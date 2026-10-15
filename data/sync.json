@@ -1,0 +1,18 @@
+{
+ "checked_at": "2026-10-15T16:32:12Z",
+ "changes": [],
+ "missing_decks": [],
+ "broken_evidence": [],
+ "repo_updates": [],
+ "repos": {
+  "drgrpo-replication": "2026-09-26T00:33:11Z",
+  "ztf-transient-pipeline": "2026-07-24T02:06:21Z"
+ },
+ "errors": [],
+ "history": [
+  {
+   "date": "2026-10-15",
+   "summary": "0 portfolio changes, 0 projects without a deck, 0 broken evidence quotes, 0 repos updated"
+  }
+ ]
+}
