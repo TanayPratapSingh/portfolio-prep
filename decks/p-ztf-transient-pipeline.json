@@ -1,0 +1,1435 @@
+{
+  "deck_id": "p-ztf-transient-pipeline",
+  "title": "ZTF Transient Pipeline",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/ztf-transient-pipeline",
+  "summary_easy": "A nightly pipeline over real telescope alerts from the Zwicky Transient Facility: alerts are replayed through a Kafka broker, scored by a small image plus table classifier, and landed in a DuckDB warehouse, where dbt turns them into tested tables. Tanay ran it on 27,378 real alerts from July 20, 2026 and pushed 500 all the way through, with every dbt model and test passing. The plumbing and data contracts are real; the classifier is a smoke test model, not a science result.",
+  "summary_deep": "Ingestion reads ZTF Avro container files with fastavro (candidate, prv_candidates, three gzipped FITS cutouts), and a replay producer pushes the archive bytes to a single broker Kafka topic under Docker Compose. A Keras model fuses a three layer CNN over the 63x63x3 science, template, and difference stack with a dense branch over seven candidate features into a five class softmax; the committed training path is synthetic only, so no accuracy is claimed. The scorer appends to raw_predictions, load_raw.py flattens prior detections so the SQL stays portable, and dbt builds 3 staging views, 2 intermediate views (window function lightcurves), and 3 marts, including an incremental daily summary keyed on date, band, and class, with 21 tests including a singular test against double scoring. An Airflow DAG chains download, load, score, dbt build, and a PSI drift check over the predicted class mix. On one real night, 27,378 packets were extracted, 500 scored, and a dbt build of 8 models and 21 tests passed with 32 checks and zero errors. Reading the code back surfaces gaps worth owning: a source schema rename that splits loader and dbt, a referential test that fails on night two, freshness rules that never execute, and two SQL spellings BigQuery rejects.",
+  "sheet": {
+    "easy": "## ZTF Transient Pipeline in one line\nReal telescope alerts, replayed through Kafka, scored by a small image plus table classifier, landed in DuckDB, and modeled by dbt into tested tables.\n\n## Why it matters\nA sky survey sends far more alerts than people can read, and most are noise. Astronomers need good candidates quickly and need the nightly numbers to be right.\n\n## The numbers (one real night)\n| What | Value |\n|---|---|\n| Real Avro alert packets | 27,378 (July 20, 2026) |\n| Scored end to end | 500 |\n| dbt build | 8 models, 21 tests, 32 checks passing, zero errors |\n\n## The flow\ndownload archive, replay to Kafka, load raw tables, score, dbt build, PSI drift check, dashboard\n\n## Two planes\n- **Streaming ML**: Avro decode, Kafka, a two branch CNN plus dense model, predictions into the warehouse.\n- **Analytics engineering**: dbt staging, intermediate, marts, 21 tests, freshness rules, lineage docs.\n\n## Say this out loud\n- The payloads are real; only the timing is replayed.\n- The model in the repo trains on a synthetic smoke dataset, so there is no accuracy number.\n- Single node under Docker Compose, not survey volume.\n- Broker labels are model outputs, so any benchmark would be relative.\n\n## Gaps worth owning\n- The loader and dbt sources point at different schemas in the latest commit.\n- Raw alerts are replaced nightly while predictions append, so a referential test would fail on night two.\n- Freshness rules are declared but never run.\n- BigQuery needs two small SQL changes before the models compile.\n\n## Likely pushbacks\n- Kafka for one night? The live stream is Kafka; the nightly DAG uses the batch path.\n- Accuracy? None claimed; the system is the result.\n- DuckDB? Right size for one machine; cloud profiles exist.\n",
+    "deep": "## Architecture\n```\nUW archive (https://ztf.uw.edu/alerts/public/ztf_public_YYYYMMDD.tar.gz)\n  ingestion/download_archive.py   urllib download, tarfile extract, count .avro, exit 1 on failure\n  ingestion/replay_producer.py    confluent_kafka Producer, topic ztf.alerts.raw, key = filename, --rate 20/s\n  scoring/stream_scorer.py        batch: glob files | stream: group ztf-scorer, auto.offset.reset latest, buffer 50\n      -> DuckDB raw_predictions   append (insert into), model_version from labels.json\n  warehouse/load_raw.py           create or replace raw_alerts, raw_alert_history (pandas -> DuckDB)\n  dbt build                       3 staging views, 2 intermediate views, 3 mart tables, 21 tests\n  monitoring/drift_report.py      PSI on predicted class mix, threshold 0.2, JSON report\n  dashboards/app.py               Streamlit, read only DuckDB, cache ttl 60 s\n  model/serve.py                  FastAPI /health, /score (not used by the scorer)\nAirflow ztf_nightly: download_archive >> load_raw >> score_alerts >> dbt_build >> drift_monitor\n  schedule 0 14 * * * (UTC), start 2024-01-01, catchup False, retries 1, retry_delay 5 min, night = ds_nodash\nKafka: cp-kafka 7.6.0 + cp-zookeeper 7.6.0, one broker, auto topic creation, offsets RF 1\n```\n\n## Alert packet\n| Field | Meaning |\n|---|---|\n| objectId | persistent object id (one object, many detections) |\n| candidate | current detection: candid, jd, ra, dec, fid (1 g, 2 r, 3 i), magpsf, sigmapsf, rb, drb, distnr, sgscore1, ndethist |\n| prv_candidates | recent history; magpsf None means upper limit, skipped |\n| cutoutScience / Template / Difference | gzipped FITS in stampData, decoded with astropy, padded or cropped to 63x63 |\n\nPreprocessing: nan_to_num, top left pad or crop to 63, per channel clip to the 1st to 99th percentile:\n$$x' = \\mathrm{clip}\\left(\\frac{x - P_1}{P_{99} - P_1}, 0, 1\\right)$$\nDecode failure returns a zero array (silent).\n\n## Model (model/architecture.py)\n- Image (63,63,3): Conv 32 (3x3 relu same), MaxPool, Conv 64, MaxPool, Conv 96, GAP, Dropout 0.3, Dense 64\n- Tabular (7): magpsf, sigmapsf, rb, drb, distnr, sgscore1, ndethist; Dense 32, Dropout 0.2, Dense 16\n- Fusion: Concatenate (80), Dense 64, Dropout 0.3, Dense 5 softmax: sn_candidate, variable_star, asteroid, artifact, unclear\n- Adam $\\eta = 10^{-3}$, sparse categorical cross entropy $L = -\\log p_y$, about 87,000 parameters by layer count\n- Training: `--synthetic` only. 600 samples (seed 7), 80/20 ordered split, 4 epochs, batch 64, version 0.1.0-smoke. evaluate.py on seed 99, labelled smoke test metrics.\n- Scoring features: `float(record.get(k) or 0.0)`, unscaled (train and serve skew against standard normal training data).\n\n## Kafka facts\n- Order holds only within a partition; one consumer per partition per group; parallelism capped by partitions.\n- Scorer: librdkafka defaults, enable.auto.commit true every 5000 ms, enable.auto.offset.store true. Buffer of 50 means a crash can lose rows (offset committed, rows unwritten) or duplicate them (rows written, offset not committed).\n- Producer: acks all by default, enable.idempotence false by default, no delivery callback.\n- Exactly once: offset written in the same transaction as the output, or idempotent writes on a key.\n- No schema registry: container files embed the writer schema. Registry default compatibility is BACKWARD (consumers upgrade first).\n- live_consumer.py writes `<offset>.avro`: collides across partitions.\n\n## dbt\n| Layer | Models | Materialization |\n|---|---|---|\n| staging | stg_alerts, stg_alert_history, stg_predictions | view |\n| intermediate | int_object_lightcurves, int_object_features | view |\n| marts | mart_classified_transients, mart_daily_alert_summary, mart_model_monitoring | table, incremental, table |\n\n- Sources: schema main_main; freshness on raw_predictions with loaded_at_field scored_at, warn 36 h, error 72 h. Runs only under `dbt source freshness`; `dbt build` does not include it; neither CI nor the DAG calls it.\n- Julian date: $t_{unix} = (JD - 2440587.5)\\times 86400$; magnitude $m = -2.5\\log_{10}F + C$.\n- Dedup: `qualify row_number() over (partition by candid order by scored_at desc) = 1`.\n- Lightcurve windows: detection_seq (row_number), dmag and dt_days (lag), running_peak_mag (min over rows unbounded preceding to current row).\n- Features: n_detections, n_bands, first_jd, last_jd, timespan_days, peak_mag = min, mag_amplitude, mean_mag.\n- Product mart: highest prob prediction per object, latest alert by observed_at, passes_quality = rb >= 0.5.\n- Incremental: unique_key (summary_date, band, pred_class), filter `summary_date > coalesce(max(summary_date), date '1970-01-01')`, unmatched alerts become 'unclassified'. Full refresh is destructive because raw_alerts holds one night.\n\n### The 21 tests\n| Type | Count | Columns |\n|---|---|---|\n| not_null | 8 | stg_alerts.candid, stg_alerts.object_id, stg_predictions.candid, stg_alert_history.object_id, stg_alert_history.magpsf, mart_classified_transients.object_id, mart_daily_alert_summary.n_alerts, mart_model_monitoring.score_date |\n| unique | 3 | stg_alerts.candid, stg_predictions.candid, mart_classified_transients.object_id |\n| accepted_values | 2 | band (g, r, i, other), pred_class (5 labels) |\n| dbt_utils.accepted_range | 5 | rb, drb, prob, class_confidence (0 to 1), n_alerts (min 1) |\n| relationships | 1 | stg_predictions.candid to stg_alerts.candid |\n| unique_combination_of_columns | 1 | summary_date, band, pred_class |\n| singular | 1 | assert_single_model_version_per_day |\n\n32 checks in the build = 8 models + 21 tests + 3 seeds (Tanay's reading of dbt build's count; the write up gives only totals).\n\n## Portability\n| Construct | DuckDB | Snowflake | BigQuery |\n|---|---|---|---|\n| `cast(x as double)` | yes | yes | no (FLOAT64, no DOUBLE alias) |\n| `to_timestamp(seconds)` | yes | yes (number = seconds) | no (TIMESTAMP_SECONDS takes INT64) |\n| QUALIFY | yes | yes | yes |\n| array history | flattened in Python | lateral flatten | unnest |\nSource schema main_main is hard coded. No CI job runs a cloud target.\n\n## PSI\n$$\\mathrm{PSI} = \\sum_i (a_i - e_i)\\ln\\frac{a_i}{e_i} = KL(a\\|e) + KL(e\\|a)$$\n- Bins = predicted classes. Expected = sum of all earlier score dates (cumulative, volume weighted). Actual = latest score date. eps = 1e-6 added to counts.\n- Reads: ListenData < 0.1 no change, 0.1 to 0.2 slight, >= 0.2 significant. Yurdakul: rules of thumb lack error rate analysis. Arize: prefer a trailing production value. Repo flags at > 0.2 and never fails the DAG.\n- score_date is scoring wall clock, not observation night.\n\n## Testing and CI\n- pytest: 5 unit tests (band mapping, candidate flattening, upper limit skip, normalize bounds, resize pad and crop). Hand built packet, no fastavro or FITS fixture.\n- CI: push to any branch and PRs to main; Python 3.11; requirements-ci (no TensorFlow, Kafka client, Astropy); generate_sample (40 objects); pytest; dbt deps, seed, build on ci.duckdb.\n- Untested: model build, train, serve, scorer, producer, consumers, loader, drift job, DAG.\n\n## Known gaps found reading the code\n1. Sources read main_main (where seeds land); loader and scorer write main. The latest commit made this rename.\n2. raw_alerts replaced nightly, raw_predictions appended: relationships test fails on night two; dbt build exits non zero and drift never runs.\n3. Freshness never executed.\n4. Auto commit plus 50 row buffer: possible loss and duplicates.\n5. Tabular features unscaled; decode failures silent; history duplicated across alerts; live consumer filenames collide across partitions.\n6. Write up says real or artifact then coarse class; code is one five class softmax.\n7. README says CI covers model code; CI never imports TensorFlow.\n\n## Numbers and sources\n| Number | Source |\n|---|---|\n| 27,378 packets, July 20, 2026 | portfolio |\n| 500 scored end to end | portfolio |\n| 8 models, 21 tests, 32 checks, zero errors | portfolio |\n| over a million alerts per night (survey) | portfolio |\n| 63 px cutouts, 7 tabular features, 5 classes | ingestion/schema.py, model/architecture.py |\n| 20 alerts/s replay, 50 row buffer | replay_producer.py, stream_scorer.py |\n| PSI threshold 0.2, eps 1e-6 | monitoring/drift_report.py |\n| freshness 36 h warn, 72 h error | dbt/models/staging/_sources.yml |\n| 600 synthetic samples, 4 epochs, batch 64 | model/train.py |\n| BTSbot: 25 features, 296 selections at 93% real (Oct 2023) | arXiv 2401.15167, not this project |\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "I built a nightly pipeline over real telescope alerts from the Zwicky Transient Facility. One night of archived Avro packets goes through my own Kafka broker, a small image plus table classifier scores each alert, and dbt turns the landed data into tested tables in DuckDB. I ran it on 27,378 real alerts from July 20, 2026, and pushed 500 all the way through. The dbt build passed 8 models and 21 tests with zero errors. The classifier is a smoke test model, and I say that first.",
+      "keypoints": [
+        "Real ZTF Avro alerts, only the timing replayed",
+        "Kafka, multimodal classifier, DuckDB, dbt",
+        "27,378 alerts from one night, 500 end to end",
+        "8 models and 21 tests passing, zero errors",
+        "Classifier is a placeholder, stated up front"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "The problem is two jobs at once. A survey astronomer wants good transient candidates fast, and wants to trust the nightly numbers behind them. So I built one system with a streaming ML side and a warehouse side that meet in DuckDB. The data is real. ZTF publishes over a million alerts a night as Avro over Kafka. I downloaded one night from the public archive and replayed the real bytes through my own broker, because the live broker needs an IP whitelist. Each packet has the current detection, its history, and three image stamps: new, reference, and difference. A Keras model with a small CNN over the stamps and a dense branch over seven features writes a class and a probability to a raw predictions table. A loader flattens the history so the SQL stays portable. Then dbt builds staging views, lightcurve models with window functions, and three marts, one of them incremental. An Airflow DAG runs download, load, score, dbt build, and a PSI drift check in order. On the real night I extracted 27,378 packets and pushed 500 all the way through. The build passed 8 models and 21 tests with zero errors. Now what broke, or would. The training script only supports a synthetic smoke dataset, so I claim no accuracy. Reading the code back, the loader and the dbt sources point at different schemas after my last commit, and raw alerts are replaced nightly while predictions append, so a referential test would fail on night two. Freshness rules are declared but never run. Next I would fix multi night correctness, train on broker labels split by object, and commit Kafka offsets with the warehouse write.",
+      "keypoints": [
+        "Two planes meeting in one warehouse",
+        "Real Avro replayed through my own broker, and why",
+        "CNN over stamps plus dense over seven features",
+        "dbt staging, window function lightcurves, incremental mart, Airflow order",
+        "27,378 extracted, 500 end to end, 8 models and 21 tests",
+        "Gaps owned: smoke model, schema mismatch, night two test, freshness unused",
+        "Next: multi night fixes, real labels, offsets committed with the write"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "Start with the data contract, because everything else hangs off it. A ZTF alert is an Avro object container file: the writer schema sits in the header, then one record with a candidate, a list of prior candidates, and three gzipped FITS stamps. That is why there is no schema registry. fastavro reads the schema from the file, and the replay producer forwards the bytes untouched. One module, ingestion/schema.py, owns the field lists that the loader, scorer, dbt sources, and dashboard all use. Ingestion pulls a nightly tarball from the UW public archive and replays it into a single Kafka broker at 20 alerts a second by default. The topic gets the broker's default partition count, so ordering is total and there is no consumer parallelism. That is fine for one node and is the first thing I would change, keying by objectId across many partitions. The scorer decodes each packet into a 63 by 63 by 3 stack, with each channel clipped to its 1st to 99th percentile, plus seven candidate features. The model is a three layer CNN with global average pooling, fused with a small dense branch into a five class softmax, about 87,000 parameters. It trains only on a synthetic set, so its outputs on real data mean nothing, and the tabular inputs are unscaled at scoring time. I treat it as a fixture. Delivery is at least once with a hole. librdkafka auto commits every five seconds and stores offsets when poll returns, while I buffer 50 rows before one insert. A crash can lose a buffer or replay one. Duplicates are handled downstream. raw_predictions is append only, stg_predictions keeps the latest score per candid with QUALIFY, and a singular test fails the build if one object gets two model versions in a day. The warehouse side is dbt over DuckDB. Staging types and dedups and converts Julian date to a timestamp. The intermediate lightcurve model unions current and prior detections and computes sequence, magnitude delta, cadence, and a running peak with an explicit ROWS frame. Marts are a per object product table, an incremental daily summary keyed on date, band, and class, and a monitoring rollup. There are 21 tests: not_null, unique, accepted values, ranges, one relationship, a composite key, and the singular one. On the real night all 8 models and 21 tests passed. The drift job computes PSI over predicted class shares, latest day against all earlier days, flagged at 0.2. Here is what I found reading it back. My last commit renamed the source schema to main_main because dbt concatenates target and custom schemas for seeds. The Python loader still writes to main. As committed, a fresh run would model the fixture. Second, raw alerts are replaced each night but predictions accumulate, so the relationships test fails on night two and Airflow never reaches the drift task. Third, freshness is declared but dbt build never runs it. Fourth, BigQuery would reject cast as double and to_timestamp. The fixes are small: one shared schema variable, append only raw tables partitioned by night, freshness as a DAG step, and two macros.",
+      "keypoints": [
+        "Self describing Avro container files, so no registry",
+        "Single partition broker, keying by objectId is the first change",
+        "Model is a fixture: synthetic training, unscaled inputs",
+        "At least once with a loss window; dedup and a singular test downstream",
+        "dbt layers, window functions with an explicit ROWS frame, 21 tests passing on real data",
+        "PSI on class shares, latest day against pooled history, flag at 0.2",
+        "Gaps: main_main rename, night two relationships failure, freshness unused, BigQuery syntax"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone who is not an engineer.",
+      "script": "A telescope in California photographs the whole northern sky every night and compares each picture with an older one. Anything that changed, like an exploding star, a passing asteroid, or just a camera glitch, triggers an alert. There are far more alerts than any person can read, and most are noise. I built a system that collects one night of those real alerts, sorts each one into a rough category, and stores the results in a database that checks its own numbers before anyone sees them. I tested it on more than 27,000 real alerts from one night in July. The checking part works, and every one of its 21 automated checks passed. The sorting part is still a practice model, and I'm upfront about that. The next step is training it on alerts that astronomers have already labeled.",
+      "keypoints": [
+        "Telescope compares tonight's sky with an older picture",
+        "Too many alerts for people, most are noise",
+        "System collects, sorts, and stores with automatic checks",
+        "Tested on over 27,000 real alerts, 21 checks passed",
+        "Sorting model is practice only; next step is labeled data"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the architecture on the whiteboard.",
+      "script": "First I draw a box on the left labeled UW archive, with an arrow to a cylinder labeled Kafka, topic ztf.alerts.raw. While drawing I say the packets are real Avro files with their own schema, and only the timing is replayed. Second, I draw the scorer under Kafka, with two arrows into it: a small CNN box for the three stamps and a dense box for seven features, merging into a softmax over five classes. I say the model is a smoke test fixture and point at the arrow out of the scorer into a table labeled raw_predictions, append only. Third, I draw the loader as a separate arrow from the archive into raw_alerts and raw_alert_history, and say I flatten history in Python so the SQL stays portable. Fourth, I draw the dbt layers as three stacked boxes: staging views that type, dedup, and convert Julian date; intermediate views that build lightcurves with window functions; marts, including the incremental daily summary keyed on date, band, and class. Next to the marts I write 21 tests and circle the singular test against two model versions per object per day. Fifth, I hang the PSI drift job and the Streamlit dashboard off the marts. Last, I draw a horizontal bar across the top labeled Airflow with five ticks: download, load, score, dbt build, drift. Then I mark the gaps in a different color: a red X between the loader's main schema and the source's main_main, a red note on raw_alerts saying replaced nightly, and a red note on the scorer saying auto commit races the buffer.",
+      "keypoints": [
+        "Archive to Kafka first, real bytes and replayed timing",
+        "Scorer with two branches into a five class softmax, labeled a fixture",
+        "Loader flattens history for portable SQL",
+        "dbt staging, intermediate, marts, 21 tests, singular test circled",
+        "Drift and dashboard hang off the marts; Airflow bar on top",
+        "Gaps marked in red: schema mismatch, nightly replace, offset race"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How do you know the dbt numbers were right on real data, and not the sample fixture?",
+      "script": "Two ways. The run scored 500 real alerts, and the fixture the generator writes has 40 objects, so the build could not have produced those row counts from seeds. And the tests ran on real ZTF values, so ranges like rb and drb between 0 and 1 were checked on survey data. I'll be straight about one thing I found afterward. My latest commit pointed the dbt sources at the main_main schema, where seeds land, while the Python loader writes to main. So as committed, a fresh run would model the fixture. The real run matches the earlier source setting. The fix is one schema variable shared by the loader and the sources, plus excluding seeds from production builds.",
+      "keypoints": [
+        "500 real alerts cannot come from a 40 object fixture",
+        "Tests ran on survey values",
+        "Owns the main_main rename found afterward",
+        "Fix: shared schema variable, exclude seeds in production"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What happens on the second night?",
+      "script": "It breaks, and I can tell you exactly where. The loader does create or replace on raw_alerts, so the table only ever holds the latest night. raw_predictions is append only. On night two, the night one predictions point at candids that are no longer in stg_alerts, so the relationships test fails. dbt build exits non zero, the marts that depend on both alerts and predictions are skipped, and Airflow never runs the drift task because its upstream failed. The incremental summary would have kept night one, which is the only place history survives. The fix is to append raw alerts partitioned by night, or scope the relationship test to the current night with a where clause.",
+      "keypoints": [
+        "create or replace on raw_alerts, append on predictions",
+        "Relationships test fails on night two",
+        "Dependent marts skipped, drift task never runs",
+        "Fix: append raw by night or scope the test"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you get a real accuracy number?",
+      "script": "I'd start with labels I didn't make. Community brokers like ALeRCE and Fink publish classifications, and the Bright Transient Survey has spectroscopically classified objects. I'd pull cutouts for those objects and split by object id, so detections of one object never sit in both train and test. Then per class precision and recall, PR-AUC for the rare class, and a confusion matrix, which evaluate.py already writes. The baseline is the survey's own deep real bogus score with a threshold, and the CNN has to beat that. I'd also run an image only and tabular only ablation, to check the network actually uses the pixels. And I'd report purity at a fixed follow up budget, because that's how BTSbot is judged.",
+      "keypoints": [
+        "Labels from brokers and BTS, not self made",
+        "Split by object id to avoid leakage",
+        "Per class precision, recall, PR-AUC",
+        "Baseline: threshold on drb",
+        "Ablation and purity at a follow up budget"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you make the Kafka to warehouse path exactly once?",
+      "script": "Today it is at least once with a small loss window. The client auto commits every five seconds and stores offsets when poll returns, while I buffer 50 rows before one insert. So a crash can lose a buffer or replay one. For exactly once into DuckDB, I'd turn off auto commit and write the predictions and the consumed offsets in one transaction, into an offsets table keyed by topic and partition. On restart the consumer seeks to the stored offsets. The cheaper option is commit after the insert plus a merge on candid, which turns any replay into an overwrite. I'd also turn on the idempotent producer so retries can't duplicate messages in the topic.",
+      "keypoints": [
+        "Auto commit races the 50 row buffer",
+        "Offsets and rows in one DuckDB transaction",
+        "Seek to stored offsets on restart",
+        "Cheaper: commit after write plus merge on candid",
+        "Idempotent producer for retries"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Does it really port to BigQuery with only a profile change?",
+      "script": "Not as written, and I checked. The design choices for portability are real: history is flattened in Python so no unnest is needed, QUALIFY works on all three engines, and the cloud profiles are in the repo. But stg_alerts uses cast as double and to_timestamp. BigQuery has no double type, it's FLOAT64, and it has no to_timestamp; TIMESTAMP_SECONDS takes an integer. Snowflake accepts both. So BigQuery needs two small cross database macros, and the source schema has to be configurable. Nothing in CI runs a cloud target, so I'd add that before claiming portability again.",
+      "keypoints": [
+        "Portability choices: flattening, QUALIFY, cloud profiles",
+        "BigQuery rejects cast as double and to_timestamp",
+        "Snowflake accepts both",
+        "Two macros plus a configurable source schema",
+        "Add a cloud target to CI"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Kafka for one night of 27,000 alerts is overkill.",
+      "script": "For one night, yes. A loop over a folder would do, and the nightly DAG actually uses the batch scorer over files. Kafka is in the repo because the real ZTF stream is Kafka, over a million alerts a night, one topic per night on the UW broker. Replaying archived bytes through my own broker means the consumer, decode, and offset handling are the code that would face the live topic. Going live becomes a broker address and a topic name. It also let me replay at a controlled rate to test restarts. If this were only ever an archive job, I would drop Kafka and keep the batch path.",
+      "keypoints": [
+        "Concede: one night fits a loop; DAG uses batch",
+        "Real stream is Kafka at survey scale",
+        "Same consumer code faces the live topic",
+        "Controlled rate replay for restart testing",
+        "Would drop it for archive only work"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "So the model doesn't work. Why is this on your resume?",
+      "script": "Because the model was never the claim, and I say that in the first sentence. The write up calls it a systems project first. What I can defend is the part most ML projects skip: real survey data through a real broker, a warehouse where 21 tests passed on that data, lineage, a drift job, and an orchestrated nightly run. I also found and documented the places it would break over many nights, which is the work a data team does. The model gap is specific and fixable: labeled cutouts from community brokers, object level splits, and a real bogus baseline to beat. I'd rather show a working pipeline with an honest placeholder than a model number I can't back.",
+      "keypoints": [
+        "Concede: no real model",
+        "Write up says systems project first",
+        "Defensible: real data, real broker, 21 tests on real data",
+        "Documented multi night failure points",
+        "Specific plan for a real model"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your drift monitor watches a placeholder model's outputs. That's theater.",
+      "script": "Partly fair. With a smoke test model the class mix doesn't carry much meaning yet, and prediction drift alone can't tell a sky change from a pipeline bug. I built it before the real model on purpose, because the monitoring contract doesn't depend on the model. The monitoring mart is tested, the job handles the empty and single night cases, and model versions are recorded, so a jump on a deploy day can be attributed. What I'd add now is drift on the inputs, the real bogus scores and magnitudes, which is meaningful today, plus a trailing baseline keyed by observation night instead of scoring time.",
+      "keypoints": [
+        "Concede: placeholder outputs carry little meaning",
+        "Contract built before the model on purpose",
+        "Tested mart, edge cases handled, versions recorded",
+        "Add input drift and a trailing baseline by observation night"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "ztf-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What problem does the ZTF pipeline solve, in one sentence and then technically?",
+      "easy": "A sky survey produces far more alerts than people can read, so Tanay built one system that scores each alert quickly and also keeps a tested record of every night's numbers.",
+      "deep": "The write up frames two jobs. At the front, an alert broker operator needs high purity transient candidates fast, which is a classification and latency problem over a stream of Avro packets. Behind it, the same operator needs the nightly counts and class mixes to be correct, which is a data modeling and data quality problem. The project puts both in one repository: a streaming ML plane (Avro decode, Kafka, a multimodal Keras classifier, predictions appended to a warehouse table) and an analytics engineering plane (a raw loader, a dbt project with staging, intermediate, and mart layers, 21 tests, freshness rules, and a PSI drift check), joined in DuckDB and chained by one Airflow DAG. The deliberate choice is that the plumbing and contracts are real (real ZTF payloads, a real broker, real warehouse tests) while the model is a placeholder trained on a synthetic smoke dataset.",
+      "say": "Telescopes produce more alerts than anyone can read, and most are noise. I wanted one system that scores alerts fast and also keeps the nightly numbers behind them honest. So the repo has a streaming ML side and a tested warehouse side that meet in DuckDB.",
+      "evidence": [
+        "portfolio: A survey astronomer or alert broker operator needs high purity transient candidates surfaced quickly",
+        "portfolio: The project ships with 21 data quality tests, source freshness checks, and generated lineage docs."
+      ],
+      "sources": [],
+      "tags": [
+        "problem",
+        "overview"
+      ]
+    },
+    {
+      "id": "ztf-02",
+      "type": "concept",
+      "level": 1,
+      "q": "Walk me through the pipeline end to end.",
+      "easy": "Download one night of real alerts, replay them through Kafka, score each one with a small image plus table model, load the alerts and scores into DuckDB, build tested tables with dbt, then check whether the predicted class mix drifted.",
+      "deep": "ingestion/download_archive.py fetches ztf_public_YYYYMMDD.tar.gz from the UW public archive and extracts the .avro files. ingestion/replay_producer.py produces the raw file bytes to topic ztf.alerts.raw at a set rate. scoring/stream_scorer.py runs in batch mode (read a directory) or stream mode (consume Kafka as group ztf-scorer), decodes each packet into a 63x63x3 cutout stack plus seven tabular features, predicts, and appends one row per candid to raw_predictions. warehouse/load_raw.py flattens each packet into raw_alerts (current detection) and raw_alert_history (prior detections). dbt builds 3 staging views, 2 intermediate views, and 3 mart tables. monitoring/drift_report.py computes PSI on the predicted class mix from mart_model_monitoring. dashboards/app.py (Streamlit) reads only marts and one intermediate view. The Airflow DAG ztf_nightly chains download_archive, load_raw, score_alerts, dbt_build, drift_monitor. Note the nightly DAG uses the batch scorer over files, so Kafka sits on the replay and live paths, not the scheduled one.",
+      "say": "It is a nightly pipeline. Download a night, replay it through Kafka, score each alert, land everything in DuckDB, build tested marts in dbt, then run a drift check. Every step is a command you can run on its own, and the Airflow DAG just chains them.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/ingestion/download_archive.py: Nightly tarballs are named ztf_public_YYYYMMDD.tar.gz.",
+        "repo:ztf-transient-pipeline/ingestion/replay_producer.py: ap.add_argument(\"--topic\", default=\"ztf.alerts.raw\")",
+        "repo:ztf-transient-pipeline/ingestion/schema.py: CUTOUT_SIZE = 63",
+        "repo:ztf-transient-pipeline/orchestration/dags/ztf_nightly.py: download >> load_raw >> score >> dbt_build >> drift"
+      ],
+      "sources": [],
+      "tags": [
+        "architecture",
+        "kafka",
+        "dbt",
+        "duckdb",
+        "airflow"
+      ]
+    },
+    {
+      "id": "ztf-03",
+      "type": "number",
+      "level": 1,
+      "q": "What did you actually run it on, and what came out?",
+      "easy": "One real night: 27,378 Avro alert packets from July 20, 2026. 500 of them were loaded, scored, and rebuilt through the warehouse, and the dbt build passed 8 models and 21 tests, 32 checks in total, with zero errors.",
+      "deep": "The 27,378 is the packet count extracted from the public archive for that night; the survey as a whole produces over a million alerts a night, so this is one night's public slice, not survey volume. Only 500 went the whole way through scoring and the warehouse, which makes it a correctness run, not a throughput test. On the 32: 8 models plus 21 tests is 29, and the remaining 3 are consistent with dbt build also counting the three seed CSVs, since dbt build runs seeds as well as models and tests; that breakdown is Tanay's reading, the write up gives only the totals. The scores came from the committed model, which trains only on a synthetic smoke dataset, so the run proves plumbing and data contracts, not classification quality. Everything ran single node under Docker Compose.",
+      "say": "I ran one real night: 27,378 alert packets from July 20. I pushed 500 of them all the way through scoring and the warehouse. The dbt build passed all 8 models and 21 tests on that data with zero errors. That proves the pipeline and the contracts, and it says nothing about accuracy, because the model in the repo is a smoke test model.",
+      "evidence": [
+        "portfolio: I ran the pipeline against a real night of the survey: 27,378 Avro alert packets extracted from July 20, 2026.",
+        "portfolio: Of those, 500 alerts were loaded, scored, and rebuilt through the warehouse.",
+        "portfolio: A full dbt build returned 8 models and 21 tests with 32 checks passing and zero errors, on real data rather than a seed sample.",
+        "portfolio: The Zwicky Transient Facility (ZTF) streams over a million optical alerts per night as Avro packets over Kafka.",
+        "portfolio: Everything runs single node under Docker Compose, not at production survey volume."
+      ],
+      "sources": [
+        "https://docs.getdbt.com/reference/commands/build"
+      ],
+      "tags": [
+        "results",
+        "dbt"
+      ]
+    },
+    {
+      "id": "ztf-04",
+      "type": "why",
+      "level": 2,
+      "q": "Why build this after ShopFloor AI? What was it meant to fix?",
+      "easy": "ShopFloor AI listed three limitations: simulated streaming, a synthetic benchmark dataset, and a single node app with no warehouse. This project was designed to close each one.",
+      "deep": "The write up maps them one to one. Simulated Kafka became real Avro alert bytes flowing through a real Kafka broker (cp-kafka 7.6.0 under Docker Compose). A synthetic benchmark dataset became a public survey stream (archived ZTF alerts). The single node app gained a warehouse (DuckDB with BigQuery and Snowflake profiles), a dbt transformation layer with tests, and drift monitoring (PSI). What it did not close is the model gap: the classifier here also trains only on synthetic data, so the honest framing is that this project moved the realism from the model to the data and the warehouse, and the next project step is a real labeled training set.",
+      "say": "ShopFloor taught me what was fake about my last stack: simulated Kafka, a benchmark dataset, and no warehouse. I designed this one to fix exactly those three. The data and the broker are real now, and there is a tested warehouse. The model is still the weak part, and I say so.",
+      "evidence": [
+        "portfolio: Simulated Kafka becomes real Avro alert data flowing over a real Kafka broker.",
+        "portfolio: The single node app gains a real warehouse, a dbt transformation layer, and drift monitoring.",
+        "repo:ztf-transient-pipeline/docker-compose.yml: image: confluentinc/cp-kafka:7.6.0"
+      ],
+      "sources": [],
+      "tags": [
+        "motivation",
+        "shopfloor"
+      ]
+    },
+    {
+      "id": "ztf-05",
+      "type": "define",
+      "level": 1,
+      "q": "Define the Zwicky Transient Facility, an alert, a transient, and an alert broker.",
+      "easy": "ZTF is a camera on a telescope at Palomar that scans the northern sky every night. When something in a new image differs from the reference sky, it sends an alert. A transient is a source that appears or changes, like a supernova. A broker is a service that receives the alert stream and filters or classifies it for scientists.",
+      "deep": "Time domain astronomy studies how the sky changes. ZTF publishes each candidate detection as an alert packet, and the write up puts the stream at over a million optical alerts per night, delivered as Avro over Kafka. Most alerts are not new astrophysical events: they are subtraction artifacts, known variable stars, or solar system objects, which is why the coarse label set here is sn_candidate, variable_star, asteroid, artifact, unclear. Brokers such as Lasair, ALeRCE, and Fink (README Tier C) consume the stream and expose classifications through APIs and SQL. The UW broker serves the raw stream itself at public.alerts.ztf.uw.edu:9092, one topic per night, IP whitelisted.",
+      "evidence": [
+        "portfolio: The Zwicky Transient Facility (ZTF) streams over a million optical alerts per night as Avro packets over Kafka.",
+        "repo:ztf-transient-pipeline/ingestion/schema.py: CLASS_LABELS = [\"sn_candidate\", \"variable_star\", \"asteroid\", \"artifact\", \"unclear\"]",
+        "repo:ztf-transient-pipeline/README.md: Consume `public.alerts.ztf.uw.edu:9092` directly."
+      ],
+      "sources": [],
+      "tags": [
+        "ztf",
+        "definitions",
+        "astronomy"
+      ]
+    },
+    {
+      "id": "ztf-06",
+      "type": "define",
+      "level": 1,
+      "q": "What is difference imaging, and what are the science, template, and difference cutouts?",
+      "easy": "Take tonight's image of a patch of sky, subtract a reference image of the same patch, and whatever is left is what changed. Each alert carries three small stamps: tonight's image, the reference, and the subtraction.",
+      "deep": "The science image is the new exposure, the template is a deep reference built from earlier exposures, and the difference is science minus the PSF matched template. A real transient leaves a clean point source in the difference; a bad subtraction leaves a dipole (positive and negative lobes), a cosmic ray leaves a sharp single pixel spike, and a bad column leaves a streak. Those morphologies are what the CNN branch is meant to read. In the packet the stamps are cutoutScience, cutoutTemplate, cutoutDifference, each a gzipped FITS file in stampData, and the model expects each at 63 by 63 pixels, stacked as three channels.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/README.md: The core idea is difference imaging: subtract a template sky from a new image,",
+        "repo:ztf-transient-pipeline/ingestion/avro_utils.py: CUTOUT_KEYS = [\"cutoutScience\", \"cutoutTemplate\", \"cutoutDifference\"]",
+        "repo:ztf-transient-pipeline/ingestion/schema.py: CUTOUT_SIZE = 63"
+      ],
+      "sources": [],
+      "tags": [
+        "difference imaging",
+        "cutouts"
+      ]
+    },
+    {
+      "id": "ztf-07",
+      "type": "concept",
+      "level": 2,
+      "q": "What is inside a ZTF alert packet, and how does the code parse it?",
+      "easy": "Each alert is an Avro record with the current detection, a list of earlier detections of the same object, and three image stamps. The code turns each packet into one flat row, several history rows, and a three channel image.",
+      "deep": "candidate holds the current detection; objectId is the persistent object id; prv_candidates is the recent history; the three cutouts carry stamps. avro_utils.read_packets wraps fastavro.reader, which reads an Avro object container file whose header carries the writer schema, so no registry lookup is needed. candidate_record flattens 13 fields (candid, object_id, jd, ra, dec, fid, magpsf, sigmapsf, rb, drb, distnr, sgscore1, ndethist) using .get, so a missing field becomes None instead of a KeyError. history_records emits one row per prior entry and skips entries whose magpsf is None, because those are upper limits from non detections. stack_cutouts decodes each stamp, pads or crops to 63x63, normalizes each channel on its own, and stacks to shape (63, 63, 3). ingestion/schema.py holds the canonical field lists that the loader, scorer, dbt sources, and dashboard all share.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/ingestion/avro_utils.py: CUTOUT_KEYS = [\"cutoutScience\", \"cutoutTemplate\", \"cutoutDifference\"]",
+        "repo:ztf-transient-pipeline/ingestion/avro_utils.py: continue  # non-detection upper limit, skip for the lightcurve",
+        "repo:ztf-transient-pipeline/ingestion/schema.py: CUTOUT_SIZE = 63"
+      ],
+      "sources": [],
+      "tags": [
+        "avro",
+        "fastavro",
+        "parsing"
+      ]
+    },
+    {
+      "id": "ztf-08",
+      "type": "define",
+      "level": 2,
+      "q": "Define candid, objectId, prv_candidates, and an upper limit.",
+      "easy": "candid identifies one detection. objectId identifies the astronomical object, which can have many detections over many nights. prv_candidates is the object's recent history carried inside each alert. An upper limit means the survey looked and saw nothing brighter than some magnitude.",
+      "deep": "The grain matters for every table: raw_alerts and stg_alerts are one row per candid; mart_classified_transients is one row per object_id; raw_alert_history is one row per prior detection, linked back by alert_candid. Because each new alert repeats the object's history, the same physical detection appears both as an earlier alert's candidate and inside later alerts' prv_candidates, which is a duplication the lightcurve model does not remove. An upper limit (magpsf null in a history entry) is a non detection with a limiting magnitude; history_records drops it, and the unit test test_history_skips_upper_limits proves it does. Dropping limits keeps the lightcurve to measured points but throws away information about when an object was not yet visible, which matters for estimating explosion times.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/ingestion/avro_utils.py: continue  # non-detection upper limit, skip for the lightcurve",
+        "repo:ztf-transient-pipeline/tests/test_avro_utils.py: {\"jd\": 2459998.5, \"magpsf\": None, \"fid\": 1},  # upper limit, skipped"
+      ],
+      "sources": [],
+      "tags": [
+        "grain",
+        "definitions",
+        "lightcurves"
+      ]
+    },
+    {
+      "id": "ztf-09",
+      "type": "define",
+      "level": 2,
+      "q": "What are the seven tabular features the model uses?",
+      "easy": "Brightness and its error, two scores from the survey that say how likely the detection is real, how far it sits from a known source, whether that source looks like a star, and how many times the spot was detected before.",
+      "deep": "From model/architecture.py TABULAR_FEATURES: magpsf (PSF fit magnitude, smaller is brighter), sigmapsf (its uncertainty), rb (the survey's real bogus score, 0 to 1), drb (the deep learning real bogus score, 0 to 1), distnr (distance to the nearest source in the reference image), sgscore1 (star galaxy score of that nearest source, 0 to 1, near 1 means star like), and ndethist (number of prior detections at that position). fid (filter id, 1 g, 2 r, 3 i) is not a model input; it becomes the band column in dbt. The pairing is the point: a transient near a galaxy nucleus (small distnr, low sgscore1) reads differently from one on top of a star (small distnr, high sgscore1), which is likely a variable star. In scoring, stream_scorer._features turns None into 0.0 and passes the values unscaled.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/model/architecture.py: \"magpsf\", \"sigmapsf\", \"rb\", \"drb\", \"distnr\", \"sgscore1\", \"ndethist\",",
+        "repo:ztf-transient-pipeline/ingestion/schema.py: FID_TO_BAND = {1: \"g\", 2: \"r\", 3: \"i\"}",
+        "repo:ztf-transient-pipeline/scoring/stream_scorer.py: return np.array([[float(record.get(k) or 0.0) for k in TABULAR_FEATURES]],"
+      ],
+      "sources": [],
+      "tags": [
+        "features",
+        "ztf"
+      ]
+    },
+    {
+      "id": "ztf-10",
+      "type": "define",
+      "level": 2,
+      "q": "Define Avro, an Avro object container file, FITS, fastavro, and Astropy as used here.",
+      "easy": "Avro is a compact binary format with a schema. A container file stores the schema once in its header followed by records. FITS is the standard astronomy image format. fastavro reads Avro in Python, and Astropy reads FITS and handles astronomical units and time.",
+      "deep": "An Avro record is untagged binary, so the reader must know the writer schema; a container file embeds that schema in its header, which is why ZTF alerts are self describing and the code needs no schema registry. fastavro.reader iterates records and resolves the schema from the file. Each cutout is a FITS file (header plus data array) that has been gzipped and stored as bytes in stampData; avro_utils.decode_cutout gunzips it, opens it with astropy.io.fits, takes the primary HDU data, and applies np.nan_to_num. fastavro is in the lean CI requirements; Astropy is not, which means CI never exercises real stamp decoding (decode_cutout falls back to a zero array when astropy is missing). The write up says Astropy handles coordinate and time conventions; in the code its visible role is FITS decoding, and the Julian date conversion is done in SQL.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/ingestion/avro_utils.py: CUTOUT_KEYS = [\"cutoutScience\", \"cutoutTemplate\", \"cutoutDifference\"]",
+        "repo:ztf-transient-pipeline/requirements-ci.txt: No tensorflow, kafka, or astropy needed."
+      ],
+      "sources": [],
+      "tags": [
+        "avro",
+        "fits",
+        "astropy",
+        "definitions"
+      ]
+    },
+    {
+      "id": "ztf-11",
+      "type": "how",
+      "level": 2,
+      "q": "How do you get real ZTF data, and why replay instead of consuming live?",
+      "easy": "There are three ways in. Download a past night from the public archive and replay it, connect to the live broker if your IP is allowed, or query community brokers. The project uses the first because it needs no permission and still uses real packets.",
+      "deep": "Tier A (default): download_archive.py fetches https://ztf.uw.edu/alerts/public/ztf_public_YYYYMMDD.tar.gz, extracts with tarfile, and counts .avro files; on a failed download it prints a hint and exits 1, which fails the Airflow task. Tier B: live_consumer.py reads public.alerts.ztf.uw.edu:9092, which needs the source IP whitelisted through the ztf-broker-ops list, with one topic per night (ztf_YYYYMMDD_programid1) and data expiring after about two weeks. Tier C: Lasair, ALeRCE, Fink APIs, useful for cross checking labels. The write up's run extracted 27,378 packets for July 20, 2026. Replay keeps the payloads genuine and only fakes the timing, so the critical path never waits on whitelisting. One code note: tar.extractall is called without a filter on a downloaded archive, which a production version would restrict (Python's tarfile extraction filters exist for this).",
+      "evidence": [
+        "repo:ztf-transient-pipeline/ingestion/download_archive.py: ARCHIVE_BASE = \"https://ztf.uw.edu/alerts/public\"",
+        "repo:ztf-transient-pipeline/ingestion/download_archive.py: tar.extractall(extract_dir)",
+        "repo:ztf-transient-pipeline/ingestion/live_consumer.py: (ztf_YYYYMMDD_programid1) with data expiring after about two weeks",
+        "portfolio: I ran the pipeline against a real night of the survey: 27,378 Avro alert packets extracted from July 20, 2026.",
+        "portfolio: live streaming from the survey broker needs an IP whitelist",
+        "portfolio: The payloads are genuine ZTF data; only the timing is replayed."
+      ],
+      "sources": [],
+      "tags": [
+        "data",
+        "ingestion",
+        "archive"
+      ]
+    },
+    {
+      "id": "ztf-12",
+      "type": "how",
+      "level": 2,
+      "q": "How are the cutouts preprocessed, and where can that go wrong?",
+      "easy": "Each stamp is unzipped, read, cleaned of missing pixels, forced to 63 by 63, and rescaled to the 0 to 1 range using its own brightness range, so faint and bright sources look comparable to the model.",
+      "deep": "decode_cutout: gunzip, astropy FITS open, primary HDU, float32, np.nan_to_num. Any exception returns np.zeros((63, 63)), so one bad stamp never kills a batch. _resize: if the shape is not 63x63, copy the overlap into the top left of a zero array, which pads or crops. _normalize: lo and hi are the 1st and 99th percentiles, output is clip((x minus lo) / (hi minus lo), 0, 1), and a flat stamp (hi <= lo) becomes all zeros. Failure modes: (1) the zero fallback is silent, with no counter or log, so a systematic decode failure would look like a stream of blank images; (2) padding into the top left corner moves an edge stamp's source off center, and a centered pad would keep the source where the CNN expects it; (3) per stamp percentile scaling erases absolute flux, which is acceptable because magpsf carries brightness in the tabular branch; (4) nan_to_num turns masked pixels into 0, which after scaling can look like real structure. Unit tests cover _normalize bounds and _resize pad and crop.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/ingestion/avro_utils.py: lo, hi = np.percentile(arr, 1), np.percentile(arr, 99)",
+        "repo:ztf-transient-pipeline/ingestion/schema.py: CUTOUT_SIZE = 63"
+      ],
+      "sources": [],
+      "tags": [
+        "preprocessing",
+        "cutouts",
+        "failure modes"
+      ]
+    },
+    {
+      "id": "ztf-13",
+      "type": "how",
+      "level": 2,
+      "q": "Explain topics, partitions, consumer groups, and offsets as they apply to this repo.",
+      "easy": "A topic is a log split into partitions. Producers append messages and each consumer group keeps its own read position, the offset, per partition. Here the replay producer writes real alert bytes to ztf.alerts.raw and the scorer reads them as group ztf-scorer.",
+      "deep": "Partitions are the unit of ordering and parallelism: order holds within a partition, and within one consumer group each partition is assigned to exactly one consumer, so parallelism tops out at the partition count. The committed offset is the group's position per partition. The broker is a single cp-kafka 7.6.0 node with Zookeeper, offsets topic replication factor 1, and automatic topic creation, so ztf.alerts.raw is created on first produce with the broker's default partition count (one unless configured): total order and no consumer parallelism. replay_producer.py keys messages by Avro filename, so with more partitions the spread would be arbitrary; keying by objectId would keep each object's alerts ordered on one partition. stream_scorer.py uses group.id ztf-scorer with auto.offset.reset latest (with no committed offset, start at the end), while live_consumer.py makes a random group id per run with earliest, so every run rereads the topic from the start.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/ingestion/replay_producer.py: producer.produce(topic, value=payload, key=os.path.basename(path))",
+        "repo:ztf-transient-pipeline/scoring/stream_scorer.py: \"group.id\": \"ztf-scorer\",",
+        "repo:ztf-transient-pipeline/scoring/stream_scorer.py: \"auto.offset.reset\": \"latest\",",
+        "repo:ztf-transient-pipeline/ingestion/live_consumer.py: \"group.id\": \"ztf-pipeline-{}\".format(uuid.uuid4().hex[:8]),",
+        "repo:ztf-transient-pipeline/docker-compose.yml: KAFKA_AUTO_CREATE_TOPICS_ENABLE: \"true\"",
+        "repo:ztf-transient-pipeline/docker-compose.yml: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1"
+      ],
+      "sources": [
+        "https://docs.confluent.io/kafka/design/delivery-semantics.html",
+        "https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md"
+      ],
+      "tags": [
+        "kafka",
+        "partitions",
+        "consumer groups",
+        "offsets"
+      ]
+    },
+    {
+      "id": "ztf-14",
+      "type": "how",
+      "level": 2,
+      "q": "How does the replay producer work, and how long would a full night take?",
+      "easy": "It reads every .avro file in the folder in sorted order and sends each file's raw bytes to Kafka, pausing between sends to hit a target rate. The default is 20 alerts a second.",
+      "deep": "replay(): confluent_kafka.Producer with only bootstrap.servers set; for each file, produce(topic, value=payload, key=basename), poll(0) to serve delivery callbacks, a progress print every 100, and time.sleep(1/rate); flush() at the end blocks until all queued messages are acknowledged. rate 0 means as fast as possible. Arithmetic, not a measured run: replaying all 27,378 packets of the July 20 night at the default 20 per second would take about 1,369 seconds, roughly 23 minutes. Nothing registers a delivery callback, so a failed produce would be dropped without a log line. The producer runs on librdkafka defaults: acks all, but enable.idempotence false, so a retried send after a lost acknowledgement can duplicate a message. The sleep based pacing is open loop; it ignores how long produce itself takes, so real throughput sits a little under the nominal rate.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/ingestion/replay_producer.py: ap.add_argument(\"--rate\", type=float, default=20.0,",
+        "repo:ztf-transient-pipeline/ingestion/replay_producer.py: producer.produce(topic, value=payload, key=os.path.basename(path))",
+        "portfolio: I ran the pipeline against a real night of the survey: 27,378 Avro alert packets extracted from July 20, 2026."
+      ],
+      "sources": [
+        "https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md"
+      ],
+      "tags": [
+        "kafka",
+        "producer",
+        "replay"
+      ]
+    },
+    {
+      "id": "ztf-15",
+      "type": "concept",
+      "level": 2,
+      "q": "At most once, at least once, exactly once: what does this pipeline actually guarantee?",
+      "easy": "Kafka is at least once by default, so a crash can replay messages. Here there is also a small window where a crash could lose up to one buffer of alerts, because offsets are committed in the background while scored rows are still in memory.",
+      "deep": "Definitions: commit then process gives at most once (loss possible); process then commit gives at least once (duplicates possible); exactly once needs the offset written in the same transaction as the output, or idempotent writes keyed on a unique id. Kafka's idempotent producer adds a producer id and per partition sequence numbers so the broker drops retried duplicates. In the scorer, librdkafka defaults apply: enable.auto.commit true every 5000 ms and enable.auto.offset.store true, which stores a message's offset as soon as poll hands it to the app. Rows are buffered until 50 accumulate, then one INSERT. So a crash after an auto commit but before the flush loses those rows (at most once behavior), and a crash after the flush but before the next commit replays them (at least once behavior). raw_predictions is append only, so idempotency lives downstream: stg_predictions keeps the latest scored_at per candid. The fix is enable.auto.commit false and a manual commit after the INSERT, or storing offsets in the same DuckDB transaction as the rows.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/scoring/stream_scorer.py: s.add_argument(\"--batch-size\", type=int, default=50)",
+        "repo:ztf-transient-pipeline/scoring/stream_scorer.py: con.execute(\"insert into raw_predictions select * from df\")",
+        "repo:ztf-transient-pipeline/dbt/models/staging/stg_predictions.sql: qualify row_number() over (partition by candid order by scored_at desc) = 1"
+      ],
+      "sources": [
+        "https://docs.confluent.io/kafka/design/delivery-semantics.html",
+        "https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md"
+      ],
+      "tags": [
+        "delivery semantics",
+        "idempotency",
+        "exactly once"
+      ]
+    },
+    {
+      "id": "ztf-16",
+      "type": "how",
+      "level": 3,
+      "q": "What does the live consumer do, and what bug would it hit on a partitioned topic?",
+      "easy": "It connects to the live broker, reads alerts, and writes each one to a file named after its offset. On a topic with several partitions, offsets repeat across partitions, so files would overwrite each other.",
+      "deep": "live_consumer.consume(): Consumer with a random group id (ztf-pipeline-xxxxxxxx) and auto.offset.reset earliest, subscribe to one nightly topic, poll(5.0), write msg.value() to <offset>.avro, stop after --max messages (0 means forever). Offsets are only unique within a partition, so partition 0 offset 17 and partition 3 offset 17 both write 17.avro and one alert is silently lost. The fix is a filename of partition plus offset, or the candid read from the packet. The random group id also means no committed position is ever reused, so a restart rereads the whole retained topic; that is fine for a one off pull and wrong for a long running service. This path was never on the critical path of the reported run, which used archive replay.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/ingestion/live_consumer.py: out_path = os.path.join(out_dir, \"{}.avro\".format(msg.offset()))",
+        "repo:ztf-transient-pipeline/ingestion/live_consumer.py: \"group.id\": \"ztf-pipeline-{}\".format(uuid.uuid4().hex[:8]),",
+        "repo:ztf-transient-pipeline/ingestion/live_consumer.py: \"auto.offset.reset\": \"earliest\","
+      ],
+      "sources": [],
+      "tags": [
+        "kafka",
+        "bugs",
+        "live consumer"
+      ]
+    },
+    {
+      "id": "ztf-17",
+      "type": "why",
+      "level": 2,
+      "q": "Avro over Kafka usually means a schema registry. Where is yours?",
+      "easy": "There isn't one. ZTF ships each alert as a self describing Avro file with its schema in the header, so any consumer can decode it. A registry starts to matter when several producers change a schema independently.",
+      "deep": "With Confluent serializers each message carries a short schema id, and the registry stores versioned schemas per subject and checks a compatibility mode on registration; the default is BACKWARD, meaning consumers on the new schema can read data written with the previous one, so consumers upgrade first. ZTF instead distributes alerts as Avro container files that embed the writer schema, fastavro.reader resolves it from the header, and the replay producer forwards those bytes unchanged. Benefit: no extra service and no coupling to a registry. Costs: every message repeats the schema, and nothing blocks an incompatible change before it reaches consumers. The guards here are ingestion/schema.py (one field list shared by loader, scorer, sources, dashboard) and dbt not_null and accepted_values tests that fail the build when a field disappears or changes meaning. If the project published its own derived topic, such as scored alerts for other teams, that topic is where a registry with BACKWARD or FULL compatibility would earn its place.",
+      "evidence": [],
+      "sources": [
+        "https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html"
+      ],
+      "tags": [
+        "avro",
+        "schema registry",
+        "schema evolution"
+      ]
+    },
+    {
+      "id": "ztf-18",
+      "type": "pushback",
+      "level": 1,
+      "q": "Why Kafka for 27,000 alerts a night? That is tiny.",
+      "easy": "Fair. A loop over a folder handles one night, and the nightly DAG actually uses the batch path. Kafka is there because the real survey stream is Kafka, so the replay path runs the same consumer code the live path would.",
+      "deep": "Concede: 27,378 packets is a small batch, and the Airflow DAG calls stream_scorer.py in batch mode over a directory. Defend: ZTF publishes alerts as Avro over Kafka at over a million a night, and the live UW broker (Tier B) is a Kafka topic per night. Replaying archived bytes through a local broker means decode, consumer, and offset handling are the code that would face the live topic, so going live is a broker address and topic name change rather than a rewrite. Replay also runs at a controlled rate (default 20 alerts per second), which is how you test restarts and backpressure without waiting for a real night. The cost is two more containers and an operational surface a nightly batch does not need; if the project were only ever archive processing, the right call would be to drop Kafka and keep the batch path.",
+      "say": "That's fair. One night fits in a for loop, and the nightly DAG uses the batch path. Kafka is there because the real ZTF stream is Kafka, at over a million alerts a night. Replaying real bytes through a local broker means my consumer is the same code that would face the live topic. If this were only ever a nightly batch, I would drop it.",
+      "evidence": [
+        "portfolio: The Zwicky Transient Facility (ZTF) streams over a million optical alerts per night as Avro packets over Kafka.",
+        "portfolio: I ran the pipeline against a real night of the survey: 27,378 Avro alert packets extracted from July 20, 2026.",
+        "repo:ztf-transient-pipeline/ingestion/replay_producer.py: ap.add_argument(\"--rate\", type=float, default=20.0,"
+      ],
+      "sources": [],
+      "tags": [
+        "kafka",
+        "pushback",
+        "design tradeoff"
+      ]
+    },
+    {
+      "id": "ztf-19",
+      "type": "how",
+      "level": 2,
+      "q": "Describe the classifier architecture layer by layer.",
+      "easy": "Two branches. A small convolutional network reads the three image stamps, a small dense network reads seven measured numbers, and the two are joined before a final layer picks one of five coarse classes.",
+      "deep": "Image branch: Input (63, 63, 3); Conv2D 32 filters 3x3 relu same padding; MaxPool 2x2 (to 31x31); Conv2D 64; MaxPool (to 15x15); Conv2D 96; GlobalAveragePooling2D (to 96); Dropout 0.3; Dense 64 relu. Tabular branch: Input (7,); Dense 32 relu; Dropout 0.2; Dense 16 relu. Fusion: Concatenate (64 plus 16 = 80); Dense 64 relu; Dropout 0.3; Dense 5 softmax over sn_candidate, variable_star, asteroid, artifact, unclear. Compiled with Adam at learning rate 1e-3, sparse categorical cross entropy, accuracy metric. By Tanay's count from the layer shapes that is about 87,000 trainable parameters, most of them in the third conv layer (3x3x64x96 weights). Global average pooling instead of Flatten keeps the head small and makes the image features roughly translation invariant, which suits stamps where the source should be centered but may not be.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/model/architecture.py: out = layers.Dense(n_classes, activation=\"softmax\", name=\"class\")(fused)",
+        "repo:ztf-transient-pipeline/model/architecture.py: optimizer=keras.optimizers.Adam(1e-3),",
+        "repo:ztf-transient-pipeline/model/architecture.py: \"magpsf\", \"sigmapsf\", \"rb\", \"drb\", \"distnr\", \"sgscore1\", \"ndethist\",",
+        "repo:ztf-transient-pipeline/ingestion/schema.py: CUTOUT_SIZE = 63"
+      ],
+      "sources": [],
+      "tags": [
+        "cnn",
+        "keras",
+        "architecture"
+      ]
+    },
+    {
+      "id": "ztf-20",
+      "type": "formula",
+      "level": 2,
+      "q": "Give the math for the pieces of the model: convolution, global average pooling, dropout, softmax, and the loss.",
+      "easy": "Convolutions slide small learned filters over the image, pooling shrinks the result, dropout randomly switches off units during training, softmax turns scores into probabilities, and the loss punishes low probability on the true class.",
+      "deep": "Conv: $y_{i,j,k} = \\mathrm{relu}(b_k + \\sum_{u,v,c} W_{u,v,c,k}\\, x_{i+u,j+v,c})$ over a 3x3 window, with 'same' padding keeping spatial size. Global average pooling: $g_k = \\frac{1}{HW}\\sum_{i,j} y_{i,j,k}$, one number per channel. Dropout with rate $p$: during training each unit is zeroed with probability $p$ and survivors are scaled by $1/(1-p)$, so inference needs no rescaling. Softmax: $p_c = e^{z_c}/\\sum_{c'} e^{z_{c'}}$. Sparse categorical cross entropy takes an integer label $y$ and computes $L = -\\log p_y$, identical to categorical cross entropy on a one hot target but without materializing it. Adam keeps running means of the gradient and its square, $m_t = \\beta_1 m_{t-1} + (1-\\beta_1)g_t$, $v_t = \\beta_2 v_{t-1} + (1-\\beta_2)g_t^2$, bias corrects them, and steps $\\theta \\mathrel{-}= \\eta\\, \\hat m_t/(\\sqrt{\\hat v_t}+\\epsilon)$ with $\\eta = 10^{-3}$ here. Failure mode to name: softmax probabilities from an uncalibrated network are not calibrated probabilities, and the prob column in the warehouse is the raw argmax softmax value.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/model/architecture.py: optimizer=keras.optimizers.Adam(1e-3),",
+        "repo:ztf-transient-pipeline/model/architecture.py: out = layers.Dense(n_classes, activation=\"softmax\", name=\"class\")(fused)"
+      ],
+      "sources": [],
+      "tags": [
+        "formulas",
+        "cnn",
+        "loss"
+      ]
+    },
+    {
+      "id": "ztf-21",
+      "type": "define",
+      "level": 2,
+      "q": "What is multimodal fusion, and which kind does this model use?",
+      "easy": "Multimodal means the model takes two kinds of input, here images and a table of numbers. Fusion is where they are combined. This model learns a summary of each separately and then joins the summaries.",
+      "deep": "Early fusion would concatenate raw inputs (for example, broadcast tabular values as extra image channels). Late fusion would train two separate classifiers and average or stack their outputs. This model is intermediate, or feature level, fusion: each branch produces an embedding (64 from the CNN, 16 from the dense branch), the embeddings are concatenated, and shared dense layers learn interactions between them. The reason to fuse at all: pixels show morphology (point source, dipole, streak), while rb, drb, distnr, sgscore1 carry survey context the stamp does not, such as whether the nearest catalog source is a star. BTSbot, which the write up uses as the reference point, is also a multimodal CNN over image data plus extracted features. A known risk of intermediate fusion is that one modality dominates; with rb and drb available, a network can lean on the tabular branch and underuse pixels, which an ablation (image only, tabular only, both) would reveal.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/model/architecture.py: out = layers.Dense(n_classes, activation=\"softmax\", name=\"class\")(fused)",
+        "portfolio: Rather than invent an accuracy target, the model is framed against BTSbot"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2401.15167"
+      ],
+      "tags": [
+        "multimodal",
+        "fusion"
+      ]
+    },
+    {
+      "id": "ztf-22",
+      "type": "how",
+      "level": 2,
+      "q": "How is the model trained in the repo?",
+      "easy": "Only on a made up practice dataset. The training script refuses to run on real data until labeled cutouts are wired in, so the committed model exists to prove the code runs.",
+      "deep": "model/train.py raises SystemExit unless --synthetic is passed ('Real training expects labeled cutouts.'). synthetic_dataset(n=600, seed=7): labels drawn uniformly over 5 classes; images are normal(0.1, 0.05) noise, and the difference channel gets +0.6 in a centered square whose half width is 2 + class index, so square side grows from 4 to 12 pixels by class; the rb column of the standard normal tabular block is nudged by 0.2 times the class index. Split 80/20 in order (480 train, 120 validation), 4 epochs by default, batch size 64. The artifact is model.keras plus labels.json with version 0.1.0-smoke, and that version string is what lands in raw_predictions.model_version. model/evaluate.py scores a fresh synthetic set (seed 99) and writes accuracy, per class precision, recall, F1, and a confusion matrix, with a note that these are smoke test metrics, not a benchmark. No result from this path is quoted anywhere, correctly.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/model/train.py: Real training expects labeled cutouts.",
+        "repo:ztf-transient-pipeline/model/train.py: def synthetic_dataset(n=600, seed=7):",
+        "repo:ztf-transient-pipeline/model/train.py: split = int(0.8 * len(y))",
+        "repo:ztf-transient-pipeline/model/train.py: ap.add_argument(\"--epochs\", type=int, default=4)",
+        "repo:ztf-transient-pipeline/model/train.py: epochs=args.epochs, batch_size=64, verbose=2)",
+        "repo:ztf-transient-pipeline/model/train.py: tab[:, 2] += y * 0.2  # nudge rb by class",
+        "repo:ztf-transient-pipeline/model/train.py: json.dump({\"labels\": CLASS_LABELS, \"version\": \"0.1.0-smoke\"}, fh, indent=2)",
+        "repo:ztf-transient-pipeline/model/evaluate.py: X, y = synthetic_dataset(seed=99)",
+        "repo:ztf-transient-pipeline/model/evaluate.py: smoke-test metrics on synthetic data; not a real benchmark"
+      ],
+      "sources": [],
+      "tags": [
+        "training",
+        "synthetic",
+        "smoke test"
+      ]
+    },
+    {
+      "id": "ztf-23",
+      "type": "pushback",
+      "level": 1,
+      "q": "What is the model's accuracy?",
+      "easy": "There is no real accuracy number. The committed training script only trains on a synthetic smoke dataset, so the real alerts were scored by a model that tests the plumbing and has learned nothing about astronomy.",
+      "deep": "model/train.py exits unless --synthetic is passed, and evaluate.py labels its output as smoke test metrics on synthetic data. The write up frames the target against BTSbot instead of inventing one, and says broker reference labels are themselves model outputs with no spectroscopic confirmation, so any benchmark would be relative. The defensible claim is the systems one: real Avro bytes, a real broker, and a warehouse build whose tests pass on real data. To earn a number: label real cutouts from BTS or community broker classifications (Lasair, ALeRCE, Fink), split by object_id so detections of one object never straddle train and test, report per class precision, recall, and PR-AUC, and beat a baseline of thresholding drb alone.",
+      "say": "There isn't one I would defend, and I say that first. The training script in the repo only runs on a synthetic smoke dataset, so the real alerts were scored by a placeholder. What I can defend is the system: real Avro, a real broker, and a warehouse build that passes its tests on real data. The next step is training on broker labels split by object, with the survey's own real bogus score as the baseline to beat.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/model/train.py: Real training expects labeled cutouts.",
+        "repo:ztf-transient-pipeline/model/evaluate.py: smoke-test metrics on synthetic data; not a real benchmark",
+        "portfolio: Rather than invent an accuracy target, the model is framed against BTSbot",
+        "portfolio: There is no spectroscopic confirmation, and the reference labels are themselves model outputs, so the benchmark is relative rather than ground truth.",
+        "portfolio: The classifier demonstrates the pipeline, not a science grade taxonomy. It is a systems project first."
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2401.15167"
+      ],
+      "tags": [
+        "evaluation",
+        "honesty",
+        "pushback"
+      ]
+    },
+    {
+      "id": "ztf-24",
+      "type": "pushback",
+      "level": 2,
+      "q": "Your write up says the model decides real or artifact and then a coarse class. Is that what the code does?",
+      "easy": "No. The code makes one five way choice in which artifact is just one of the five classes. A two step design is a reasonable next step, but it is not what ships.",
+      "deep": "model/architecture.py ends in a single Dense(5, softmax) over sn_candidate, variable_star, asteroid, artifact, unclear, and the scorer writes the argmax. There is no separate real bogus head and no gate. Concede the wording gap. Defend the design direction: a two stage cascade (a real bogus gate first, then a classifier on survivors) would cut the imbalance the second model sees, and the survey already supplies rb and drb, so the gate could start as a threshold on drb and be replaced later. If asked to fix the write up, Tanay would say 'a five class softmax that includes an artifact class' rather than 'real versus artifact, then a class'.",
+      "say": "Good catch. The code is one five way softmax, and artifact is one of the classes. My write up describes it as two steps, and that is looser than the code. A real cascade, with a real bogus gate first, is what I would build next, because it shrinks the imbalance the second model has to handle.",
+      "evidence": [
+        "portfolio: the two are fused to predict whether an alert is a real transient or an artifact, then a coarse class.",
+        "repo:ztf-transient-pipeline/model/architecture.py: out = layers.Dense(n_classes, activation=\"softmax\", name=\"class\")(fused)",
+        "repo:ztf-transient-pipeline/ingestion/schema.py: CLASS_LABELS = [\"sn_candidate\", \"variable_star\", \"asteroid\", \"artifact\", \"unclear\"]"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "architecture",
+        "write up accuracy"
+      ]
+    },
+    {
+      "id": "ztf-25",
+      "type": "concept",
+      "level": 2,
+      "q": "Transient classification is heavily imbalanced. How would you handle it, and what does the repo do today?",
+      "easy": "Most alerts are artifacts or known variable stars, and new explosions are rare. Plain accuracy rewards a model that never finds the rare class, so you measure per class recall and precision and set the decision threshold by how many follow up observations you can afford.",
+      "deep": "Today the repo does nothing specific: the synthetic training set draws classes uniformly, model.fit has no class weights, and the CLASS_WEIGHTS in scripts/generate_sample.py only shape the CI fixture so its marts look plausible. On real data: (1) metrics: per class precision and recall, PR-AUC for the rare class, and the confusion matrix evaluate.py already writes; (2) loss: class_weight inversely proportional to frequency, focal loss $-(1-p_y)^\\gamma \\log p_y$, or oversampling the rare class with rotations and flips of the stamps, which are physically valid augmentations because the sky has no preferred orientation; (3) splits grouped by object_id so repeat detections of one object do not leak; (4) thresholds read off the precision recall curve against a follow up budget, since spectroscopic time is the scarce resource, which is how BTSbot reports its real time selections (by the purity of what it requested); (5) a cascade, real bogus gate then class, to shrink the imbalance the second model sees.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/scripts/generate_sample.py: CLASS_WEIGHTS = [0.14, 0.34, 0.12, 0.30, 0.10]"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2401.15167"
+      ],
+      "tags": [
+        "class imbalance",
+        "pr-auc",
+        "thresholds"
+      ]
+    },
+    {
+      "id": "ztf-26",
+      "type": "concept",
+      "level": 2,
+      "q": "What is BTSbot, and why frame the model against it instead of quoting an accuracy target?",
+      "easy": "BTSbot is a published classifier from the Bright Transient Survey team that scores ZTF detections from the same kind of inputs, images plus measured features, and requests follow up spectra automatically. It is the real benchmark this kind of model would have to meet.",
+      "deep": "Per its arXiv abstract (2401.15167): a multimodal CNN over image data plus 25 extracted features, targeting bright extragalactic transients (peak magnitude 18.5 or brighter) to replace daily human scanning for the Bright Transient Survey; it recovers all bright transients in its test split, finds them about an hour faster than human scanners on average, shows no significant data shift on a concealed test split, and in October 2023 selected 296 sources in real time of which 93% were real extragalactic transients. Those are BTSbot's numbers, not this project's. Framing against it instead of inventing a target is honest because this repo has no labeled real training set, and because the comparison metric BTSbot uses (purity of real time selections at a follow up budget) is the one that matters operationally.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/2401.15167"
+      ],
+      "tags": [
+        "btsbot",
+        "benchmark",
+        "related work"
+      ]
+    },
+    {
+      "id": "ztf-27",
+      "type": "why",
+      "level": 3,
+      "q": "Is there train and serve skew in the tabular branch?",
+      "easy": "Yes. The practice model was trained on numbers centered at zero, but at scoring time it receives raw survey values such as magnitudes near 18 and detection counts, unscaled. A real model would need the same scaling at training and at scoring.",
+      "deep": "synthetic_dataset draws the 7 tabular features from a standard normal. stream_scorer._features passes float(record.get(k) or 0.0) straight into the network: magpsf around 15 to 21, sigmapsf around 0.01 to 0.3, rb and drb in 0 to 1, distnr in pixels, ndethist as a count. Dense layers with relu are sensitive to scale, so the committed model sees inputs far outside its training range; any prediction it made on the real night is not meaningful, which is consistent with the project making no accuracy claim. The 'or 0.0' also maps a missing value to 0, which collides with real zeros (for example distnr of 0). The fix: fit a scaler on training data, save it next to model.keras (or put a Keras Normalization layer inside the model so scaling ships with the weights), and add explicit missing indicators.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/scoring/stream_scorer.py: return np.array([[float(record.get(k) or 0.0) for k in TABULAR_FEATURES]],",
+        "repo:ztf-transient-pipeline/model/train.py: tab[:, 2] += y * 0.2  # nudge rb by class"
+      ],
+      "sources": [],
+      "tags": [
+        "train serve skew",
+        "features",
+        "failure modes"
+      ]
+    },
+    {
+      "id": "ztf-28",
+      "type": "how",
+      "level": 2,
+      "q": "How is the model served, and what would you change in the serving code?",
+      "easy": "A small FastAPI app loads the Keras model once and exposes /health and /score. You post the image stack and seven features and get back a class, a probability, and the model version.",
+      "deep": "model/serve.py keeps model, labels, and version in a module level dict; a startup hook loads model.keras and labels.json if they exist, and /score lazily loads on first call otherwise. ScoreRequest is a pydantic model with cutouts (a nested list reshaped to 1x63x63x3) and tabular (reshaped to 1x7); the response carries pred_class, prob, and model_version, and /health reports model_loaded so an orchestrator can gate traffic. Changes: FastAPI documents on_event as deprecated in favor of a lifespan context manager that loads the model before the app accepts requests; validate shapes in pydantic so a malformed request is a 422 instead of a reshape error 500; and accept a batch. The serve.py docstring says the stream scorer calls this API, but the scorer actually loads the model in process, which is the better choice for bulk scoring because a 63x63x3 stack as JSON is 11,907 floats per request. The write up's 'a FastAPI service exposes the scorer' is accurate; the API is for ad hoc inspection.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/model/serve.py: @app.on_event(\"startup\")",
+        "repo:ztf-transient-pipeline/model/serve.py: return {\"status\": \"ok\", \"model_loaded\": _state[\"model\"] is not None,",
+        "repo:ztf-transient-pipeline/model/serve.py: stream scorer calls this, but it is also useful for manual inspection.",
+        "portfolio: A FastAPI service exposes the scorer, and a streaming consumer writes predictions and alert metadata into the warehouse."
+      ],
+      "sources": [
+        "https://fastapi.tiangolo.com/advanced/events/"
+      ],
+      "tags": [
+        "fastapi",
+        "serving",
+        "pydantic"
+      ]
+    },
+    {
+      "id": "ztf-29",
+      "type": "how",
+      "level": 2,
+      "q": "How is the dbt project structured, and why three layers?",
+      "easy": "Raw tables are declared as sources. Staging cleans and types them, intermediate builds per object lightcurves, and marts are the tables people query. Each layer has one job, so a bug is easy to locate.",
+      "deep": "Sources (_sources.yml): raw_alerts, raw_alert_history, raw_predictions in schema main_main, with freshness on raw_predictions. Staging (views): stg_alerts, stg_alert_history, stg_predictions. Intermediate (views): int_object_lightcurves (window features), int_object_features (per object aggregates). Marts (tables): mart_classified_transients, mart_daily_alert_summary (incremental, overriding the folder default), mart_model_monitoring. Views for cheap one to one transforms and tables for what the dashboard and drift job read is the usual cost tradeoff: views cost nothing to build and always reflect raw, tables cost a build but make reads fast and stable. profiles.yml has dev (DUCKDB_PATH, 4 threads) and ci (ci.duckdb, 2 threads) DuckDB targets; profiles.example.yml has BigQuery and Snowflake targets. dbt_utils is the one package (accepted_range, unique_combination_of_columns).",
+      "evidence": [
+        "repo:ztf-transient-pipeline/dbt/dbt_project.yml: +materialized: view",
+        "repo:ztf-transient-pipeline/dbt/models/staging/_sources.yml: schema: main_main",
+        "repo:ztf-transient-pipeline/dbt/profiles.yml: path: \"ci.duckdb\"",
+        "repo:ztf-transient-pipeline/dbt/profiles.example.yml: type: bigquery",
+        "repo:ztf-transient-pipeline/dbt/profiles.example.yml: type: snowflake"
+      ],
+      "sources": [],
+      "tags": [
+        "dbt",
+        "data modeling",
+        "layers"
+      ]
+    },
+    {
+      "id": "ztf-30",
+      "type": "define",
+      "level": 2,
+      "q": "Define a dbt source, ref, model, materialization, seed, profile, and target.",
+      "easy": "A source names a raw table dbt did not build. ref points to another dbt model and creates a dependency. A model is one SELECT that dbt turns into a view or table, which is its materialization. A seed is a small CSV dbt loads as a table. A profile holds connection settings, and a target is one named connection in it.",
+      "deep": "source('raw', 'raw_alerts') resolves through _sources.yml to database.schema.table, and lets dbt attach freshness rules and draw lineage from raw. ref('stg_alerts') resolves to the built relation and adds an edge to the DAG, which is how dbt orders builds and decides what to skip when a test fails. Materializations used here: view (staging, intermediate), table (marts), incremental (the daily summary). Seeds: dbt/seeds/raw_alerts.csv and friends, generated by scripts/generate_sample.py (40 objects by default) for CI; dbt_project.yml gives seeds +schema: main and column types. Profiles: ztf_transient with targets dev and ci in profiles.yml; --target ci selects ci.duckdb. On dbt-duckdb the database name is the file's basename, so ci.duckdb becomes database ci.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/scripts/generate_sample.py: ap.add_argument(\"--objects\", type=int, default=40)",
+        "repo:ztf-transient-pipeline/dbt/dbt_project.yml: +schema: main",
+        "repo:ztf-transient-pipeline/dbt/profiles.yml: path: \"ci.duckdb\""
+      ],
+      "sources": [
+        "https://github.com/duckdb/dbt-duckdb"
+      ],
+      "tags": [
+        "dbt",
+        "definitions"
+      ]
+    },
+    {
+      "id": "ztf-31",
+      "type": "how",
+      "level": 2,
+      "q": "What does each staging model do?",
+      "easy": "stg_alerts types the current detections, removes duplicate detection ids, labels the band, and adds a real timestamp. stg_alert_history does the same for earlier detections. stg_predictions keeps only the newest score per detection.",
+      "deep": "stg_alerts: casts every column (bigint candid, double jd, ra, dec, magpsf and friends, integer fid and ndethist), maps fid 1, 2, 3 to g, r, i and anything else to other, derives observed_at = to_timestamp((jd minus 2440587.5) times 86400), and dedups with qualify row_number() over (partition by candid order by jd desc) = 1 (duplicates of one candid share a jd, so the ordering is arbitrary but harmless). stg_alert_history: same casts and band mapping, keeps rows where magpsf is not null. stg_predictions: casts prob to double and scored_at to timestamp, and keeps the latest score per candid with qualify row_number() over (partition by candid order by scored_at desc) = 1, which is what makes the append only raw_predictions table safe to rescore into. QUALIFY filters on a window function result without a subquery; DuckDB, BigQuery, and Snowflake all support it.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/dbt/models/staging/stg_alerts.sql: to_timestamp((cast(jd as double) - 2440587.5) * 86400.0)",
+        "repo:ztf-transient-pipeline/dbt/models/staging/stg_predictions.sql: qualify row_number() over (partition by candid order by scored_at desc) = 1"
+      ],
+      "sources": [],
+      "tags": [
+        "dbt",
+        "staging",
+        "dedup",
+        "qualify"
+      ]
+    },
+    {
+      "id": "ztf-32",
+      "type": "formula",
+      "level": 1,
+      "q": "How do you turn a Julian date into a timestamp, and why is a lower magnitude brighter?",
+      "easy": "A Julian date counts days from a fixed ancient starting point. Subtract the Julian date of 1970-01-01, multiply by 86,400 seconds, and you have a Unix timestamp. Magnitude is a logarithmic scale that runs backwards, so a smaller number means a brighter object.",
+      "deep": "$t_{unix} = (JD - 2440587.5) \\times 86400$. 2440587.5 is the JD of 1970-01-01 00:00 UTC; the .5 is there because Julian days start at noon. stg_alerts computes exactly this as observed_at. The sample generator goes the other way with date.toordinal() + 1721424.5. Astropy's Time(jd, format='jd') does the same conversion and also handles time scales when precision matters. DuckDB's to_timestamp returns a time zone aware timestamp, so the later cast to a date can depend on the session time zone; pinning the session to UTC removes that ambiguity. Magnitude: $m = -2.5\\log_{10}F + C$, so one magnitude is a flux factor of about 2.512 and five magnitudes is a factor of 100. That is why peak_mag is min(magpsf), running_peak_mag is a running min, a negative dmag means brightening, and the dashboard tells the reader that lower is brighter.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/dbt/models/staging/stg_alerts.sql: to_timestamp((cast(jd as double) - 2440587.5) * 86400.0)"
+      ],
+      "sources": [],
+      "tags": [
+        "julian date",
+        "magnitudes",
+        "sql"
+      ]
+    },
+    {
+      "id": "ztf-33",
+      "type": "code",
+      "level": 2,
+      "q": "Show me the window function logic in the lightcurve model, and what is wrong with it.",
+      "easy": "For each object, ordered by time, it numbers the detections, computes the change in brightness and the gap in days since the previous detection, and tracks the brightest magnitude seen so far.",
+      "deep": "```sql\nrow_number() over (partition by object_id order by jd) as detection_seq,\nmagpsf - lag(magpsf) over (partition by object_id order by jd) as dmag,\njd - lag(jd) over (partition by object_id order by jd) as dt_days,\nmin(magpsf) over (partition by object_id order by jd\n  rows between unbounded preceding and current row) as running_peak_mag\n```\nThe input is a UNION ALL of stg_alerts and stg_alert_history, so current and prior detections form one series. The explicit ROWS frame matters: with ORDER BY and no frame, the default is RANGE UNBOUNDED PRECEDING, which treats ties in jd as peers and would give them the same running value. Problems: each alert repeats its object's recent history in prv_candidates, and an earlier alert's current detection reappears in a later alert's history, so the union contains duplicates that inflate n_detections and create zero day gaps; dedup on (object_id, jd, fid) first. Mixing g and r points in one partition makes dmag partly a color difference, so partitioning by object_id and band gives honest rise rates.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/dbt/models/intermediate/int_object_lightcurves.sql: rows between unbounded preceding and current row"
+      ],
+      "sources": [],
+      "tags": [
+        "sql",
+        "window functions",
+        "lightcurves"
+      ]
+    },
+    {
+      "id": "ztf-34",
+      "type": "how",
+      "level": 2,
+      "q": "How are the per object features and the product mart built?",
+      "easy": "int_object_features summarizes each object's lightcurve: how many points, how many bands, how long it was seen, its peak, its swing, its average. mart_classified_transients joins that with the object's best prediction and latest position into one row per object.",
+      "deep": "int_object_features: count(*) n_detections, count(distinct band) n_bands, min and max jd, timespan_days = max(jd) minus min(jd), peak_mag = min(magpsf), mag_amplitude = max minus min, mean_mag. mart_classified_transients: from the features, left join the prediction ranked by row_number() over (partition by object_id order by prob desc), so the object's class is its highest confidence prediction, not its most recent one; left join the latest alert by observed_at for ra, dec, rb, drb; passes_quality = (rb >= 0.5). Tests: object_id not_null and unique, and class_confidence in 0 to 1 where not null (the left join can leave it null). Design notes: choosing max prob over latest means an old confident score outranks a newer model's judgment, which is arguable after a model upgrade; and the 0.5 rb cut is a convention, not a tuned threshold.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/dbt/models/marts/mart_classified_transients.sql: row_number() over (partition by object_id order by prob desc) as rn",
+        "repo:ztf-transient-pipeline/dbt/models/marts/mart_classified_transients.sql: (a.rb >= 0.5)"
+      ],
+      "sources": [],
+      "tags": [
+        "dbt",
+        "marts",
+        "features"
+      ]
+    },
+    {
+      "id": "ztf-35",
+      "type": "concept",
+      "level": 2,
+      "q": "How does the incremental daily summary work, and where can it go wrong?",
+      "easy": "The first run builds the whole table. After that it only computes days newer than the latest day already stored and adds them, so history is kept without recomputing every night.",
+      "deep": "Config: materialized incremental, unique_key (summary_date, band, pred_class). is_incremental() is true only when the table already exists, the model is incremental, and --full-refresh is not passed; then the filter keeps rows with summary_date greater than coalesce(max(summary_date), 1970-01-01) from {{ this }}. With a unique_key, rows whose key already exists are replaced instead of appended; on dbt-duckdb the strategies that use it are delete+insert and merge. The join is stg_alerts left join stg_predictions on candid, with unmatched alerts labeled 'unclassified'. Failure modes: (1) the strict greater than skips late alerts for a date already summarized; dbt's own example uses greater than or equal, and a lookback of a few days with unique_key replacement is the usual fix; (2) predictions that land after their alerts were summarized leave rows stuck as 'unclassified'; (3) load_raw.py replaces raw_alerts every night, so this mart is the only place older nights survive, which makes --full-refresh destructive here, since it would rebuild history from the current night alone.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/dbt/models/marts/mart_daily_alert_summary.sql: unique_key = ['summary_date', 'band', 'pred_class']",
+        "repo:ztf-transient-pipeline/dbt/models/marts/mart_daily_alert_summary.sql: where summary_date > (select coalesce(max(summary_date), date '1970-01-01') from {{ this }})",
+        "repo:ztf-transient-pipeline/dbt/models/marts/mart_daily_alert_summary.sql: coalesce(p.pred_class, 'unclassified')",
+        "repo:ztf-transient-pipeline/warehouse/load_raw.py: con.execute(\"create or replace table raw_alerts as select * from alerts_df\")"
+      ],
+      "sources": [
+        "https://docs.getdbt.com/docs/build/incremental-models",
+        "https://github.com/duckdb/dbt-duckdb"
+      ],
+      "tags": [
+        "dbt",
+        "incremental models",
+        "late data"
+      ]
+    },
+    {
+      "id": "ztf-36",
+      "type": "how",
+      "level": 1,
+      "q": "What do the 21 dbt tests check?",
+      "easy": "They check that ids are present and unique, that categories only take allowed values, that scores sit between 0 and 1, that every prediction points to a real alert, that the daily summary has one row per key, and that no object is scored by two model versions on the same day.",
+      "deep": "Count by type. not_null x8: stg_alerts.candid, stg_alerts.object_id, stg_predictions.candid, stg_alert_history.object_id, stg_alert_history.magpsf, mart_classified_transients.object_id, mart_daily_alert_summary.n_alerts, mart_model_monitoring.score_date. unique x3: stg_alerts.candid, stg_predictions.candid, mart_classified_transients.object_id. accepted_values x2: band in g, r, i, other; pred_class in the five labels. dbt_utils.accepted_range x5: rb, drb, prob, class_confidence (where not null) in 0 to 1, and n_alerts at least 1. relationships x1: stg_predictions.candid to stg_alerts.candid. dbt_utils.unique_combination_of_columns x1: (summary_date, band, pred_class), the incremental grain. Singular x1: assert_single_model_version_per_day. 8 + 3 + 2 + 5 + 1 + 1 + 1 = 21, matching the write up. All tests default to error severity, so any failure fails dbt build and skips dependent models.",
+      "evidence": [
+        "portfolio: The project ships with 21 data quality tests, source freshness checks, and generated lineage docs.",
+        "portfolio: A full dbt build returned 8 models and 21 tests with 32 checks passing and zero errors, on real data rather than a seed sample.",
+        "repo:ztf-transient-pipeline/dbt/models/staging/_staging.yml: to: ref('stg_alerts')",
+        "repo:ztf-transient-pipeline/dbt/tests/assert_single_model_version_per_day.sql: having count(distinct model_version) > 1"
+      ],
+      "sources": [
+        "https://docs.getdbt.com/reference/commands/build"
+      ],
+      "tags": [
+        "dbt tests",
+        "data quality"
+      ]
+    },
+    {
+      "id": "ztf-37",
+      "type": "why",
+      "level": 2,
+      "q": "Why write a singular test against two model versions per object per day?",
+      "easy": "Because the worst silent failure in a scoring pipeline is two models writing at once, for example an old and a new deploy overlapping. The test turns that operational mistake into a failed build.",
+      "deep": "assert_single_model_version_per_day groups stg_predictions by object_id and cast(scored_at as date) and returns rows having count(distinct model_version) > 1; dbt treats any returned row as a failure. Generic tests cannot express this, because it is a rule across rows, not a property of one column. It guards against a double deploy, a backfill run with a different artifact on the same day as the nightly run, or a manual rescore. A subtlety: stg_predictions already keeps only the latest score per candid, so the test only fires when different detections of the same object got different versions on one day, which is exactly the overlap case. In an interview this is the test worth pointing at first, because it encodes an operational invariant, not just a schema rule.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/dbt/tests/assert_single_model_version_per_day.sql: having count(distinct model_version) > 1",
+        "repo:ztf-transient-pipeline/dbt/models/staging/stg_predictions.sql: qualify row_number() over (partition by candid order by scored_at desc) = 1"
+      ],
+      "sources": [],
+      "tags": [
+        "dbt tests",
+        "singular test",
+        "ml ops"
+      ]
+    },
+    {
+      "id": "ztf-38",
+      "type": "define",
+      "level": 2,
+      "q": "Define source freshness and lineage docs, and say whether this project actually runs them.",
+      "easy": "Freshness checks how old the newest row in a raw table is and warns or errors past a limit. Lineage docs are a generated website that shows how every table depends on the others. Both are configured here, but neither is run automatically.",
+      "deep": "raw_predictions declares loaded_at_field scored_at with warn_after 36 hours and error_after 72 hours. dbt evaluates this only under the separate command dbt source freshness; dbt's docs state that dbt build does not include freshness checks. Neither the Airflow DAG nor CI calls dbt source freshness, so the rule never fires as shipped. That is also why CI stays green: the seed fixture's scored_at values are in early 2024 and would fail a 72 hour rule. Lineage docs come from dbt docs generate and dbt docs serve, which the README tells a user to run by hand; nothing publishes them. The production fix is a dbt source freshness task ahead of dbt_build in the DAG, scoped to the production target only.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/dbt/models/staging/_sources.yml: loaded_at_field: scored_at",
+        "repo:ztf-transient-pipeline/dbt/models/staging/_sources.yml: warn_after: {count: 36, period: hour}",
+        "repo:ztf-transient-pipeline/dbt/models/staging/_sources.yml: error_after: {count: 72, period: hour}",
+        "portfolio: The project ships with 21 data quality tests, source freshness checks, and generated lineage docs."
+      ],
+      "sources": [
+        "https://docs.getdbt.com/docs/deploy/source-freshness",
+        "https://docs.getdbt.com/reference/commands/build"
+      ],
+      "tags": [
+        "dbt",
+        "freshness",
+        "lineage"
+      ]
+    },
+    {
+      "id": "ztf-39",
+      "type": "compare",
+      "level": 3,
+      "q": "The write up says the models port to BigQuery and Snowflake with only a profile change. Is that true?",
+      "easy": "Mostly for Snowflake, not as written for BigQuery. A couple of SQL spellings in staging are DuckDB style and BigQuery does not accept them, and nothing in CI ever tests a cloud target.",
+      "deep": "What was designed for portability: prior detections are flattened in Python so no UNNEST is needed, QUALIFY is supported by all three engines, and profiles.example.yml carries BigQuery (service account keyfile, dataset ztf_transient, location US) and Snowflake (env var credentials, role TRANSFORMER, warehouse COMPUTE_WH, database ZTF) targets. Gaps found when checking against vendor docs: BigQuery has no DOUBLE type (FLOAT64 has no alias; INT64 does accept BIGINT and INTEGER), so cast(... as double) fails; BigQuery has no TO_TIMESTAMP, and TIMESTAMP_SECONDS takes an INT64, so the Julian date conversion needs TIMESTAMP_MICROS(CAST(... AS INT64)) or a cross database macro. Snowflake accepts DOUBLE and its TO_TIMESTAMP treats a number as seconds since the epoch. Also, the source schema main_main is hard coded, so on a cloud target the raw dataset must be given that name or the source must read an env var. The honest wording is 'designed to port, with two macros needed for BigQuery'.",
+      "evidence": [
+        "portfolio: the same models port to BigQuery and Snowflake with only a profile change",
+        "repo:ztf-transient-pipeline/dbt/profiles.example.yml: models are warehouse-portable except the array-history note in the README.",
+        "repo:ztf-transient-pipeline/README.md: Prior detections are flattened in Python at load time so the shipped SQL is",
+        "repo:ztf-transient-pipeline/dbt/models/staging/stg_alerts.sql: to_timestamp((cast(jd as double) - 2440587.5) * 86400.0)",
+        "repo:ztf-transient-pipeline/dbt/profiles.example.yml: type: bigquery",
+        "repo:ztf-transient-pipeline/dbt/profiles.example.yml: type: snowflake"
+      ],
+      "sources": [
+        "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-types",
+        "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/timestamp_functions",
+        "https://docs.snowflake.com/en/sql-reference/functions/to_timestamp"
+      ],
+      "tags": [
+        "portability",
+        "bigquery",
+        "snowflake",
+        "duckdb"
+      ]
+    },
+    {
+      "id": "ztf-40",
+      "type": "pushback",
+      "level": 2,
+      "q": "DuckDB is not a warehouse. Why build on it?",
+      "easy": "For one node and one night of data it is the right size: an embedded columnar database that dbt treats like any other warehouse. It also let CI build the whole project with no cloud account.",
+      "deep": "Concede: DuckDB is an embedded single process OLAP engine. One process can hold the file read and write, readers in other processes cannot open it while a writer holds it, there is no access control, and the data is one file on one disk. The dashboard and drift job open it read only, but a stream scorer writing while dbt builds would contend for the lock. Defend: the project's subject is the modeling layer, and dbt-duckdb lets every push build every model and run every test on a clean GitHub runner with no credentials. Portability was designed in, with the BigQuery caveats owned (two SQL spellings need macros). Moving up means a loader that writes to cloud storage, native incremental strategies (merge on BigQuery and Snowflake), and partitioned raw tables.",
+      "say": "DuckDB is a warehouse for one machine, and one night of alerts is that size. It let CI build every model and run every test on each push with no credentials. The models were written to move, though I'd need two small macros before BigQuery would accept them. At scale the loader and incremental strategy change, not the modeling logic.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/dashboards/app.py: con = duckdb.connect(DUCKDB_PATH, read_only=True)",
+        "repo:ztf-transient-pipeline/.github/workflows/ci.yml: dbt build --target ci"
+      ],
+      "sources": [],
+      "tags": [
+        "duckdb",
+        "warehouse",
+        "pushback"
+      ]
+    },
+    {
+      "id": "ztf-41",
+      "type": "pushback",
+      "level": 2,
+      "q": "Why flatten prior detections in Python instead of using UNNEST in the warehouse?",
+      "easy": "So the same SQL runs on DuckDB, BigQuery, and Snowflake, which each spell array unnesting differently. The cost is that the raw layer is no longer a faithful copy of the packet.",
+      "deep": "load_raw.py writes one row per prior detection to raw_alert_history, linked by alert_candid, and drops entries with no magnitude. Upside: stg_alert_history is a plain select, and the CI fixture can be three CSVs. Downsides: the loader holds every history row in a pandas DataFrame; upper limits are discarded before the warehouse sees them, so nobody can later analyze limiting magnitudes; and transform logic is split between Python and SQL. The README documents the alternative: on BigQuery a comma join with unnest(a.prv_candidates), on Snowflake lateral flatten(input => a.prv_candidates). The cleaner production pattern is ELT: land the nested record untouched, then unnest in staging with a dbt macro that dispatches per adapter, so raw stays raw.",
+      "say": "I flattened in Python so the SQL stayed the same across three warehouses. The price is that the raw layer stopped being raw, because the upper limits are gone before load. In production I would land the nested record untouched and unnest in a staging macro that dispatches per adapter.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/README.md: Prior detections are flattened in Python at load time so the shipped SQL is",
+        "repo:ztf-transient-pipeline/ingestion/avro_utils.py: continue  # non-detection upper limit, skip for the lightcurve"
+      ],
+      "sources": [],
+      "tags": [
+        "elt",
+        "portability",
+        "pushback"
+      ]
+    },
+    {
+      "id": "ztf-42",
+      "type": "how",
+      "level": 2,
+      "q": "How is the nightly run scheduled in Airflow, and what does a retry do?",
+      "easy": "One DAG runs five shell steps in order every day at 14:00 UTC: download the night, load raw alerts, score them, build dbt, check drift. A failed step retries once after five minutes, and nothing downstream runs until it passes.",
+      "deep": "dag_id ztf_nightly, schedule '0 14 * * *' (commented 'after the night's alerts have posted'), start_date 2024-01-01, catchup False so the scheduler only creates the latest run, default_args owner data, retries 1, retry_delay 5 minutes, five BashOperators chained download >> load_raw >> score >> dbt_build >> drift. The night is {{ ds_nodash }}, the logical date, which Airflow defines as the start of the data interval; for this cron the interval runs 14:00 on day D to 14:00 on D+1, so the run that fires on D+1 processes the archive tarball for D. Each task is a CLI command, so any step can be rerun by hand, and ZTF_PROJECT_DIR and ZTF_DBT_TARGET come from the environment. Retry safety: download and load_raw are idempotent (download again, create or replace), dbt build can rerun, but score_alerts appends to raw_predictions, so a retry after a partial write duplicates rows that stg_predictions then absorbs. Backfill over a date range replays archive nights one by one.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/orchestration/dags/ztf_nightly.py: schedule=\"0 14 * * *\",",
+        "repo:ztf-transient-pipeline/orchestration/dags/ztf_nightly.py: after the night's alerts have posted",
+        "repo:ztf-transient-pipeline/orchestration/dags/ztf_nightly.py: \"retry_delay\": timedelta(minutes=5),",
+        "repo:ztf-transient-pipeline/orchestration/dags/ztf_nightly.py: night = \"{{ ds_nodash }}\"",
+        "repo:ztf-transient-pipeline/orchestration/dags/ztf_nightly.py: catchup=False,",
+        "repo:ztf-transient-pipeline/orchestration/dags/ztf_nightly.py: download >> load_raw >> score >> dbt_build >> drift",
+        "portfolio: An Apache Airflow DAG runs the full nightly batch end to end: download, deserialize, load, transform, and monitor."
+      ],
+      "sources": [
+        "https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dag-run.html"
+      ],
+      "tags": [
+        "airflow",
+        "scheduling",
+        "retries"
+      ]
+    },
+    {
+      "id": "ztf-43",
+      "type": "formula",
+      "level": 1,
+      "q": "How does the drift monitor compute PSI, and how do you read the number?",
+      "easy": "PSI compares two distributions bucket by bucket: how much each bucket's share moved, weighted by the log of the ratio. Here the buckets are the five predicted classes, and the latest scoring day is compared with all earlier days pooled.",
+      "deep": "$\\mathrm{PSI} = \\sum_i (a_i - e_i)\\ln(a_i/e_i)$, with $e_i$ the baseline share and $a_i$ the latest share of bin $i$. It equals $KL(a\\|e) + KL(e\\|a)$, so it is symmetric, non negative, and zero only when the shares match. drift_report.py reads mart_model_monitoring, pivots counts by score_date and pred_class, uses the last date as actual and the sum of all earlier dates as expected, adds eps = 1e-6 to each count before normalizing so an empty class does not produce log(0), and flags drift when PSI exceeds the threshold, default 0.2. The bins are categorical classes, so there is no binning choice to make, unlike PSI on a continuous score where deciles are the usual choice. Rules of thumb vary: ListenData reads below 0.1 as no change, 0.1 to 0.2 as slight, 0.2 and up as significant; other practice uses 0.25 as the upper bar; Yurdakul's dissertation argues these cutoffs are applied without any Type I or Type II error analysis, and Arize suggests setting the threshold from a trailing production value.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/monitoring/drift_report.py: return float(np.sum((actual - expected) * np.log(actual / expected)))",
+        "repo:ztf-transient-pipeline/monitoring/drift_report.py: def _psi(expected, actual, eps=1e-6):",
+        "repo:ztf-transient-pipeline/monitoring/drift_report.py: PSI above this flags drift (0.2 is a common bar)",
+        "repo:ztf-transient-pipeline/monitoring/drift_report.py: baseline = pivot.iloc[:-1].sum()"
+      ],
+      "sources": [
+        "https://www.listendata.com/2015/05/population-stability-index.html",
+        "https://scholarworks.wmich.edu/dissertations/3208/",
+        "https://arize.com/blog-course/population-stability-index-psi/"
+      ],
+      "tags": [
+        "psi",
+        "drift",
+        "monitoring"
+      ]
+    },
+    {
+      "id": "ztf-44",
+      "type": "compare",
+      "level": 2,
+      "q": "Compare PSI with KL divergence, chi square, and KS, and say what kind of drift this monitor detects.",
+      "easy": "PSI is a symmetric version of KL divergence used as a drift score. Chi square and KS are formal tests that give p values. This monitor watches prediction drift, the mix of classes the model outputs, not the inputs or the true labels.",
+      "deep": "KL(a||e) is asymmetric and infinite when e has a zero where a does not; PSI sums both directions and the code's eps keeps it finite. A chi square test on the latest day's class counts against baseline shares gives a p value, but with thousands of alerts a night it flags trivially small shifts, which is why a magnitude score like PSI is used for alerting. KS compares continuous distributions (for example rb or prob) by the max gap between CDFs, and fits input drift on the score columns better than PSI with arbitrary bins. Drift taxonomy: data or covariate drift is a change in P(x) (rb, magpsf, seeing conditions); prediction drift is a change in P(yhat), which is what mart_model_monitoring feeds; concept drift is a change in P(y|x), which needs labels to see. Prediction drift is a cheap proxy that mixes all three: a shift in the class mix can come from a real sky change (a field with many variable stars), an input pipeline bug, or a model regression.",
+      "evidence": [],
+      "sources": [
+        "https://arize.com/blog-course/population-stability-index-psi/",
+        "https://www.listendata.com/2015/05/population-stability-index.html"
+      ],
+      "tags": [
+        "drift",
+        "statistics",
+        "comparison"
+      ]
+    },
+    {
+      "id": "ztf-45",
+      "type": "how",
+      "level": 2,
+      "q": "How does the drift job behave operationally, and what are its blind spots?",
+      "easy": "It writes a JSON report and prints it, saying either no data, not enough history, or a PSI value with a drift flag. It never fails the pipeline, so drift is recorded but nobody is paged.",
+      "deep": "run(): no rows gives status no_data; fewer than two score dates gives insufficient_history; otherwise a report with psi rounded to 4 places, threshold, drift_flagged = psi > threshold, and baseline and latest counts per class (the keys say shares, but the values are raw counts). The DAG's drift_monitor task exits 0 either way, so a True flag does not turn the run red. Blind spots: (1) score_date is cast(scored_at as date), wall clock time, so a backfill of ten nights in one run looks like one huge day and a rescore moves old detections into today; (2) the baseline is the sum of all earlier days, which grows forever and is volume weighted, so a recent regime change is diluted; a trailing window such as the last 7 or 30 nights reacts better; (3) only the class mix is watched, not the inputs; (4) a single night of a few hundred alerts gives noisy shares. The fix: key by observation night, trailing window baseline, input PSI on rb, drb, magpsf, and a non zero exit or alert when flagged.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/monitoring/drift_report.py: need at least two score dates to compare",
+        "repo:ztf-transient-pipeline/monitoring/drift_report.py: \"drift_flagged\": psi > threshold,",
+        "repo:ztf-transient-pipeline/monitoring/drift_report.py: baseline = pivot.iloc[:-1].sum()",
+        "repo:ztf-transient-pipeline/dbt/models/marts/mart_model_monitoring.sql: group by cast(scored_at as date), pred_class"
+      ],
+      "sources": [],
+      "tags": [
+        "drift",
+        "monitoring",
+        "operations"
+      ]
+    },
+    {
+      "id": "ztf-46",
+      "type": "pushback",
+      "level": 2,
+      "q": "Prediction drift on a placeholder model's output tells you nothing. Why ship it?",
+      "easy": "Partly fair. With the smoke test model the class mix is not meaningful yet. What ships is the plumbing: a monitoring mart, a tested daily distribution, and a job that turns a shift into a number on every run.",
+      "deep": "Concede: drift in a placeholder model's outputs mostly measures input scale and noise; and prediction drift without input drift cannot tell a sky change from a pipeline bug. Defend: monitoring is cheapest to build before the real model arrives, and the contract is model independent. mart_model_monitoring is a tested table (score_date not_null), the job handles the no data and single day cases explicitly, and when a real model replaces 0.1.0-smoke the same code gives a meaningful signal from night two. The singular test on model versions complements it: a version change is visible in the data, so a PSI jump on a deploy day can be attributed. The next step is input drift on rb, drb, and magpsf, which is meaningful today regardless of the model.",
+      "say": "That's half right. With the smoke model, the class mix doesn't mean much yet. I built the monitoring before the real model on purpose, because the contract doesn't depend on the model. When a trained model replaces it, the same job gives a real signal from the second night. And I'd add input drift on the real bogus scores, which is meaningful today.",
+      "evidence": [
+        "portfolio: A Population Stability Index drift monitor watches the prediction distribution over time",
+        "repo:ztf-transient-pipeline/model/train.py: json.dump({\"labels\": CLASS_LABELS, \"version\": \"0.1.0-smoke\"}, fh, indent=2)"
+      ],
+      "sources": [],
+      "tags": [
+        "drift",
+        "pushback"
+      ]
+    },
+    {
+      "id": "ztf-47",
+      "type": "how",
+      "level": 2,
+      "q": "What is tested, and what do the tests actually prove?",
+      "easy": "Five unit tests check the pure parsing helpers, and the dbt build runs 21 data tests over the sample data. Together they prove the parsing logic and the warehouse contracts. They do not prove the model, the Kafka path, or real stamp decoding.",
+      "deep": "tests/test_avro_utils.py (pytest, pythonpath set in pytest.ini): test_band_of (1 to g, 2 to r, 99 to other); test_candidate_record_has_all_fields (every CANDIDATE_FIELDS key present, objectId mapped to object_id, candid kept); test_history_skips_upper_limits (two prior entries, one with magpsf None, gives one row with alert_candid set); test_normalize_bounds (output in 0 to 1 on a 2x2 array); test_resize_pads_and_crops (10x10 ones padded to 63x63, corner values checked). The packet is a hand built dict, so fastavro decoding is not exercised, and there is no FITS fixture, so decode_cutout and stack_cutouts are untested. The dbt tests run on a fixture of 40 generated objects in CI, and on the real night once, per the write up. Not tested anywhere: build_model, train, serve, the scorer, the producer and consumers, drift_report, load_raw, and the DAG. A missing test worth naming first is a round trip: one real Avro alert file committed as a fixture, decoded, flattened, and loaded.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/tests/test_avro_utils.py: {\"jd\": 2459998.5, \"magpsf\": None, \"fid\": 1},  # upper limit, skipped",
+        "repo:ztf-transient-pipeline/scripts/generate_sample.py: ap.add_argument(\"--objects\", type=int, default=40)",
+        "portfolio: A full dbt build returned 8 models and 21 tests with 32 checks passing and zero errors, on real data rather than a seed sample."
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "pytest",
+        "coverage"
+      ]
+    },
+    {
+      "id": "ztf-48",
+      "type": "how",
+      "level": 2,
+      "q": "What does CI run, and what is the devcontainer for?",
+      "easy": "Every push installs a lean dependency set, generates sample data, runs the unit tests, and builds the whole dbt project on DuckDB. The devcontainer lets anyone open the repo in GitHub Codespaces with everything installed.",
+      "deep": ".github/workflows/ci.yml: triggers on push to any branch and on pull requests to main; ubuntu-latest, Python 3.11 with pip cache; pip install -r requirements-ci.txt (dbt-duckdb, duckdb, pandas, pyarrow, fastavro, pytest, no TensorFlow, Kafka client, or Astropy); python scripts/generate_sample.py; pytest -q; dbt deps; dbt seed --target ci; dbt build --target ci (which reseeds; harmless). The lean set keeps CI fast and credential free. .devcontainer/devcontainer.json: the mcr python 3.11 image, the docker in docker feature so docker compose can start Kafka inside the Codespace, postCreateCommand installing the CI requirements and dbt deps, and forwarded ports 8000 (model API), 8501 (Streamlit), 9092 (Kafka). The Makefile mirrors CI with make test, and make demo seeds and builds the marts on the fixture.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/.github/workflows/ci.yml: branches: [\"**\"]",
+        "repo:ztf-transient-pipeline/.github/workflows/ci.yml: python-version: \"3.11\"",
+        "repo:ztf-transient-pipeline/.github/workflows/ci.yml: dbt build --target ci",
+        "repo:ztf-transient-pipeline/requirements-ci.txt: No tensorflow, kafka, or astropy needed.",
+        "repo:ztf-transient-pipeline/.devcontainer/devcontainer.json: \"forwardPorts\": [8000, 8501, 9092],",
+        "portfolio: Continuous integration through GitHub Actions runs the test suite and a dbt build on every push"
+      ],
+      "sources": [],
+      "tags": [
+        "ci",
+        "github actions",
+        "codespaces"
+      ]
+    },
+    {
+      "id": "ztf-49",
+      "type": "pushback",
+      "level": 2,
+      "q": "Your README says a green CI means the model code holds together. Does it?",
+      "easy": "No. CI deliberately skips TensorFlow, so no model code is imported, built, or run in CI. Green means the parsing helpers and the dbt project hold together.",
+      "deep": "requirements-ci.txt excludes tensorflow, kafka, and astropy, and the only Python tests import ingestion.schema and ingestion.avro_utils. model/architecture.py, train.py, evaluate.py, and serve.py import TensorFlow lazily, so nothing fails, but nothing is exercised. Concede the README overstates it. Defend the choice: a TensorFlow install would add minutes to every push for a model that is a smoke fixture. The fix is cheap: a separate, slower job (nightly or on changes under model/) that installs the full requirements, runs make train with --epochs 1, calls evaluate, and hits /health and /score through FastAPI's TestClient.",
+      "say": "It doesn't, and the README overstates it. CI leaves out TensorFlow on purpose so every push stays fast, which means no model code runs there. The fix is a second, slower job that trains one epoch on the smoke data and calls the API through a test client. I'd also reword the README line.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/README.md: Green means the transformations, tests, and model code all",
+        "repo:ztf-transient-pipeline/requirements-ci.txt: No tensorflow, kafka, or astropy needed."
+      ],
+      "sources": [],
+      "tags": [
+        "ci",
+        "pushback",
+        "testing"
+      ]
+    },
+    {
+      "id": "ztf-50",
+      "type": "why",
+      "level": 3,
+      "q": "What went wrong with the schemas, and why does dbt produce a schema called main_main?",
+      "easy": "dbt glued two schema names together, so the seed tables landed in a schema named main_main. The latest commit pointed the dbt sources at main_main so CI finds the seeds, but the Python loader still writes to the plain main schema.",
+      "deep": "dbt_project.yml gives seeds +schema: main. dbt's default generate_schema_name macro concatenates the target schema and a custom schema with an underscore when a custom schema is set, so target schema main plus custom main gives main_main. The clone's only visible commit is titled as renaming the source schema from main to main_main, and _sources.yml now reads schema: main_main. Meanwhile warehouse/load_raw.py and scoring/stream_scorer.py open DuckDB and write raw_alerts, raw_alert_history, raw_predictions into the default main schema. Consequence as committed: a fresh real run's dbt build would reseed the fixture into main_main and build the marts from the 40 object fixture rather than the loaded night. The reported real run (500 alerts, which the 40 object fixture cannot produce) is consistent with having run before that rename. Fix: drop +schema on seeds, or override generate_schema_name, or make the source schema an env var shared with the loader, and exclude seeds from production builds with --exclude resource_type:seed.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/dbt/dbt_project.yml: +schema: main",
+        "repo:ztf-transient-pipeline/dbt/models/staging/_sources.yml: schema: main_main",
+        "repo:ztf-transient-pipeline/warehouse/load_raw.py: con.execute(\"create or replace table raw_alerts as select * from alerts_df\")",
+        "repo:ztf-transient-pipeline/scoring/stream_scorer.py: con.execute(\"insert into raw_predictions select * from df\")",
+        "repo:ztf-transient-pipeline/scripts/generate_sample.py: ap.add_argument(\"--objects\", type=int, default=40)",
+        "portfolio: Of those, 500 alerts were loaded, scored, and rebuilt through the warehouse."
+      ],
+      "sources": [],
+      "tags": [
+        "dbt",
+        "bugs",
+        "schemas",
+        "what went wrong"
+      ]
+    },
+    {
+      "id": "ztf-51",
+      "type": "case",
+      "level": 3,
+      "q": "What would break first if this ran every night in production?",
+      "easy": "Several things one night cannot reveal: the loader and dbt read different schemas, the second night breaks a referential test, freshness never runs, consumer offsets can drop alerts, and the model is a placeholder.",
+      "deep": "(1) Schemas: sources read main_main where seeds land while the loader writes main (see the schema card). (2) Night two: load_raw replaces raw_alerts each night but raw_predictions accumulates, so night one predictions point at candids no longer in stg_alerts; the relationships test fails, dbt build exits non zero, the marts that depend on both stg_alerts and stg_predictions (mart_classified_transients, mart_daily_alert_summary) are skipped, and Airflow never runs drift_monitor because its upstream task failed. (3) Freshness: declared, never executed. (4) Offsets: auto commit plus a 50 row buffer can lose alerts on a crash. (5) Features: unscaled tabular inputs into a model trained on standard normal data. (6) A stamp that fails to decode silently becomes a zero image with no counter. (7) Repeated prv_candidates rows inflate n_detections. (8) The dashboard formats object_id into SQL strings; values come from the warehouse, but parameterized queries are the right habit.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/dbt/models/staging/_sources.yml: schema: main_main",
+        "repo:ztf-transient-pipeline/warehouse/load_raw.py: con.execute(\"create or replace table raw_alerts as select * from alerts_df\")",
+        "repo:ztf-transient-pipeline/scoring/stream_scorer.py: con.execute(\"insert into raw_predictions select * from df\")",
+        "repo:ztf-transient-pipeline/dbt/models/staging/_staging.yml: to: ref('stg_alerts')",
+        "repo:ztf-transient-pipeline/dbt/models/staging/_sources.yml: warn_after: {count: 36, period: hour}",
+        "repo:ztf-transient-pipeline/scoring/stream_scorer.py: s.add_argument(\"--batch-size\", type=int, default=50)",
+        "repo:ztf-transient-pipeline/dashboards/app.py: \"where object_id = '{}' order by jd\".format(obj)"
+      ],
+      "sources": [
+        "https://docs.getdbt.com/reference/commands/build",
+        "https://docs.getdbt.com/docs/deploy/source-freshness"
+      ],
+      "tags": [
+        "production readiness",
+        "failure modes"
+      ]
+    },
+    {
+      "id": "ztf-52",
+      "type": "case",
+      "level": 3,
+      "q": "What changes at 10x and 100x scale?",
+      "easy": "At ten times, one machine still copes if inference is batched and the warehouse write is fixed. At a hundred times, which is roughly the full survey stream, you need parallel consumers, a real warehouse, and a model server.",
+      "deep": "Baseline: the write up's run is one public night of 27,378 packets on one node; the survey produces over a million a night. 10x (around 270,000 a night): the per packet model.predict call in score_packet becomes the bottleneck, so batch packets into one predict call per buffer; load_raw holds everything in pandas, so stream to parquet in chunks; DuckDB still fits on one disk. 100x (survey scale): ztf.alerts.raw needs many partitions keyed by objectId and a consumer group of scorers, one per partition; predictions go to object storage or a cloud warehouse (BigQuery or Snowflake) with merge on candid; DuckDB's single writer lock rules it out as the shared store; raw tables become append only and partitioned by night instead of replaced; inference moves to a GPU or a dedicated model server with dynamic batching; freshness and drift become alerting, not JSON files; and the per message schema repetition argues for a registry on any internal topics.",
+      "evidence": [
+        "portfolio: I ran the pipeline against a real night of the survey: 27,378 Avro alert packets extracted from July 20, 2026.",
+        "portfolio: The Zwicky Transient Facility (ZTF) streams over a million optical alerts per night as Avro packets over Kafka.",
+        "portfolio: Everything runs single node under Docker Compose, not at production survey volume."
+      ],
+      "sources": [],
+      "tags": [
+        "scale",
+        "system design"
+      ]
+    },
+    {
+      "id": "ztf-53",
+      "type": "case",
+      "level": 2,
+      "q": "What would you build next?",
+      "easy": "Make the warehouse correct across many nights, train a real model on broker labeled cutouts with an honest baseline, then switch to the live broker once the IP is allowed.",
+      "deep": "In order: (1) multi night correctness: one schema variable shared by loader and sources, raw alerts appended with a night partition, history deduped on (object_id, jd, fid), dbt source freshness as a DAG step before dbt build, and seeds excluded in production; (2) a real training set from BTS or community broker labels, object level splits, class weights, per class PR curves, a drb threshold baseline the CNN must beat, and an image only versus tabular only ablation; (3) exactly once into the warehouse, either offsets stored in the same DuckDB transaction as the predictions or manual commit after the write plus a MERGE on candid; (4) messages keyed by objectId with more partitions; (5) drift on inputs as well as outputs, keyed by observation night with a trailing baseline; (6) the two BigQuery macros, then a CI job against a cloud target; (7) live Tier B consumption.",
+      "evidence": [
+        "portfolio: live streaming from the survey broker needs an IP whitelist"
+      ],
+      "sources": [],
+      "tags": [
+        "roadmap",
+        "next steps"
+      ]
+    },
+    {
+      "id": "ztf-54",
+      "type": "pushback",
+      "level": 2,
+      "q": "You extracted 27,378 alerts but only scored 500. Why should I believe it scales?",
+      "easy": "You shouldn't take scale from this run, and the write up does not claim it. The 500 alert run shows every stage connects and every test passes on real data. Scale is a separate claim I have not measured.",
+      "deep": "Concede: 500 is under 2% of one public night, single node, and the batch scorer calls model.predict once per packet, so throughput was never benchmarked. The write up's own limitations section says the compute is trial scale under Docker Compose, not production survey volume. Defend: the run was a correctness check of the contracts between stages (decode, flatten, score, load, model, test), and those either hold or break regardless of row count; the dbt tests ran on real ZTF values, not the generated fixture. The scale plan is specific: batched inference, partitioned topics keyed by objectId, append only raw tables partitioned by night, and a cloud warehouse with merge on candid.",
+      "say": "I wouldn't claim scale from it. The 500 alert run proves the stages connect and the tests pass on real values, and my write up says the compute is trial scale. Throughput is a separate number I haven't measured. I know where it breaks first: one predict call per alert, and a single writer warehouse.",
+      "evidence": [
+        "portfolio: I ran the pipeline against a real night of the survey: 27,378 Avro alert packets extracted from July 20, 2026.",
+        "portfolio: Of those, 500 alerts were loaded, scored, and rebuilt through the warehouse.",
+        "portfolio: Everything runs single node under Docker Compose, not at production survey volume."
+      ],
+      "sources": [],
+      "tags": [
+        "scale",
+        "pushback"
+      ]
+    },
+    {
+      "id": "ztf-55",
+      "type": "how",
+      "level": 2,
+      "q": "What does the dashboard show, and how is it built?",
+      "easy": "A Streamlit page with three headline counts, a bar chart of predicted classes, nightly alert counts by band, and a lightcurve for any object you pick, all read from the dbt tables.",
+      "deep": "dashboards/app.py opens DuckDB read only per query through a cached helper (st.cache_data with a 60 second TTL). It reads mart_daily_alert_summary for alerts summarized, nights, and classes seen, a classification mix bar chart, and volume by date and band; it reads mart_classified_transients for the object picker and detail table, and int_object_lightcurves for the lightcurve (magpsf against jd, colored by band, with a caption that lower magnitude is brighter, since st.line_chart does not invert the axis). If the marts are missing it shows an error with the build command and stops. Two notes: it reads one intermediate view, so 'serving only from marts' is nearly but not fully true; and object_id is formatted into the SQL string, where a parameterized query would be safer.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/dashboards/app.py: @st.cache_data(ttl=60)",
+        "repo:ztf-transient-pipeline/dashboards/app.py: con = duckdb.connect(DUCKDB_PATH, read_only=True)",
+        "repo:ztf-transient-pipeline/dashboards/app.py: \"where object_id = '{}' order by jd\".format(obj)"
+      ],
+      "sources": [],
+      "tags": [
+        "streamlit",
+        "dashboard"
+      ]
+    },
+    {
+      "id": "ztf-56",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to me as if I were the hiring manager for a data engineering role.",
+      "easy": "A nightly pipeline over real telescope alerts, with a tested warehouse at the end. The data engineering is the result; the classifier is a stand in.",
+      "deep": "Lead with the contract: real Avro packets, Kafka replay, a DuckDB warehouse, dbt staging, intermediate, and mart layers with tests that fail the build on bad data, and Airflow running it in order. Then the numbers with their caveats, then the gaps found reading it back.",
+      "say": "I built a nightly pipeline over real astronomy data. It takes one night of alerts from the Zwicky Transient Facility, runs them through Kafka, scores them, and lands everything in a warehouse. dbt turns that into tested tables, and the build fails if an id goes missing or a detection gets scored by two models. I ran it on 27,378 real alerts. The warehouse contract is the strong part, and the classifier is a placeholder, which I say up front.",
+      "evidence": [
+        "portfolio: I ran the pipeline against a real night of the survey: 27,378 Avro alert packets extracted from July 20, 2026."
+      ],
+      "sources": [],
+      "tags": [
+        "narration",
+        "hiring manager"
+      ]
+    },
+    {
+      "id": "ztf-57",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain to a staff engineer how the pipeline handles reruns and duplicate messages.",
+      "easy": "Assume at least once delivery, append raw, deduplicate in staging, and let tests catch the operational failures. The known hole is offset commits racing the write buffer.",
+      "deep": "Producer and consumer are at least once. raw_predictions is append only. stg_predictions keeps the latest scored_at per candid, stg_alerts dedups on candid, and a singular test catches two model versions on one object in one day. The hole is auto commit with a write buffer; the fix is offsets stored transactionally with the rows or manual commits after the write.",
+      "say": "I assume Kafka gives me duplicates, so the scorer appends and staging keeps the latest score per detection id. A singular dbt test fails the build if one object gets two model versions in a day, which is how an overlapping deploy would show up. The weak spot is offsets. Auto commit with a 50 row buffer can drop alerts on a crash, so the next version commits offsets in the same transaction as the rows.",
+      "evidence": [
+        "repo:ztf-transient-pipeline/scoring/stream_scorer.py: s.add_argument(\"--batch-size\", type=int, default=50)",
+        "repo:ztf-transient-pipeline/dbt/models/staging/stg_predictions.sql: qualify row_number() over (partition by candid order by scored_at desc) = 1",
+        "repo:ztf-transient-pipeline/dbt/tests/assert_single_model_version_per_day.sql: having count(distinct model_version) > 1"
+      ],
+      "sources": [
+        "https://docs.confluent.io/kafka/design/delivery-semantics.html"
+      ],
+      "tags": [
+        "narration",
+        "idempotency",
+        "kafka"
+      ]
+    },
+    {
+      "id": "ztf-58",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the project to a product manager.",
+      "easy": "Astronomers need a short list of interesting new objects every morning and need to trust the counts. The system makes that list and checks the numbers automatically.",
+      "deep": "Frame it as two user needs: speed (candidates surfaced each night) and trust (counts that are checked). Name the honest gap: the ranking model is a placeholder, so the product today is the reliable data feed, and the next milestone is a trained model.",
+      "say": "Think of the telescope as a firehose of alerts, most of them noise. The product is a nightly feed that sorts those alerts and a dashboard whose numbers are checked automatically before anyone sees them. I ran it on one real night. The sorting model is a placeholder today, so what I'd ship first is the trustworthy data feed, and the next milestone is a trained model judged against a published one.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narration",
+        "pm"
+      ]
+    },
+    {
+      "id": "ztf-59",
+      "type": "narrate",
+      "level": 2,
+      "q": "Give the recruiter version in under a minute.",
+      "easy": "Tanay built a pipeline that takes real telescope data every night, scores it with a machine learning model, and stores it in a checked database. It covers machine learning, data engineering, and analytics engineering in one project.",
+      "deep": "Keep it to tools and one number: Kafka, Airflow, dbt, DuckDB, FastAPI, TensorFlow; 27,378 real alerts from one night; 21 automated data tests passing. One honest line on the model.",
+      "say": "I built a data pipeline over a real astronomy survey. Every night it pulls new alerts, scores them with a TensorFlow model, and loads them into a warehouse where dbt runs 21 automated checks. I tested it on 27,378 real alerts from one night. It uses Kafka, Airflow, dbt, and FastAPI, so it covers the ML, data engineering, and analytics engineering sides of the roles I'm applying for.",
+      "evidence": [
+        "portfolio: I ran the pipeline against a real night of the survey: 27,378 Avro alert packets extracted from July 20, 2026.",
+        "portfolio: The project ships with 21 data quality tests, source freshness checks, and generated lineage docs."
+      ],
+      "sources": [],
+      "tags": [
+        "narration",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "Confluent: Kafka message delivery semantics",
+      "url": "https://docs.confluent.io/kafka/design/delivery-semantics.html",
+      "why": "At most once, at least once, exactly once, the idempotent producer, and how offset commit order sets the guarantee."
+    },
+    {
+      "title": "librdkafka configuration properties",
+      "url": "https://github.com/confluentinc/librdkafka/blob/master/CONFIGURATION.md",
+      "why": "The defaults the scorer and producer inherit: auto commit every 5000 ms, offset store on poll, idempotence off, acks all."
+    },
+    {
+      "title": "Confluent: Schema evolution and compatibility",
+      "url": "https://docs.confluent.io/platform/current/schema-registry/fundamentals/schema-evolution.html",
+      "why": "Compatibility modes and the BACKWARD default, for the schema registry question."
+    },
+    {
+      "title": "dbt: Configure incremental models",
+      "url": "https://docs.getdbt.com/docs/build/incremental-models",
+      "why": "is_incremental(), {{ this }}, unique_key replacement, and what full refresh does."
+    },
+    {
+      "title": "dbt: Source freshness",
+      "url": "https://docs.getdbt.com/docs/deploy/source-freshness",
+      "why": "States that dbt build does not run freshness checks, which is why the rule here never fires."
+    },
+    {
+      "title": "dbt build command reference",
+      "url": "https://docs.getdbt.com/reference/commands/build",
+      "why": "What dbt build runs (seeds included) and how a failing test skips dependent nodes."
+    },
+    {
+      "title": "dbt-duckdb adapter README",
+      "url": "https://github.com/duckdb/dbt-duckdb",
+      "why": "Incremental strategies on DuckDB and how the database name comes from the file path."
+    },
+    {
+      "title": "Airflow: DAG runs",
+      "url": "https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dag-run.html",
+      "why": "Data intervals, logical date, catchup, and backfill behind the 14:00 nightly schedule."
+    },
+    {
+      "title": "FastAPI: Lifespan events",
+      "url": "https://fastapi.tiangolo.com/advanced/events/",
+      "why": "on_event is deprecated in favor of lifespan for loading a model once."
+    },
+    {
+      "title": "BTSbot (arXiv 2401.15167)",
+      "url": "https://arxiv.org/abs/2401.15167",
+      "why": "The published multimodal ZTF classifier the project frames itself against."
+    },
+    {
+      "title": "ListenData: Population Stability Index",
+      "url": "https://www.listendata.com/2015/05/population-stability-index.html",
+      "why": "The PSI formula, decile binning, and the 0.1 and 0.2 reading bands."
+    },
+    {
+      "title": "Yurdakul (2018): Statistical properties of PSI",
+      "url": "https://scholarworks.wmich.edu/dissertations/3208/",
+      "why": "Argues common PSI cutoffs ignore Type I and Type II error; good for the caveat."
+    },
+    {
+      "title": "Arize: Population Stability Index",
+      "url": "https://arize.com/blog-course/population-stability-index-psi/",
+      "why": "PSI as a symmetric KL divergence, binning, and setting thresholds from trailing production values."
+    },
+    {
+      "title": "BigQuery: Data types",
+      "url": "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/data-types",
+      "why": "INT64 aliases include BIGINT; FLOAT64 has no DOUBLE alias, which breaks one cast in staging."
+    },
+    {
+      "title": "BigQuery: Timestamp functions",
+      "url": "https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/timestamp_functions",
+      "why": "No TO_TIMESTAMP; TIMESTAMP_SECONDS and TIMESTAMP_MICROS take INT64."
+    },
+    {
+      "title": "Snowflake: TO_TIMESTAMP",
+      "url": "https://docs.snowflake.com/en/sql-reference/functions/to_timestamp",
+      "why": "A numeric argument is read as seconds since the epoch, so the staging SQL works there."
+    }
+  ]
+}
