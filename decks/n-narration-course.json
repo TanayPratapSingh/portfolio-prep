@@ -1,0 +1,1411 @@
+{
+  "deck_id": "n-narration-course",
+  "title": "How to narrate your work",
+  "group": "Narration",
+  "repo": "",
+  "summary_easy": "A course in talking about technical work out loud, built entirely from Tanay's own projects. It covers how long each answer should be, how to put numbers into spoken sentences, how to present results that reversed or vanished, and how to handle bugs, not knowing, pushback, AI tool questions and different audiences.",
+  "summary_deep": "The course is organised around an answer ladder of four nested rungs (10 second hook, 30 second pitch, 2 minute walkthrough, 5 minute deep dive) and two default shapes: Problem, Approach, Result, Lesson for technical questions and STAR for behavioral ones. Number handling rules (result first, one number per sentence, a comparator on every number, the caveat in the same sentence, verbs matched to evidence) are illustrated with Tanay's measured results, from HyperLogLog's 986.9 against 983 exact to JMA's 97.3% uptime beside 46.3% schedule attainment. Hard moments get explicit templates: reversed results (Dr. GRPO), vanished speedups (distributed ViT), bug stories (BEIR truncation, Groundwork's 0.444 threshold), 'I don't know', retrospectives, and a concede, evidence, boundary formula for pushback. Delivery cards cover signposting, branch offers, whiteboarding with rates and failure exits, audience switching, I versus we, honest answers about AI coding tools, transitions, endings without recaps, pacing, filler and stopping. Fifteen drills with model scripts and keypoints turn each technique into practice.",
+  "sheet": {
+    "easy": "## The answer ladder\n\n| Rung | Length | What it holds |\n|---|---|---|\n| Hook | 10 s, about 25 words | What you built or tested plus the surprising result |\n| Pitch | 30 s, 60 to 90 words | Hook, why it matters, approach, result with comparator, caveat |\n| Walkthrough | 2 min, about 280 words | Problem, setup, approach, result, what broke, next |\n| Deep dive | 5 min, 600 to 800 words | Exact claim, controls, mechanism, verification, results, anomaly, deviations |\n\nEach rung starts with the rung above it. Climb one rung at a time, on the part they reacted to.\n\n## Default shapes\n\n- Technical question: Problem, Approach, Result, Lesson.\n- 'Tell me about a time': STAR (Situation, Task, Action, Result), plus one line of lesson.\n- Keep the Situation short and spend half the time on Action.\n\n## Numbers\n\n- Lead with the result.\n- One number per sentence. A number and its comparator count as one.\n- Every number has a comparator: exact count, published value, matched baseline, target, or naive baseline.\n- The caveat goes in the same sentence as the number.\n- Verbs match evidence: measured, reproduced, not reproduced here, projected, simulated, upper bound.\n\n## Hard moments\n\n- Reversed result: score each claim, rule out the boring cause, credit what partly held, bound the claim.\n- Bug: symptom, ruled out, tell, cause, fix, generalisation.\n- I don't know: admit it, known facts, the experiment, a labelled guess.\n- Do differently: a decision you made and its cost. Do next: the experiment that most changes confidence.\n- Pushback: concede, evidence, boundary.\n- AI tools: what you delegated, how you verified, what you caught.\n\n## Delivery\n\n- Signpost the shape, then offer branches ('I can go into A or B') instead of 'does that make sense?'.\n- Whiteboard left to right, rates on arrows, exits marked.\n- 140 to 160 words a minute, pause before numbers.\n- End on a fact, a lesson, or a branch offer. No recap.\n- Stop early; they will ask for more.\n\n## Audience\n\n| Audience | Wants | Lead project |\n|---|---|---|\n| Recruiter | Fit, plain outcome, role words | JMA |\n| PM | Decision, user impact, tradeoff | Groundwork precision floor |\n| Hiring manager | Ownership and judgement | Distributed ViT diagnosis |\n| Staff engineer | Mechanism, alternatives, failure modes | Tool dependency graph |\n",
+    "deep": "## 1. The ladder in detail\n\n| Rung | Words | Beats | Example opening |\n|---|---|---|---|\n| Hook | 20 to 30 | object plus surprising result | 'I replicated Dr. GRPO on the paper's own model, data and grader: accuracy held, and both length claims came out reversed.' |\n| Pitch | 60 to 90 | hook, why it matters, mechanism, result with comparator, caveat | Wikipedia Edit Stream: HyperLogLog 986.9 against 983 exact, Count-Min barely stressed |\n| Walkthrough | 250 to 320 | problem, setup, approach, result, what broke, next | Distributed ViT: 1.96x fp32, 1.15x fp16, 1.92x synthetic, 4 vCPU host |\n| Deep dive | 600 to 800 | claim, controls, mechanism, verification, results, anomaly, deviations | Dr. GRPO: two flags, gradient tests, 0.004 nats, reversed lengths, one seed |\n\nMoving up: one rung, on the reacted part, then a branch offer. Moving down: delete setup, then tools, then supporting numbers; keep any caveat that changes the meaning.\n\n## 2. Shapes\n\n**Problem, Approach, Result, Lesson** (technical). Tool dependency graph: agents need opaque handles; schemas resolved to namespaced entities in a bipartite graph; 1,768 of 1,770 typed required inputs have a producer, beside the 65 percent denominator; all eight assertions started out failing.\n\n**STAR** (behavioral). JMA: two lines nobody could compare; project lead of four; definition interviews, sponsor approved document, pipeline; 97.3% uptime beside 46.3% attainment located the constraint upstream. Add the lesson: the finding came from definitions.\n\n## 3. Number bank with comparators and caveats\n\n| Project | Number and comparator | Caveat that travels with it |\n|---|---|---|\n| Wikipedia Edit Stream | HyperLogLog 986.9 vs 983 exact, inside a 1.6% one sigma bound | Short sessions exercise only the small range path; Count-Min barely collides |\n| Order book | 46,892 of 46,892 checksums verified | One venue, 100 levels |\n| Earthquake statistics | California b = 0.73, bootstrap [0.66, 0.85] | Pooled b of 0.34 reflects mixed magnitude scales |\n| Dr. GRPO | 51.6% vs 51.2% on MATH500, paired [-3.4, +4.0]; Dr. GRPO 99 tokens longer per step [77, 123] | One seed, 100 LoRA steps, 1024 token budget |\n| Tool dependency graph | 1,768 of 1,770 typed required inputs have a producer | 65 percent of all required inputs are typed handles |\n| Distributed ViT | 98% efficiency fp32 vs 57% fp16; 1.92x with no dataloader | Synthetic 96% is an upper bound |\n| ZTF | 27,378 real alerts; dbt 8 models, 21 tests | Archive replay; reference labels are model outputs |\n| Groundwork | BM25 recall@5 0.921 vs hybrid 0.853; ECE 0.045; declines 96.2% of unanswerable at a 60% precision floor | Offline extractive reader; hashing embedder |\n| BEIR | 6 of 6 cells; DPR 0.260 recovered to the published 0.318 | BM25 is a Python reimplementation, not Anserini |\n| JMA | 97.3% uptime vs 46.3% schedule attainment; ~$355K | Projection pending JMA Finance |\n| Gravity Spy | 0.89 validation AUC; ECE 0.10 to 0.05 | Agreement with volunteer labels |\n| Kp LSTM | 1 hour RMSE 0.738, 45% better than mean baseline | Skill falls with horizon |\n\n## 4. Calibrated verbs\n\n| Verb | Use for | Example |\n|---|---|---|\n| measured | run artifact on real data | 9,909 real edits in a 297 second run |\n| reproduced | match to a published value | BEIR, 6 of 6 |\n| not reproduced here | disagreement at smaller scale | Dr. GRPO, one seed |\n| projected | a model of the future | JMA ~$355K |\n| simulated, synthetic, mock | anything not real | handoff cluster, media-pulse corpus, comms-agent LLM |\n| upper bound | best case instrument reading | ViT synthetic input runs |\n\n## 5. Templates for hard moments\n\n**Reversed result.** Score each claim; rule out the boring cause (55 of 500 responses hit the cap in each arm); credit the partial (correct answers 262 vs 399 tokens); bound the claim (one seed, three in the paper).\n\n**Bug.** Symptom (0.260 vs 0.318), ruled out (TAS-B exact), tell (title only 0.261 vs full 0.260), cause (max_seq_length = 100), fix (512 tokens matches the paper), generalisation (chunks longer than the embedder's limit), why it hid (38.2 vs 1.1 judged documents per query).\n\n**Own bug.** The test that caught it and the class of mistake: Groundwork's 0.444 under a 0.5 threshold caught 0 of 60 attacks until a single pattern unit test.\n\n**I don't know.** Admission, known facts, the experiment, labelled guess. GRPO length collapse at steps 55 to 80 is unexplained; truncation similar in both arms.\n\n**Do differently versus next.** JMA: culture metric scoped late, no pipeline tests. ViT next: remove the host ceiling instead of inferring it.\n\n**Pushback.** Concede, evidence, boundary. One seed: concede variance and fp16 nondeterminism; evidence is pairing and the [77, 123] interval; boundary is steps and problems, not seeds. Hybrid: concede it usually wins (BEIR RRF beat both inputs); evidence 6.8 points worse with a hashing embedder; boundary is the flip condition in config.py.\n\n## 6. AI coding tools\n\n1. Delegated: implementation under written house rules in each repo's CLAUDE.md ('Never report a number the code did not measure', 'Never weaken a check to make something pass', 'Never add OnExpiry.ALLOW').\n2. Verified: the ViT documentation gate (five unsupported claims on first run), the inverse gradient test, eight hand written graph assertions that all started out failing.\n3. Caught: silent defaults (max_seq_length = 100), nearby question APIs (is_bf16_supported), cross module thresholds (0.444 vs 0.5), unfailable tests.\n\n## 7. Whiteboarding\n\nOrder: source with rate and format, main path, second plane, orchestration and monitoring, failure exits. Rates to quote: Wikimedia 26 to 36 events a second; Kraken about 142 book updates a second; JMA 31 GB nested JSON to under 5 MB. Groundwork exits: input rail, retrieval empty, context rail, gateway 401/402/429, output rail, calibrated decision.\n\n## 8. Audience map\n\n| Audience | Listens for | Project | Line to land |\n|---|---|---|---|\n| Recruiter | role words, plain outcome | JMA | 'The automated line was waiting on materials rather than breaking down.' |\n| PM | decision and cost | Groundwork | 'At a 60% precision floor it declines 96.2% of unanswerable questions and answers 7.5% of answerable ones.' |\n| Hiring manager | judgement without supervision | Distributed ViT | 'One experiment instead of a week tuning NCCL.' |\n| Staff engineer | alternatives and failure modes | Tool dependency graph | 'Producers plus consumers instead of producers times consumers.' |\n\n## 9. Transitions\n\nShopFloor AI to ZTF (closes its three listed gaps); comms-agent to handoff (what happens when the reviewer does not show up); Kp LSTM to Space Weather Nowcast (the live input side of a model trained on clean history).\n\n## 10. Self grading checklist\n\n- Result in the first sentence.\n- One number per sentence, each with a comparator.\n- Caveat beside its number; verb matches evidence.\n- 'I' for your actions, 'we' for shared outcomes.\n- A branch offer or a fact at the end; no recap.\n- Under two fillers a minute; 140 to 160 words a minute.\n"
+  },
+  "narration": [
+    {
+      "kind": "drill",
+      "prompt": "Drill: say the BEIR headline in one sentence with a comparator, then the caveat sentence, then the number if asked.",
+      "script": "I rebuilt the central BEIR experiment and reproduced six of six published cells, and the one that first disagreed exposed a silent truncation default. The caveat is that my BM25 is a Python reimplementation rather than Anserini, which is the likely source of the only two inexact cells. If you want the number: DPR on SciFact came in at 0.260 against a published 0.318. Raising the encoder's token limit from 100 to 512 brought it to the published value.",
+      "keypoints": [
+        "Headline in one sentence, with 'six of six published' as the comparator",
+        "Caveat names the deviation (BM25 not Anserini) and what it costs",
+        "Number given only on request, with the published value beside it",
+        "No more than one number per sentence",
+        "Ends on the fix, without a recap"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: give the Wikipedia Edit Stream hook in 10 seconds. The interviewer says 'go on'. Give the 30 second pitch.",
+      "script": "Hook: I ran three streaming sketches beside exact counters on Wikipedia's live edit stream, to watch their error bounds hold on real traffic. Pitch, after 'go on': sketches like HyperLogLog promise a bounded error, and people usually take that on faith. Mine run in the browser on the public stream, with an exact counter on the same events. HyperLogLog estimated 986.9 distinct editors against an exact 983. That's well inside its one sigma bound of 1.6%. The honest caveat is that Count-Min barely collides with about a hundred wikis, so its bound is shown but hardly stressed. I can go deeper on the sketch math or on the stream handling.",
+      "keypoints": [
+        "Hook is one sentence with no tool list",
+        "Pitch opens by continuing the hook, not restarting",
+        "986.9 against 983 exact, then the bound in its own sentence",
+        "States the Count-Min caveat unprompted",
+        "Ends with a branch offer"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: present the Dr. GRPO replication as a strength in under 45 seconds.",
+      "script": "I replicated Dr. GRPO on the paper's own model, data and grader, with the two arms differing in exactly two flags. One claim held and two reversed. Accuracy held: 51.6% against 51.2% on MATH500, with a paired interval spanning zero. The length claims went the other way, and Dr. GRPO's wrong answers were longer, not shorter. Truncation doesn't explain it, because each arm hit the cap equally often. Half the mechanism did show up, since GRPO's correct answers got shorter. It's one seed, so I report it as not reproduced here, and I'd want the paper's three seeds before saying refuted.",
+      "keypoints": [
+        "Scores each claim separately",
+        "Names the control: two flags differ, everything else paired",
+        "Rules out truncation before interpreting",
+        "Credits the half of the mechanism that did appear",
+        "Bounds the claim: one seed, not reproduced here, never refuted"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: explain the vanished ViT speedup to a hiring manager in 60 seconds, with no jargon beyond 'GPU'.",
+      "script": "I tested whether splitting training across two GPUs really doubles speed. In standard precision it almost did, 1.96 times faster. Then I switched on a faster number format that makes each GPU roughly twice as quick, and the speedup collapsed to 1.15 times. The obvious suspect was the network between the GPUs, and tuning that could have eaten a week. Instead I ran one experiment that fed the GPUs data straight from memory, skipping the data loading step. With that, two GPUs scaled almost perfectly again. So the machine's CPU, with only four cores, couldn't prepare images fast enough for two fast GPUs. The decision that mattered was running the one experiment that separated the two suspects before tuning anything.",
+      "keypoints": [
+        "Plain words for fp16 and dataloader",
+        "Good number, then bad number, each in its own sentence",
+        "Names the tempting wrong fix and its cost",
+        "One isolating experiment, not trial and error",
+        "Ends on the judgement call, not a recap"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: tell the BEIR truncation bug in five beats: symptom, ruled out, tell, cause, generalisation.",
+      "script": "Symptom: DPR on SciFact scored 0.260 against a published 0.318, too big a gap for rounding. Ruled out: TAS-B had reproduced exactly on both datasets, so the loader and the metrics were fine, which left something about how DPR reads a document. Tell: searching with only the title scored about the same as title plus the full abstract, and that only happens if the body is being discarded. Cause: the sentence-transformers port of the DPR context encoder ships with a 100 token limit, with no warning. Generalisation: any retrieval system whose chunks are longer than its embedder's configured limit has the same silent loss, and the other dataset in my run absorbed the damage so well that it would have hidden the bug on its own.",
+      "keypoints": [
+        "Symptom with the published comparator",
+        "Explicitly clears the shared code path using TAS-B",
+        "The tell is the title only result, explained",
+        "Root cause is a named default with no error or warning",
+        "Generalises to production RAG chunking",
+        "Mentions why NFCorpus hid it"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: the interviewer says 'One seed is meaningless.' Answer with concede, evidence, boundary.",
+      "script": "Concede: you're right that one seed can't separate the effect from seed variance, and fp16 on a GPU isn't bit reproducible, so two identical runs drift apart after the first update. Evidence: the comparison is paired, on the same training questions every step and the same eval problems at the end. The per step length gap has a bootstrap interval of 77 to 123 tokens. Boundary: that interval covers steps and problems, not seeds. So I claim not reproduced at this scale, and I'd need the paper's three seeds before calling it anything stronger.",
+      "keypoints": [
+        "Concedes first and specifically (seed variance, fp16 nondeterminism)",
+        "Evidence the critic may not know: pairing and the interval",
+        "States what the interval does not cover",
+        "Neither collapses nor digs in",
+        "One number per sentence"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: 'What would you do differently on the JMA project?' Give two decisions and their costs.",
+      "script": "Two decisions. First, I scoped the Culture and Engagement metric late. The instrument is built and wired into the dashboard, but the first survey slipped past the engagement, so it's the only KPI with no baseline. Next time it goes into the field during Define. Second, I didn't write unit tests for the Python pipeline. It's correct today, but the only thing between an upstream schema change and a silently wrong dashboard is an analyst noticing. A handful of assertions on the schema would have removed that dependency before handover.",
+      "keypoints": [
+        "Names decisions, not circumstances",
+        "States the cost of each",
+        "Gives the specific fix for each",
+        "Keeps it to two items",
+        "No defensive framing"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: 'Why did GRPO's response length collapse between steps 55 and 80?' Practise an honest I don't know.",
+      "script": "I don't know, and my write up lists it as unexplained. What I do know is that truncation during training was similar in both arms, so the token cap isn't the obvious cause. To find out, I'd split per step length into correct and wrong responses across that window, next to reward and format rate. My guess, labelled as a guess, is that GRPO's pressure toward short correct answers dominates once enough answers are correct, because its correct answers did end up much shorter than Dr. GRPO's.",
+      "keypoints": [
+        "Admits it in the first sentence",
+        "Gives the known fact that rules out the obvious cause",
+        "Names the concrete experiment",
+        "Labels the hypothesis as a guess",
+        "Grounds the guess in a measured result"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: whiteboard Groundwork's request path in 90 seconds, naming every exit.",
+      "script": "I'll draw the question coming in on the left. First box, the input rail: injection, jailbreak, length and PII checks, with an exit arrow labelled blocked. Second, retrieval: BM25 by default with optional dense and fusion, and an exit for nothing found. Third, the context rail, which scans retrieved passages for payloads and drops them. It uses only the pattern detector, because the trained classifier fired on every clean encyclopaedia passage. Fourth, the gateway: auth, budget, cache, routing and retries, with exits for bad keys, spent budgets and rate limits, and every call metered. Fifth, the output rail: citations, groundedness and PII egress, with an exit to abstain. Last, the decision box, where calibrated confidence meets a threshold. That exit matters most, because an answer can pass every safety check and still not be confident enough to assert. On the right, the answer leaves with citations and a confidence.",
+      "keypoints": [
+        "Draws left to right in request order",
+        "Every stage has a labelled exit",
+        "Explains why the context rail uses patterns only",
+        "Gateway exits named with status codes",
+        "Lands on safe versus confident as the key idea",
+        "Talks while drawing, one sentence per box"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: explain the JMA finding twice, first to a PM, then to a staff engineer.",
+      "script": "To a PM: the automated line looked healthy, running almost all the time, yet it delivered less than half of its weekly plan. A machine that runs constantly and still misses plan is waiting on inputs, so the fix belongs upstream in how materials are kitted, not in the machine. The manual line was covering the gap by running over its own target, which hid the real demand from planning. To a staff engineer: the cell's uptime was 97.3%. Its schedule attainment was 46.3%, and those can't both describe an equipment constraint. The comparison only existed after we fixed one formula per KPI across both lines and I flattened the cell's nested PLC JSON into one typed row per test event. A fishbone put the causes in method, material and measurement: kitting batches sized for the manual line, batched connector subassemblies, and a commissioning era target.",
+      "keypoints": [
+        "PM version has no percentages and states the decision",
+        "PM version mentions the hidden demand signal",
+        "Engineer version gives each number its own sentence",
+        "Engineer version credits the definitions and the pipeline",
+        "Engineer version names the fishbone causes"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: transition from the Kp LSTM to Space Weather Nowcast in two sentences, then give the nowcast hook.",
+      "script": "My Kp forecaster trained on clean hourly history from NASA's OMNI2 dataset, and clean history is the easy part. A model like that would run on live feeds from several spacecraft with gaps, revisions and instrument switches, so I built that input side next. The hook: my dashboard joins nine NOAA feeds on time and propagates the solar wind from L1 to Earth using the active spacecraft's real position. In one run the active spacecraft sat 1.58 million kilometres sunward. The wind it measured was due at Earth 73.5 minutes later.",
+      "keypoints": [
+        "Bridge names the limitation of the first project",
+        "Second project framed as the fix for that limitation",
+        "Hook is concrete and physical",
+        "One number per sentence"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: 'Did you use AI tools to build this?' Answer in under 45 seconds: delegated, verified, caught.",
+      "script": "Yes, I use Claude Code. My repos keep a working context file with house rules for it, like never report a number the code didn't measure and never weaken a check to make something pass. I verify with checks that don't trust the author. On the ViT project a gate fails the build if any documented number doesn't trace to a run artifact, and it found five unsupported claims the first time. What I catch are errors that read as correct, like a library default that silently truncated documents, or a detector score that sat just under its threshold.",
+      "keypoints": [
+        "Says yes in the first sentence",
+        "Delegation is under written rules",
+        "Verification is mechanical, not trust",
+        "One concrete verification result",
+        "Examples of errors that read as correct"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: tie the tool dependency graph to an agent startup's problem and end with a question for them.",
+      "script": "Agents fail on tool calls for a boring reason: the call needs an argument like a thread id that only an earlier call returns. I built a graph from 1,391 tool schemas that says which tools have to run first and which arguments genuinely have to come from a person. The part that transfers is namespacing: generic names like id collide across services, so name matching wires a mail client to a source control API. How does your agent decide today whether to call another tool or ask the user?",
+      "keypoints": [
+        "Opens with their users' failure, not your project",
+        "One number only",
+        "Names the transferable mechanism",
+        "Ends on a specific question about their system"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: the interviewer says 'we have one minute left'. Compress the distributed ViT walkthrough to 20 seconds.",
+      "script": "Short version: two GPUs scaled at 98% efficiency in fp32 and dropped to 57% in fp16. One experiment with the dataloader removed brought it back near perfect, so the cause was a 4 core host that couldn't feed faster GPUs, not the network. Scaling efficiency turned out to depend on the ratio of accelerator speed to host speed.",
+      "keypoints": [
+        "Drops setup and tools entirely",
+        "Keeps the contrast and the isolating experiment",
+        "Ends on the lesson",
+        "Does not talk faster to fit"
+      ]
+    },
+    {
+      "kind": "drill",
+      "prompt": "Drill: give the order book 30 second pitch, then signpost two branches and stop.",
+      "script": "Every trading system starts from a local copy of the order book, and the classic failure is silent drift: miss one update and every number downstream is quietly wrong. I rebuild Kraken's book in the browser and verify it against the exchange's checksum on every message. In the final run, all 46,892 checksums matched. Only on top of a verified book do I compute order flow imbalance, microprice and realized volatility. I can go into the checksum formatting trap that fails every check if you print one digit wrong, or into the volatility result that went the opposite way from textbook noise.",
+      "keypoints": [
+        "Problem stated in plain words first",
+        "Mechanism in one sentence",
+        "One result with its comparator (all of them)",
+        "Two named branches, then stops"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "nc-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is the answer ladder, and why should every lead project have four rungs ready?",
+      "easy": "Prepare each lead project at four lengths: a 10 second hook, a 30 second pitch, a 2 minute walkthrough, and a 5 minute deep dive. Answer on the rung the question asks for and move only when the interviewer pulls.",
+      "deep": "Questions arrive at different zoom levels. 'What's this on your resume?' wants the hook, 'Tell me about a project' wants the pitch, 'Walk me through it' wants the walkthrough, and a technical round's 'How does it work?' wants the deep dive. Each rung contains the one above it: the hook is the first sentence of the pitch, and the pitch is the first paragraph of the walkthrough. That nesting makes movement cheap, because going up means continuing and going down means stopping early. Rough budgets at 140 to 160 spoken words a minute: hook 20 to 30 words, pitch 60 to 90, walkthrough 250 to 320, deep dive 600 to 800. Tanay needs the full ladder only for the six to eight projects that lead for the target role (BEIR, Groundwork, Dr. GRPO, JMA, Gravity Spy, distributed ViT, tool dependency graph, handoff); the rest need a hook and a pitch.",
+      "say": "For each lead project I keep four lengths ready. The hook for BEIR is one line: I reproduced six of six published cells, and the one that first disagreed exposed a silent truncation bug. If you want more, that sentence becomes the opening of the 30 second version.",
+      "evidence": [
+        "portfolio: 6 of 6 published cells reproduced",
+        "portfolio: BADGE: 6 of 6 published cells reproduced / 4 exact / silent truncation bug found and fixed"
+      ],
+      "sources": [],
+      "tags": [
+        "answer-ladder",
+        "structure"
+      ]
+    },
+    {
+      "id": "nc-02",
+      "type": "how",
+      "level": 1,
+      "q": "How do I write a 10 second hook for a project?",
+      "easy": "One sentence: what you built or tested, plus the single most surprising result. No setup and no list of tools.",
+      "deep": "The hook answers 'what is it, and why should I care' in about 25 words. Template: '[I built / I reproduced / I led] [object], and [the one result that makes an engineer ask a follow up].' The result to pick is the surprising one, which is often a negative result or a bug. Weak: 'I built a Dr. GRPO replication with PyTorch, LoRA and vLLM on Kaggle.' Strong: 'I replicated Dr. GRPO on the paper's own model, data and grader: accuracy held, and both length claims came out reversed.' Tools belong in the walkthrough. Test a hook by whether it invites exactly one follow up ('reversed how?'), because that follow up is answered by the 30 second pitch you already have.",
+      "say": "I replicated the Dr. GRPO paper on its own model, data and grader. Accuracy held, and both of its length claims came out reversed.",
+      "evidence": [
+        "portfolio: BADGE: 51.6% vs 51.2% on MATH500 / both length claims reversed / 1 seed, 100 steps"
+      ],
+      "sources": [],
+      "tags": [
+        "answer-ladder",
+        "hook",
+        "dr-grpo"
+      ]
+    },
+    {
+      "id": "nc-03",
+      "type": "how",
+      "level": 1,
+      "q": "How do I grow the hook into a 30 second pitch?",
+      "easy": "Hook, then one sentence each for why it matters, what you did, the result with its comparator, and the caveat. Then stop.",
+      "deep": "Five sentences, 60 to 90 words. (1) The hook. (2) Why the problem matters, in plain words. (3) The approach, as one mechanism. (4) The result with its comparator. (5) The caveat or the lesson. Wikipedia Edit Stream filled in: streaming sketches come with error bounds that people take on faith; Tanay ran each sketch beside an exact counter on the same live events; HyperLogLog estimated 986.9 distinct editors against an exact 983, inside its one sigma bound of 1.6%; Count-Min barely collides with about 100 wikis in 1,024 columns, so its bound is shown but hardly stressed. The caveat sentence separates a pitch from marketing, and it answers the sharpest follow up before anyone asks it.",
+      "say": "Streaming sketches come with error bounds that people usually take on faith. I ran three of them beside exact counters on Wikipedia's live edit stream, in the browser. HyperLogLog estimated 986.9 distinct editors against an exact 983. That's inside its one sigma bound of 1.6%. The honest caveat is that Count-Min barely collides at this volume, so its bound is shown but hardly stressed.",
+      "evidence": [
+        "portfolio: HyperLogLog estimated 986.9 distinct editors against an exact 983, an error of +0.4% against a one sigma bound of 1.6%.",
+        "portfolio: Count-Min barely collides here. About 100 wikis in 1,024 columns rarely share a cell, so the bound is shown but hardly stressed.",
+        "portfolio: I wanted to watch those promises hold on real traffic instead of taking them on faith"
+      ],
+      "sources": [],
+      "tags": [
+        "answer-ladder",
+        "pitch",
+        "wikipedia-edit-stream"
+      ]
+    },
+    {
+      "id": "nc-04",
+      "type": "how",
+      "level": 1,
+      "q": "What goes into the 2 minute walkthrough?",
+      "easy": "The pitch, expanded into six beats: problem, setup, approach, result, what broke, and what you would do next. About 280 words.",
+      "deep": "Roughly 20 seconds per beat. Problem: why anyone should care. Setup: data or hardware, with one quirk. Approach: the one or two mechanisms that matter, named. Result: the headline number with its comparator, then at most one supporting number. What broke: the bug or the wrong prediction, usually the most memorable part. Next: one concrete step. Distributed ViT filled in: distributed speedups are usually unverifiable; 2x Tesla T4 with a gradient equivalence test before any timing; DDP scaled 1.96x in fp32; the identical config in fp16 fell to 1.15x; a synthetic input mode with no dataloader scaled at 1.92x, which cleared the collective and pointed at a 4 vCPU host; next is confirming that by removing the ceiling instead of inferring it. Drop tool names unless they carry meaning.",
+      "say": "This project tests a distributed training speedup instead of just claiming one. Before timing anything, I checked that two ranks compute the same gradient as one rank with double the batch. On two T4s in fp32, DDP scaled at 1.96x. Then I turned on mixed precision and the same setup fell to 1.15x. I ran a synthetic input mode with no dataloader, and the collective scaled at 1.92x. So communication was fine, and the artifacts showed a host with 4 CPU cores that couldn't feed two faster GPUs. Next I'd confirm that on a machine with more cores instead of inferring it.",
+      "evidence": [
+        "portfolio: 2x Tesla T4, NCCL",
+        "portfolio: DDP in fp32: 1.96x at 98% efficiency",
+        "portfolio: identical config in fp16: 1.15x at 57%",
+        "portfolio: With no dataloader the same configuration scales at 1.92x, 96% efficiency.",
+        "portfolio: The artifacts record cpu_cores: 4.",
+        "repo:distributed-vit-cifar10/CLAUDE.md: 1. Confirm the diagnosis by removing the ceiling rather than inferring it."
+      ],
+      "sources": [],
+      "tags": [
+        "answer-ladder",
+        "walkthrough",
+        "distributed-vit"
+      ]
+    },
+    {
+      "id": "nc-05",
+      "type": "how",
+      "level": 2,
+      "q": "What does a 5 minute deep dive add that the walkthrough does not?",
+      "easy": "Mechanism and evidence: the exact claim, what was held fixed, the one equation or design choice that matters, how correctness was checked, and how far the result generalises.",
+      "deep": "Seven parts, with a pause after each so the interviewer can steer. (1) Restate the claim precisely. (2) Setup and what was held fixed. (3) The mechanism at whiteboard level, with the one equation that matters. (4) How correctness was verified before results were trusted. (5) Results with intervals. (6) The anomaly and what it taught. (7) Deviations from the reference. Dr. GRPO filled in: the claim is that GRPO's 1/|o| normaliser and per question std division inflate wrong answer length; the two configs differ in exactly two flags; the per token gradient is tested to be exactly -A/|o| under GRPO and -A/budget under Dr. GRPO, and sampler and learner log probabilities never differed by more than 0.004 nats in a step; accuracy 51.6% against 51.2% with a paired interval of [-3.4, +4.0]; both length claims reversed; the anomaly is that GRPO's correct answers did shrink (262 against 399 tokens), so half the mechanism appeared; the deviations are one seed, 100 LoRA steps, and a 1024 token budget.",
+      "say": "The claim is precise: dividing each response's loss by its own length should make wrong answers grow. My two runs differ in exactly two flags. Before trusting anything, I tested that the per token gradient is exactly minus A over the length under GRPO. Accuracy held, 51.6% against 51.2%. The length result reversed, but half the mechanism did show up: GRPO's correct answers got shorter, 262 tokens against 399. I can go into the deviations from the paper next, or the verification.",
+      "evidence": [
+        "portfolio: The two run configs differ in exactly two flags: std_norm and length_norm are on for GRPO and off for Dr. GRPO.",
+        "portfolio: The per token gradient is exactly -A/|o| under GRPO and -A/budget under Dr. GRPO, tested in both the MLX and the PyTorch version of the loss.",
+        "portfolio: never differed by more than 0.004 nats in a step",
+        "portfolio: MATH500: Dr. GRPO 51.6% vs GRPO 51.2%, paired +0.4 points [-3.4, +4.0]",
+        "portfolio: The first side appears clearly, with GRPO's correct answers at 262 tokens against 399 for Dr. GRPO.",
+        "portfolio: 1 seed, 100 steps, 500 paired eval problems",
+        "portfolio: 55 of 500 final responses hit the 1024 token cap in each arm"
+      ],
+      "sources": [],
+      "tags": [
+        "answer-ladder",
+        "deep-dive",
+        "dr-grpo"
+      ]
+    },
+    {
+      "id": "nc-06",
+      "type": "how",
+      "level": 1,
+      "q": "The interviewer says 'tell me more'. How far up the ladder do I climb?",
+      "easy": "One rung, on the part they reacted to. Then offer two named branches.",
+      "deep": "'Tell me more' is ambiguous, so resolve it by what they reacted to: a number means expand the measurement, a bug means expand the diagnosis. Climb one rung (60 to 90 seconds), then offer a choice. Jumping to the 5 minute version buries the part they cared about under setup they did not ask for. After the BEIR hook, 'tell me more about the bug' gets symptom, tell, cause and fix in four sentences: DPR on SciFact at 0.260 against a published 0.318; title only search scored 0.261 against title plus text at 0.260; the encoder port ships with max_seq_length = 100; at 512 tokens it matches the paper. Then: 'I can go into why NFCorpus hid it, or how this shows up in production RAG.'",
+      "say": "Sure, the bug. DPR on SciFact came in at 0.260 against a published 0.318. The tell was that title only search scored the same as title plus abstract, which only happens if the body is being thrown away. The encoder port ships with a 100 token limit. Raising it to 512 matches the paper exactly. I can go into why the other dataset hid it, or how the same thing bites production RAG.",
+      "evidence": [
+        "portfolio: DPR on SciFact came in at 0.260 against a published 0.318. Not a rounding difference.",
+        "portfolio: The tell was that searching with only the title scored 0.261 against title plus full text at 0.260.",
+        "portfolio: The sentence-transformers port of the DPR context encoder ships with max_seq_length = 100, so every abstract was cut off after roughly its first paragraph. No error, no warning, no sign of it in the output.",
+        "repo:beir-replication/README.md: At 512 tokens it matches the paper exactly on both metrics."
+      ],
+      "sources": [],
+      "tags": [
+        "answer-ladder",
+        "beir"
+      ]
+    },
+    {
+      "id": "nc-07",
+      "type": "how",
+      "level": 1,
+      "q": "The interviewer says 'we only have a minute'. How do I compress mid answer?",
+      "easy": "Jump to the result and the lesson, and delete the setup. Never compress by talking faster.",
+      "deep": "Compression keeps the top of each nested rung: hook, result, lesson. Cut in this order: chronology and tools, then supporting numbers, then caveats, except the one caveat that changes the meaning (a projection label, a single seed, synthetic data). Practise by taking a written 2 minute walkthrough and striking every sentence that is neither a result nor a load bearing caveat. JMA compressed to about 20 seconds: once both lines used the same definitions, the automated cell showed 97.3% uptime and only 46.3% of its weekly target, which placed the constraint upstream in kitting. If one more sentence fits, add the measured pilot: time from a red KPI to a named owner acting fell from about 4 hours to about 25 minutes.",
+      "say": "Short version. Once both lines were measured the same way, the automated cell ran at 97.3% uptime. It still hit only 46.3% of its weekly target. A machine that runs that much and misses plan by half is starved, so the constraint was kitting upstream.",
+      "evidence": [
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem.",
+        "portfolio: Median time from a KPI going red to a named owner taking the first action fell from about 4 hours to about 25 minutes"
+      ],
+      "sources": [],
+      "tags": [
+        "answer-ladder",
+        "compression",
+        "jma"
+      ]
+    },
+    {
+      "id": "nc-08",
+      "type": "concept",
+      "level": 1,
+      "q": "What is Problem, Approach, Result, Lesson, and why is it the default shape for a technical project?",
+      "easy": "Problem: what was broken or unknown. Approach: what you did and why that way. Result: what happened, with a number and comparator. Lesson: what you know now that you did not before.",
+      "deep": "The four beats match how engineers judge work: was the problem real, was the approach sound against the alternatives, is the result measured against something, and did the person learn something transferable. Lesson is the beat most candidates skip and the one that shows judgement. Tool dependency graph filled in. Problem: agents fail tool calls when they need an opaque handle such as thread_id that only an earlier call returns. Approach: derive which tools must run first from 1,391 tool schemas, resolving handles to namespaced entities and drawing a bipartite graph of tools and entities. Result: 1,768 of 1,770 typed required inputs have a producer, reported beside the honest denominator that 65 percent of all required inputs are typed handles. Lesson: all eight hand written assertions started out failing, and the four real bugs they exposed were invisible from reading the code. In a walkthrough, keep each beat to two or three sentences.",
+      "say": "The problem is that agents call tools with arguments they can't produce, like a thread id that only a listing call returns. I derived which tools must run first from 1,391 tool schemas, as a graph of tools and typed entities. Of the 1,770 required inputs that resolve to an entity, 1,768 have a producer. The lesson was that all eight of my assertions started out failing, and none of the four real bugs were visible from reading the code.",
+      "evidence": [
+        "portfolio: 1,391 tools across two large toolkits",
+        "portfolio: Of 2,728 required inputs across the catalog, 1,770 resolve to a typed entity, and 1,768 of those have at least one tool that can supply them.",
+        "portfolio: The honest version is that 65 percent of required inputs are typed handles and almost all of those are satisfiable.",
+        "portfolio: Eight hand written assertions, run with one command. All eight pass now, and every one of them started out failing.",
+        "portfolio: None of the four were visible from reading the code."
+      ],
+      "sources": [],
+      "tags": [
+        "parl",
+        "structure",
+        "tool-dependency-graph"
+      ]
+    },
+    {
+      "id": "nc-09",
+      "type": "compare",
+      "level": 1,
+      "q": "When do I use STAR instead of Problem, Approach, Result, Lesson?",
+      "easy": "STAR (Situation, Task, Action, Result) is for 'tell me about a time' questions about people, pressure and judgement. Problem, Approach, Result, Lesson is for 'walk me through' questions about what you built. Add a one line lesson to STAR anyway.",
+      "deep": "Behavioral prompts are scored on context, ownership, the actions you personally took, and the outcome; technical prompts are scored on framing, technical choices, measurement and learning. The STAR Action beat is where a technical approach lives when a story has both. JMA as STAR: Situation, two lines nobody could compare because Uptime and Schedule Attainment meant different things to different functions; Task, Tanay was project lead of a four person team; Action, definition interviews across manufacturing, quality and production supervision, a sponsor approved document with one formula and one target per KPI, then the pipeline; Result, 97.3% uptime beside 46.3% schedule attainment located the constraint upstream of the machine. Lesson: the finding came from the definitions rather than the code. The common STAR failure is a long Situation, so hold it to two sentences and spend half the time on Action.",
+      "say": "For a behavioral question I use STAR, and I keep the situation to two sentences. At JMA the situation was two production lines nobody could compare, because Uptime meant different things to different teams. My task as project lead was to make them comparable. Most of my answer goes to the action: definition interviews, a sponsor approved document, then the pipeline. The result was that the automated cell showed 97.3% uptime. In the same weeks it hit only 46.3% of its target, which pointed upstream.",
+      "evidence": [
+        "portfolio: Before this project there was no way to compare them, because terms like Uptime and Schedule Attainment meant different things to different functions.",
+        "profile: Role Project lead, 4 person team",
+        "portfolio: The most important Define deliverable was a written, sponsor approved definition document: five KPIs, each with one agreed formula and one agreed target, confirmed by the sponsor before anything was built.",
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem."
+      ],
+      "sources": [],
+      "tags": [
+        "star",
+        "parl",
+        "behavioral",
+        "jma"
+      ]
+    },
+    {
+      "id": "nc-10",
+      "type": "how",
+      "level": 1,
+      "q": "How do I lead with the result instead of building up to it?",
+      "easy": "Say what happened in the first sentence, then explain how you got there. The listener can only follow reasoning if they know where it ends.",
+      "deep": "Chronological telling ('first I downloaded the data, then...') makes the listener hold every detail without knowing which ones matter. Result first gives a frame, and every later sentence becomes evidence for a claim already heard. Technique: write the last sentence of the story, move it to the front, and cut whatever does not support it. Groundwork, chronological: 'I built a RAG system on SQuAD v2, added BM25, then a dense retriever, then fused them...'. Groundwork, result first: 'My own evaluation removed hybrid retrieval: fusion was 6.8 points of recall@5 worse than BM25 alone, because the hashing embedder has no semantic generalisation.' Leading with the result also forces you to know what the result is, which is most of the preparation.",
+      "say": "The evaluation in Groundwork removed a feature I had built. Hybrid retrieval came out 6.8 points of recall at 5 worse than BM25 alone. The reason is that my offline embedder is a hashing bag of words with no semantic generalisation. So sparse is the default now, and the config records the condition under which that should flip.",
+      "evidence": [
+        "repo:Groundwork/README.md: default recommendation, and here it is 6.8 points of recall@5 *worse* than",
+        "repo:Groundwork/README.md: BM25 alone, because the hashing embedder has no semantic generalisation.",
+        "repo:Groundwork/README.md: condition under which the decision should flip.",
+        "portfolio: In all four, the measurement changed the system."
+      ],
+      "sources": [],
+      "tags": [
+        "result-first",
+        "groundwork"
+      ]
+    },
+    {
+      "id": "nc-11",
+      "type": "why",
+      "level": 2,
+      "q": "What if my result is small or negative? Should I still lead with it?",
+      "easy": "Yes. State it plainly and first, then say what it is evidence of. A negative result stated first sounds confident; one revealed at the end sounds like a confession.",
+      "deep": "Burying a weak result invites the interviewer to discover it, which costs more trust than stating it. State it, attach the comparator, and follow at once with what it taught. Project Mark: the task Tanay built did not stump frontier models; in repeated rollouts they decomposed the composite metric, ignored the decoy pre reads and reached the correct answer, and hardening the framing did not change that. The lesson is that the move that cracks the task sits inside a strong reasoner's default repertoire. Earthquake statistics: the first b-value test failed because its 95% interval [1.015, 1.070] missed the true b of 1; across 300 synthetic catalogs that interval covered the truth 93.7% of the time, so the fix was a coverage test requiring at least 16 of 20 catalogs to cover, rather than a looser threshold.",
+      "say": "The headline is that my trap didn't work. Frontier models rebuilt the analysis from the raw files and found the right lever anyway. Hardening the framing and adding more authoritative decoys didn't change that. It gave me a calibrated read on where these models are strong, and that's what I now design evaluations around.",
+      "evidence": [
+        "portfolio: It did not stump the models.",
+        "portfolio: Hardening the framing and adding more authoritative decoys did not change the outcome.",
+        "portfolio: That is a calibrated data point about where these systems are now strong, and it changed how I think about designing evaluations for them.",
+        "portfolio: My first b-value test failed. Its synthetic catalog had a true b of 1, and the 95% bootstrap interval came out [1.015, 1.070], missing it.",
+        "portfolio: across 300 synthetic catalogs this one covered the true value 93.7% of the time.",
+        "portfolio: a separate test requires at least 16 of 20 catalogs to cover the true value."
+      ],
+      "sources": [],
+      "tags": [
+        "negative-result",
+        "project-mark",
+        "earthquake"
+      ]
+    },
+    {
+      "id": "nc-12",
+      "type": "how",
+      "level": 1,
+      "q": "Why only one number per sentence when I speak?",
+      "easy": "Listeners cannot reread. Two numbers in one sentence compete, and the listener keeps neither. Give each number its own sentence; a number with its comparator counts as one.",
+      "deep": "On a page a table can carry ten numbers because the reader sets the pace; in speech a listener holds very few new quantities at once. Stacked numbers sound thorough and transmit nothing. Pick the number that carries the claim, say it alone, and let the next sentence explain it. '986.9 against 983 exact' is one unit, because the second number exists only to give the first meaning. Rewrite drill, Gravity Spy. Stacked: 'I parsed 276,000+ classifications for 25,104 subjects across 8,293 channels and got 0.89 AUC with ECE from 0.10 to 0.05.' Spoken: three sentences, one number each, and the subject and channel counts held back for the follow up. The same applies to the tool graph badge (1,391 tools, 46 entities, 3,278 edges): say one, keep two.",
+      "say": "I parsed more than 276,000 volunteer classifications. The model reaches 0.89 validation AUC on a held out set. Calibration mattered more for this use, and expected calibration error came down from 0.10 to 0.05.",
+      "evidence": [
+        "profile: Classifications parsed 276,000+",
+        "profile: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on",
+        "profile: a held out 2,000 subject set. Calibration matters more than the AUC here, and label smoothing,",
+        "profile: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05.",
+        "profile: covering 25,104 glitch subjects and 8,293 auxiliary detector channels, and filtering roughly 38",
+        "portfolio: BADGE: 1,391 tools / 46 typed entities / 3,278 edges / 8 of 8 assertions passing",
+        "portfolio: HyperLogLog estimated 986.9 distinct editors against an exact 983, an error of +0.4% against a one sigma bound of 1.6%."
+      ],
+      "sources": [],
+      "tags": [
+        "numbers",
+        "gravity-spy"
+      ]
+    },
+    {
+      "id": "nc-13",
+      "type": "how",
+      "level": 1,
+      "q": "Why does every number need a comparator, and which comparators are strongest?",
+      "easy": "A number alone means nothing. Say what it was measured against: an exact count, a published value, a matched baseline, a target, or a naive baseline.",
+      "deep": "'HyperLogLog estimated 986.9' is noise; '986.9 against an exact 983' is a result; adding 'inside its one sigma bound of 1.6%' makes it a passed test. Comparators from strongest to weakest: ground truth on the same data (986.9 against 983 exact); a published reference (DPR on SciFact recovered from 0.260 to the published 0.318); a matched baseline that differs in one property (DDP at 1.96x against one rank, both fp32); a target (46.3% of the weekly target); a naive baseline (Kp 1 hour RMSE 0.738, 45% better than predicting the mean). Weakest of all is a comparator chosen after seeing the result. If no honest comparator exists, say 'I didn't have a baseline for that' instead of inventing one. The comparator also tells the listener how to judge the number, which is why 0.89 AUC should travel with the calibration story.",
+      "say": "HyperLogLog estimated 986.9 distinct editors against an exact count of 983. That's an error of 0.4%. The one sigma bound for that register count is 1.6%, so it's well inside what the paper promises.",
+      "evidence": [
+        "portfolio: HyperLogLog 986.9 vs 983 exact distinct editors (+0.4%, one sigma bound 1.6%)",
+        "portfolio: DPR on SciFact recovered from 0.260 to a published 0.318",
+        "portfolio: DDP in fp32: 1.96x at 98% efficiency",
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem.",
+        "portfolio: 1h RMSE = 0.738 (45% better than baseline)",
+        "profile: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on"
+      ],
+      "sources": [],
+      "tags": [
+        "numbers",
+        "comparator",
+        "wikipedia-edit-stream"
+      ]
+    },
+    {
+      "id": "nc-14",
+      "type": "why",
+      "level": 2,
+      "q": "My project has twenty numbers. Which one do I say?",
+      "easy": "The one that carries the decision or the surprise. Then one number that explains it, and one control or caveat. Everything else waits for a follow up.",
+      "deep": "Rank numbers by what they change in the listener's belief. The distributed ViT results table has throughput for seven T4 configurations, peak memory and top-1 accuracy, yet one contrast carries the story: 98% scaling efficiency in fp32 against 57% in fp16 on identical hardware. The number that explains it is 1.92x with the dataloader removed. Accuracy (79.41% to 80.70% across the T4 configurations) is the control, raised only if someone asks whether precision changes hurt learning. A number that changes nobody's belief is decoration, and decoration costs listening time.",
+      "say": "The number I lead with is scaling efficiency, which fell from 98% in fp32 to 57% in fp16 on the same two GPUs. The one that explains it is 1.92x with the dataloader removed. Accuracy barely moved across configurations, and I only bring that up if someone asks whether precision hurt learning.",
+      "evidence": [
+        "portfolio: DDP in fp32: 1.96x at 98% efficiency",
+        "portfolio: identical config in fp16: 1.15x at 57%",
+        "portfolio: With no dataloader the same configuration scales at 1.92x, 96% efficiency.",
+        "portfolio: Across all seven T4 configurations, top-1 spans 79.41% to 80.70%"
+      ],
+      "sources": [],
+      "tags": [
+        "numbers",
+        "distributed-vit"
+      ]
+    },
+    {
+      "id": "nc-15",
+      "type": "how",
+      "level": 1,
+      "q": "How do I state a caveat without sounding like I am undermining my own result?",
+      "easy": "Attach the caveat to the number in the same sentence, in a neutral tone, and move on. A caveat added later sounds like a retraction.",
+      "deep": "Same sentence placement makes the caveat part of the measurement instead of an apology. Pattern: number, comparator, scope. JMA: about $355,000 a year of projected opportunity, resting on rate assumptions JMA Finance still has to confirm. Groundwork: ECE 0.045, measured with a deterministic offline reader rather than a hosted model. media-pulse: topic accuracy rose from 0.88 to 0.96 with human review, on a synthetic sample corpus. One precise scope phrase beats stacked hedges ('sort of, roughly, maybe'). When the caveat is bigger than the result (a stub model, a single seed), make it the frame: 'On one seed, ...'.",
+      "say": "The projected opportunity is about $355,000 a year, resting on two rate assumptions JMA Finance still has to confirm. I label it as a projection in the report, and I say it that way here.",
+      "evidence": [
+        "portfolio: Together that is about $355,000 of recurring annual opportunity.",
+        "portfolio: Both of those rates are conservative assumptions the team adopted pending confirmation from JMA Finance",
+        "portfolio: BADGE: recall@5 0.921 / ECE 0.045 / injection recall 0.884 unseen / 113 tests, CI green",
+        "portfolio: It runs with no API key at all, on a deterministic offline reader",
+        "portfolio: On the sample corpus this lifts held out topic accuracy from 0.88 to 0.96 and sentiment accuracy from 0.50 to 0.85"
+      ],
+      "sources": [],
+      "tags": [
+        "caveats",
+        "metric-honesty",
+        "jma"
+      ]
+    },
+    {
+      "id": "nc-16",
+      "type": "how",
+      "level": 1,
+      "q": "How do I present a result that did not replicate?",
+      "easy": "Score each claim separately, show you ruled out the boring explanation, say what partly reproduced, and bound the claim. Say 'not reproduced here', never 'refuted', unless you matched the original's scale.",
+      "deep": "Four moves on Dr. GRPO. (1) Score claims separately so one failure does not swallow the successes: accuracy held (51.6% against 51.2%, paired +0.4 points, interval [-3.4, +4.0]); both length claims reversed (Dr. GRPO 99 tokens longer per step, interval [77, 123]; wrong answers 680 against 545 tokens). (2) Rule out the boring explanation: 55 of 500 final responses hit the 1024 token cap in each arm, so truncation does not explain the gap. (3) Say what partly reproduced: GRPO's correct answers did get shorter, 262 against 399 tokens. (4) Bound it: one seed against the paper's three, 100 LoRA steps, a 1024 token budget, which is why it reads as not reproduced here. Framed this way the reversal is a strength, because it shows you can disagree with a paper without overstating.",
+      "say": "Of the paper's three claims, one held and two reversed. Accuracy held: 51.6% against 51.2%, with a paired interval that spans zero. The length claims went the other way, and Dr. GRPO ran 99 tokens longer per step. I checked truncation first, and each arm hit the token cap on 55 of 500 final responses. It's a single seed, so I say not reproduced here, and I stop short of refuted.",
+      "evidence": [
+        "portfolio: MATH500: Dr. GRPO 51.6% vs GRPO 51.2%, paired +0.4 points [-3.4, +4.0]",
+        "portfolio: Dr. GRPO was 99 tokens longer per step [77, 123]",
+        "portfolio: Longer: 680 against 545 tokens.",
+        "portfolio: 55 of 500 final responses hit the 1024 token cap in each arm",
+        "portfolio: The first side appears clearly, with GRPO's correct answers at 262 tokens against 399 for Dr. GRPO.",
+        "portfolio: This is the biggest gap, and it is why the result reads as \"not reproduced here\" rather than \"refuted\".",
+        "portfolio: The paper used three seeds."
+      ],
+      "sources": [],
+      "tags": [
+        "negative-result",
+        "replication",
+        "dr-grpo"
+      ]
+    },
+    {
+      "id": "nc-17",
+      "type": "how",
+      "level": 1,
+      "q": "How do I present a speedup that vanished?",
+      "easy": "Make the vanishing the finding. Give the good number, the bad number, the two suspects, and the experiment that separated them.",
+      "deep": "An explained regression is worth more than a reported speedup, because explaining it takes a controlled experiment. Structure for distributed ViT: (1) the matched baseline rule, so the drop is real: a rank scaling baseline differs from its run only in rank count; (2) the drop: 1.96x at 98% in fp32, 1.15x at 57% in fp16; (3) two named suspects, the NCCL all reduce and the input pipeline; (4) the isolating experiment, a synthetic input mode with no dataloader, which scaled at 1.92x; (5) the confirming clues, cpu_cores: 4 in the artifacts, and 8 workers per rank doing worse than 2 (3,996 against 4,073 img/s); (6) the general lesson, that optimising the accelerator moved the bottleneck to the host. Mention that the near 1.8x prediction was written down before the run and was wrong, since a scored wrong prediction proves nothing was retrofitted.",
+      "say": "My speedup disappeared, and explaining why became the result. In fp32, DDP on two T4s scaled at 98% efficiency. Turning on fp16 dropped the same setup to 57%. I removed the dataloader with a synthetic input mode, and the collective scaled at 96%. So NCCL was innocent, and a 4 core host couldn't feed GPUs that had just doubled in speed. Anyone tuning NCCL in response would have spent a week in the wrong subsystem.",
+      "evidence": [
+        "portfolio: A rank scaling baseline must differ from its run in exactly one property: the rank count.",
+        "portfolio: DDP in fp32: 1.96x at 98% efficiency",
+        "portfolio: identical config in fp16: 1.15x at 57%",
+        "portfolio: With no dataloader the same configuration scales at 1.92x, 96% efficiency.",
+        "portfolio: The artifacts record cpu_cores: 4.",
+        "portfolio: Raising workers from 2 to 8 per rank made it worse, 3,996 against 4,073, because 16 worker processes on 4 cores buy context switches and nothing else.",
+        "portfolio: The third prediction said DDP would land near 1.8x rather than 2x",
+        "portfolio: Anyone tuning NCCL in response to that drop would have spent a week in the wrong subsystem."
+      ],
+      "sources": [],
+      "tags": [
+        "negative-result",
+        "distributed-vit",
+        "diagnosis"
+      ]
+    },
+    {
+      "id": "nc-18",
+      "type": "concept",
+      "level": 2,
+      "q": "Which verbs should I use for the strength of a claim?",
+      "easy": "Match the verb to the evidence: measured, reproduced, not reproduced here, projected, on synthetic data, upper bound. Never upgrade a projection to a saving or a single seed to a refutation.",
+      "deep": "A small fixed vocabulary keeps you honest under pressure. 'Measured' for a number from a run on real data. 'Reproduced' for a match to a published value (BEIR: 6 of 6 cells, 4 exact to three decimals). 'Not reproduced here' for a disagreement at smaller scale (Dr. GRPO, one seed, 100 steps). 'Projected' or 'sized opportunity' for a model of the future (JMA's ~$355K). 'On synthetic data', 'with a mock model' or 'simulated' for anything not real (media-pulse's corpus, comms-agent's mock LLM, handoff's dataclass cluster). 'Upper bound' for a best case instrument reading (the ViT synthetic runs index a small pool, so their 96% bounds what fixing the input path could achieve). Interviewers at research minded startups listen for these verbs, and one overclaim discounts everything else.",
+      "say": "I'm careful with verbs. On BEIR I say reproduced, because six of six cells matched. On Dr. GRPO I say not reproduced here, because it's one seed. On JMA I say projected, because finance hasn't confirmed the rates.",
+      "evidence": [
+        "portfolio: 6 of 6 published cells reproduced",
+        "portfolio: 4 exact to three decimals",
+        "portfolio: 1 seed, 100 steps, 500 paired eval problems",
+        "portfolio: ~$355K projected annualized opportunity",
+        "portfolio: Both of those rates are conservative assumptions the team adopted pending confirmation from JMA Finance",
+        "portfolio: The synthetic runs also index a small pool, so their 96% is an upper bound on what fixing the input path could achieve, not a promise.",
+        "portfolio: Mock model. The default LLM templates the report wording",
+        "portfolio: The cluster is simulated. It is a dataclass."
+      ],
+      "sources": [],
+      "tags": [
+        "metric-honesty",
+        "language"
+      ]
+    },
+    {
+      "id": "nc-19",
+      "type": "how",
+      "level": 1,
+      "q": "How do I describe a bug I found?",
+      "easy": "Symptom, what you ruled out, the tell, the cause, the fix, and what it generalises to. The tell (the clue that pointed at the cause) is the part that shows skill.",
+      "deep": "BEIR in six beats. Symptom: DPR on SciFact scored 0.260 nDCG@10 against a published 0.318, too far for rounding. Ruled out: TAS-B had reproduced exactly on both datasets, which cleared the loader, the metrics and the scoring and left something specific to how DPR reads a document. Tell: title only search scored 0.261, the same as title plus full text at 0.260, which only makes sense if the body is discarded. Cause: the sentence-transformers port of the DPR context encoder ships with max_seq_length = 100, with no error and no warning. Fix and check: a sweep of the limit recovers the paper exactly at 512 tokens. Generalisation: the same failure waits in any retrieval system whose chunks are longer than the embedding model's configured limit. Bonus beat, why it hid: NFCorpus carries 38.2 judged documents per query against SciFact's 1.1, so it absorbed the damage, and run alone it would have hidden the bug entirely.",
+      "say": "The one cell that disagreed was DPR on SciFact, 0.260 against a published 0.318. TAS-B had matched exactly, so I knew the loader and the metrics were fine. The tell was that title only search scored the same as title plus abstract. That only happens if the body is being thrown away. The encoder port silently ships with a 100 token limit, and at 512 it matches the paper. The same thing waits in any RAG system whose chunks are longer than the embedder's limit.",
+      "evidence": [
+        "portfolio: DPR on SciFact came in at 0.260 against a published 0.318. Not a rounding difference.",
+        "portfolio: TAS-B had already reproduced exactly on both datasets, so the loader, the metrics and the scoring were not at fault",
+        "portfolio: The tell was that searching with only the title scored 0.261 against title plus full text at 0.260.",
+        "portfolio: The sentence-transformers port of the DPR context encoder ships with max_seq_length = 100, so every abstract was cut off after roughly its first paragraph. No error, no warning, no sign of it in the output.",
+        "repo:beir-replication/README.md: At 512 tokens it matches the paper exactly on both metrics.",
+        "portfolio: The same failure mode is waiting in any retrieval system whose chunks are longer than an embedding model",
+        "portfolio: NFCorpus carries 38.2 judged documents per query against SciFact’s 1.1",
+        "portfolio: Run on NFCorpus alone, this replication would have hidden the bug entirely."
+      ],
+      "sources": [],
+      "tags": [
+        "bug-story",
+        "beir",
+        "debugging"
+      ]
+    },
+    {
+      "id": "nc-20",
+      "type": "how",
+      "level": 2,
+      "q": "How do I tell a bug story about my own code without sounding careless?",
+      "easy": "Centre it on the test that caught it and the class of mistake it represents. Detection is the point, and the lesson is a habit.",
+      "deep": "Everyone writes bugs; the signal is how they were caught and what changed afterwards. Groundwork: the heuristic injection combiner mapped its single strongest pattern to 0.444, below a 0.5 threshold, so any attack matching exactly one pattern scored as benign, and 0 of 60 real attacks were caught while the code read as reasonable. A unit test on a single pattern attack found it; the multi pattern tests never could. Class of mistake: a score and a threshold composed in different places with no test at the boundary. Lesson: test the boundary case the component exists for. Distributed ViT has the same shape: the dashboard divided a real data run by a synthetic baseline and reported 1.11x where the matched comparison is 1.15x, and the fix was a reporting layer that enforces matched baselines instead of trusting the author.",
+      "say": "One of my guardrails was silently off. The combiner mapped its strongest single pattern to 0.444, under a 0.5 threshold. So an attack matching exactly one pattern scored as benign, and the detector caught zero of 60 real attacks. The multi pattern tests passed the whole time. A unit test on a single pattern attack found it, and the lesson I kept is to test the boundary case directly.",
+      "evidence": [
+        "repo:Groundwork/README.md: combiner mapped its single strongest pattern to 0.444, below a 0.5 threshold,",
+        "repo:Groundwork/README.md: so any attack matching exactly one pattern scored as benign: **0 of 60** real",
+        "repo:Groundwork/README.md: single-pattern attack found it. The multi-pattern tests never could.",
+        "portfolio: That constraint was added after the dashboard was caught dividing a real data run by a synthetic data baseline, which silently reported 1.11x where the matched comparison is 1.15x."
+      ],
+      "sources": [],
+      "tags": [
+        "bug-story",
+        "groundwork",
+        "testing"
+      ]
+    },
+    {
+      "id": "nc-21",
+      "type": "why",
+      "level": 2,
+      "q": "Why volunteer bugs in an interview at all?",
+      "easy": "Finding bugs is most of the job, and a specific bug story is the hardest thing to fake. It proves you ran the code on real data and read the output.",
+      "deep": "An interviewer cannot verify a claimed accuracy, but they can hear whether a bug story has the texture of real debugging: a symptom with a number, a ruled out suspect, a clue, a root cause in a named API or default, and a generalisation. Tanay's repositories keep defect logs on purpose. The distributed ViT build kept nine bugs, four of them APIs answering a slightly different question than the one asked: is_bf16_supported counting emulation, torchvision's md5 check rejecting a legitimate mirror, MPS reporting instantaneous memory where a peak was wanted, and sys.argv[0] producing a command that could not reproduce its run. handoff's README keeps three, starting with safety code that could not run. That category, an API answering a nearby question, is also a ready answer to 'what kind of bugs do you look for?'.",
+      "say": "I keep a bug list in most of my repos. The distributed ViT build kept nine, and four were APIs answering a slightly different question than the one I asked. The clearest is PyTorch reporting bf16 as supported on a T4, which has no hardware bf16 and was emulating it. That's the category I look for first now.",
+      "evidence": [
+        "portfolio: Four of the nine came from an API answering a slightly different question than the one being asked",
+        "portfolio: A related trap is that on a T4, torch.cuda.is_bf16_supported() returns True. The card is sm_75 and has no hardware bf16, so that True reflects emulation.",
+        "repo:handoff/README.md: **Safety code that could not run.** The supervisor raised the effective"
+      ],
+      "sources": [],
+      "tags": [
+        "bug-story",
+        "distributed-vit",
+        "handoff"
+      ]
+    },
+    {
+      "id": "nc-22",
+      "type": "how",
+      "level": 1,
+      "q": "How do I say 'I don't know' about my own project?",
+      "easy": "Say it plainly, then what you do know, the experiment that would answer it, and a guess labelled as a guess. Never invent a cause.",
+      "deep": "Four parts: admission, known facts, the experiment, a labelled hypothesis. Example question: 'Why did GRPO's response length collapse between steps 55 and 80?' Tanay's write up lists that as unexplained. Known: truncation was similar in both arms during training (8.2 and 9.2 of 128 responses per step), so the cap is not the obvious cause. Experiment: split per step length by correct and wrong responses across that window, alongside reward and format rate. Labelled guess: GRPO's brevity pressure on correct answers (its correct answers ended at 262 tokens against 399) may dominate once enough responses are correct. The guess shows reasoning; the experiment shows you would actually close the question.",
+      "say": "Honestly, I don't know, and the write up says it's unexplained. Truncation was similar in both arms, so the cap isn't the obvious cause. I'd split length by correct and wrong responses per step across that window to see which side drives the drop. My guess, and it's only a guess, is that GRPO's pressure toward short correct answers takes over once enough answers are correct.",
+      "evidence": [
+        "portfolio: GRPO's length collapse between steps 55 and 80 is unexplained.",
+        "portfolio: during training the arms truncated a similar share, 8.2 and 9.2 of 128 responses per step.",
+        "portfolio: The first side appears clearly, with GRPO's correct answers at 262 tokens against 399 for Dr. GRPO."
+      ],
+      "sources": [],
+      "tags": [
+        "i-dont-know",
+        "dr-grpo"
+      ]
+    },
+    {
+      "id": "nc-23",
+      "type": "how",
+      "level": 2,
+      "q": "How do I handle a technical question one step past what I built?",
+      "easy": "Say where your knowledge stops, connect to the nearest thing you did build, reason aloud briefly, and label any guess.",
+      "deep": "Interviewers push one step past the project to find the edge. Example: 'How does HyperLogLog++ correct bias in the mid range?' Tanay's implementation uses 4,096 registers, linear counting below about 10,000 distinct editors and the raw harmonic mean estimator above that, from the original paper; it does not implement HLL++. A good answer states that, adds the measured fact that a short session exercises only the small range path, offers an understanding labelled as such (HLL++ adds an empirical bias correction in the range between the two estimators), and says the paper would need checking before claiming more. Reasoning aloud for 20 to 30 seconds is fine; bluffing specifics is the failure, because the next question will expose it.",
+      "say": "I didn't implement HLL++, so I can't give you its correction tables. What I built switches from linear counting to the raw estimator at about 10,000 distinct items. In a short session only the small range path ever runs. My understanding is that HLL++ corrects the bias in the region between the two estimators, but I'd check the paper before claiming how.",
+      "evidence": [
+        "portfolio: into 4,096 one byte registers",
+        "portfolio: While there are fewer than about 10,000 distinct editors it estimates from the share of empty registers (linear counting), and above that it switches to the harmonic mean estimator from the original paper.",
+        "portfolio: A short visit exercises only the small range path of HyperLogLog."
+      ],
+      "sources": [],
+      "tags": [
+        "i-dont-know",
+        "wikipedia-edit-stream"
+      ]
+    },
+    {
+      "id": "nc-24",
+      "type": "how",
+      "level": 1,
+      "q": "How do I answer 'what would you do differently'?",
+      "easy": "Name one or two decisions you made, the cost each one had, and the change that would have prevented it. Keep it about your choices, not about time or budget.",
+      "deep": "Weak answers blame scope ('more time', 'more data'). Strong answers name a decision and its cost. JMA, from Tanay's own write up: the Culture and Engagement metric was scoped late, so it is the one KPI with no baseline value; and the Python pipeline has no unit tests, so the only thing between an upstream schema change and a silently wrong dashboard is an analyst noticing. Each item comes with its fix: put the pulse survey in the field during Define, and add a small set of assertions on schema and row counts before handover. One honest, specific item beats three vague ones.",
+      "say": "Two things. I scoped the culture metric too late, so it's the one KPI that never got a baseline, and next time that survey goes into the field during Define. And I didn't write unit tests for the pipeline. It's correct today, but an upstream schema change would only show up when an analyst noticed a wrong number. A few assertions would have removed that risk before handover.",
+      "evidence": [
+        "portfolio: The Culture and Engagement metric was scoped late and is the one KPI with no baseline value",
+        "portfolio: I also did not write unit tests for the Python pipeline.",
+        "portfolio: a small set of assertions would have removed that dependency before handover"
+      ],
+      "sources": [],
+      "tags": [
+        "retrospective",
+        "jma"
+      ]
+    },
+    {
+      "id": "nc-25",
+      "type": "compare",
+      "level": 2,
+      "q": "What is the difference between 'what would you do differently' and 'what would you do next'?",
+      "easy": "'Differently' is a past decision you would change. 'Next' extends a finished result with the experiment that would most change your confidence. Mixing them sounds evasive.",
+      "deep": "Distributed ViT, next: the 57% question is closed by inference from a synthetic input run, so the next step is confirming it by removing the ceiling, with GPU side augmentation or a host with more cores, which free Kaggle cannot provide. After that, a model large enough for FSDP to be a fair fight (at 1,806,538 parameters there is almost nothing to shard). Dr. GRPO, next: more seeds, because its bootstrap intervals cover variation across steps and problems, not across seeds. Distributed ViT, differently: enforce matched baselines from the first run, instead of after the dashboard divided a real run by a synthetic baseline.",
+      "say": "Next on the ViT project is confirming the diagnosis by removing the ceiling instead of inferring it. That means GPU side augmentation or a host with more cores, which free Kaggle doesn't offer. What I'd do differently is enforce matched baselines from the first run, instead of after my dashboard divided by a synthetic one.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/CLAUDE.md: 1. Confirm the diagnosis by removing the ceiling rather than inferring it.",
+        "repo:distributed-vit-cifar10/CLAUDE.md: Either GPU side augmentation, or the same suite on a host with more cores.",
+        "portfolio: At 1,806,538 parameters there is almost nothing to shard.",
+        "portfolio: One seed. The bootstrap intervals cover variation across steps and problems, not across seeds.",
+        "portfolio: That constraint was added after the dashboard was caught dividing a real data run by a synthetic data baseline, which silently reported 1.11x where the matched comparison is 1.15x.",
+        "portfolio: identical config in fp16: 1.15x at 57%"
+      ],
+      "sources": [],
+      "tags": [
+        "retrospective",
+        "next-steps",
+        "distributed-vit"
+      ]
+    },
+    {
+      "id": "nc-26",
+      "type": "how",
+      "level": 1,
+      "q": "How do I take pushback on a result?",
+      "easy": "Concede what is true, give the evidence for what you still claim, and state the boundary of the claim. Defend nothing your data does not support.",
+      "deep": "Pushback usually tests calibration more than the result. Concede first and specifically, which shows you heard the strongest version. Then evidence, ideally a check the critic may not know about. Then the boundary, the exact scope where the claim holds. 'One seed is meaningless.' Concede: one seed cannot separate the effect from seed variance, and two identical runs drift apart after the first update because the fp16 backward pass is not bit reproducible. Evidence: the comparison is paired (the same 16 questions per step, the same 500 eval problems), and the 99 token per step gap has a bootstrap interval of [77, 123]. Boundary: that interval covers steps and problems, not seeds, so the claim is 'not reproduced at this scale'. Avoid both failures: collapsing ('you're right, it's worthless') and digging in ('the interval excludes zero, so it's real').",
+      "say": "You're right that one seed can't separate the effect from seed variance, and fp16 on a GPU isn't even bit reproducible run to run. What I can say is that the comparison is paired on the same questions. The length gap per step has an interval of 77 to 123 tokens. That interval covers steps and problems, not seeds, so my claim is not reproduced at this scale, and I'd want the paper's three seeds before saying more.",
+      "evidence": [
+        "portfolio: Two runs with identical settings drift apart after the first update, because the fp16 backward pass on a GPU is not bit reproducible.",
+        "portfolio: Dr. GRPO was 99 tokens longer per step [77, 123]",
+        "portfolio: One seed. The bootstrap intervals cover variation across steps and problems, not across seeds.",
+        "portfolio: The paper used three seeds.",
+        "portfolio: 1 seed, 100 steps, 500 paired eval problems",
+        "portfolio: Each step samples 8 responses for each of 16 questions, 128 in all, and both arms train on the same 16 questions at every step."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "dr-grpo"
+      ]
+    },
+    {
+      "id": "nc-27",
+      "type": "pushback",
+      "level": 2,
+      "q": "Pushback drill: 'Isn't 0.89 AUC kind of low for a CNN?'",
+      "easy": "Concede that 0.89 is not a headline number, explain that the labels are noisy volunteer judgements, and point to calibration as the target the work optimised.",
+      "deep": "Concede: 0.89 validation AUC on a held out 2,000 subject set leaves real errors. Evidence: the labels are volunteer similarity judgements, and Tanay's own descriptive analysis shows how noisy they are: on subjects classified by more than one volunteer, 52% reach perfect consensus. Disagreement among volunteers caps what any model can score against those labels. The use case needs honest probabilities, and label smoothing, AdamW and AUC based early stopping brought expected calibration error from 0.10 to 0.05. Boundary: the claim is agreement with volunteer labels, which is different from detector ground truth.",
+      "say": "Fair, 0.89 isn't a headline number. The labels are volunteer similarity judgements, and on subjects with more than one volunteer, only 52% reach perfect consensus. So agreement with those labels has a ceiling. What the use case needs is honest probabilities, and calibration error came down from 0.10 to 0.05. The boundary is that this is agreement with volunteers, which isn't the same as detector ground truth.",
+      "evidence": [
+        "profile: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on",
+        "profile: a held out 2,000 subject set. Calibration matters more than the AUC here, and label smoothing,",
+        "profile: volunteer, 52% reach perfect consensus. The code is committed to the Syracuse CCDS GravitySpy",
+        "profile: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "gravity-spy",
+        "calibration"
+      ]
+    },
+    {
+      "id": "nc-28",
+      "type": "pushback",
+      "level": 2,
+      "q": "Pushback drill: 'Everyone knows hybrid retrieval beats BM25. Why did you remove it?'",
+      "easy": "Agree with the general rule, show where your data departed from it and why, and name the condition under which you would switch back. Correct the claim, not the person.",
+      "deep": "The interviewer's prior is mostly right here. Concede: with a real semantic embedder hybrid usually wins, and Tanay's own BEIR replication agrees, where reciprocal rank fusion over BM25 and TAS-B beat both of its inputs on both datasets. Evidence: in Groundwork the dense side is a hashing bag of words embedder with no semantic generalisation, and fusion scored 0.853 recall@5 against BM25's 0.921, 6.8 points worse, improving monotonically as the dense side was down weighted until it was switched off. Boundary: the decision is conditional; all three modes are still measured every run, and config.py records the condition under which it should flip. Two projects pointing in opposite directions for a stated reason make a strong answer.",
+      "say": "With a real embedder I'd expect hybrid to win, and in my BEIR replication it did: fusion beat both of its inputs on both datasets. Groundwork is different because the dense side is a hashing embedder with no semantic generalisation. There, fusion was 6.8 points of recall at 5 worse than BM25 alone. So sparse is the default, all three modes still run every evaluation, and the config says to flip it once a real embedding model is in.",
+      "evidence": [
+        "portfolio: Reciprocal rank fusion over BM25 and TAS-B also beat both of its own inputs on both datasets",
+        "repo:Groundwork/README.md: default recommendation, and here it is 6.8 points of recall@5 *worse* than",
+        "repo:Groundwork/README.md: BM25 alone, because the hashing embedder has no semantic generalisation.",
+        "repo:Groundwork/README.md: | sparse (BM25) | 0.782 | **0.921** | **0.843** | 0.869 |",
+        "repo:Groundwork/README.md: | hybrid (RRF) | 0.599 | 0.853 | 0.702 | 0.756 |",
+        "repo:Groundwork/README.md: Down-weighting the dense side improves the fusion monotonically right up to the",
+        "repo:Groundwork/README.md: condition under which the decision should flip."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "groundwork",
+        "beir",
+        "retrieval"
+      ]
+    },
+    {
+      "id": "nc-29",
+      "type": "pushback",
+      "level": 2,
+      "q": "Pushback drill: 'This runs on simulated parts and a rules engine. Isn't it a toy?'",
+      "easy": "Concede exactly what is simulated, say what the project does test that does not depend on those parts being real, and say what it would take to make it real.",
+      "deep": "handoff is the example. Concede: the cluster is a dataclass, the five workers are deterministic rules, and no LLM is called anywhere, so whether the escalation layer holds up with nondeterministic workers is open. Evidence: the claim under test is the escalation policy, and that is fully exercised: 212 tests and 11 behavioural scenarios, deadlines testable at their exact boundary because the caller drives the tick, and the suite caught two design flaws, one a safety path that could never run. Boundary: it proves the policy logic, not production paging. To make it real: a scheduler that calls tick on a timer, a pager attached to the journal's subscribe hook, and model backed workers. media-pulse gets the same treatment: the 0.88 to 0.96 review uplift is on a synthetic corpus, and the weaker offline lexicon model is part of why the uplift is large.",
+      "say": "Parts of it are simulated, and the README says so: the cluster is a dataclass and no LLM is called. What it does test is the escalation policy, and that's fully exercised. There are 212 tests, and every deadline is tested at its exact boundary. The suite caught a safety path that could never actually run. Making it real means a scheduler, a pager on the journal hook, and nondeterministic workers, which is the open question I'd test next.",
+      "evidence": [
+        "portfolio: The cluster is simulated. It is a dataclass.",
+        "portfolio: Rules, not models. The five workers are deterministic with hand written thresholds, and no LLM is called anywhere.",
+        "portfolio: 212 tests / 11 behavioural scenarios / zero dependencies / unanswered page -> safer substitute / CI green on Python 3.11 to 3.13",
+        "portfolio: During the build the suite caught two design flaws, one of which was a safety path that could never actually run.",
+        "portfolio: On the sample corpus this lifts held out topic accuracy from 0.88 to 0.96 and sentiment accuracy from 0.50 to 0.85",
+        "portfolio: Fallback models are weaker. The lexicon sentiment model used offline is less accurate than a hosted model, which is part of why the human review uplift is large."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "handoff",
+        "media-pulse"
+      ]
+    },
+    {
+      "id": "nc-30",
+      "type": "how",
+      "level": 1,
+      "q": "What is signposting, and how do I do it?",
+      "easy": "Tell the listener the shape of the answer before you give it ('two parts: the model and the warehouse'), then use the signposts as you go.",
+      "deep": "Signposts are cheap structure. Use them at the start ('This has two planes on one stream'), at transitions ('That's the ML plane; the analytics plane is...'), and at branch points ('I can go deeper on A or B'). Keep the count honest: announce two parts, deliver two. Number signposts matter most on phone screens with no whiteboard. ZTF filled in: two planes on one stream; the first scores each alert with a multimodal CNN, the second is a dbt warehouse with tests; each plane then gets about 30 seconds. Too many signposts turn the answer into a table of contents with no content.",
+      "say": "This has two planes on one stream. The first is the ML side, a multimodal CNN that scores each alert. The second is the analytics side, a dbt warehouse with tests. I'll do the ML plane first.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "signposting",
+        "ztf"
+      ]
+    },
+    {
+      "id": "nc-31",
+      "type": "how",
+      "level": 1,
+      "q": "How do I check in with the interviewer without sounding unsure?",
+      "easy": "Offer a choice of directions instead of asking 'does that make sense?'. For example: 'I can go deeper on the sketch math or the stream handling.'",
+      "deep": "'Does that make sense?' asks the interviewer to admit confusion, so they say yes. A branch offer hands them control and tells them where your depth is. Use one after the 30 second pitch, after each beat of a long answer, and whenever you have talked for 90 seconds without a question. Format: a short close, then 'I can go into A or B.' Wikipedia Edit Stream: 'I can go deeper on the sketch math, or on the stream handling: the Last-Event-ID resume and why the chart bins by event time.' Order book: 'I can go into the checksum formatting trap, or the order flow regression.' If they pick neither, stop and let them ask.",
+      "say": "That's the overview. I can go deeper on the sketch math, or on the stream handling, meaning the reconnect logic and why I bin by event time instead of arrival time.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "checking-in",
+        "wikipedia-edit-stream"
+      ]
+    },
+    {
+      "id": "nc-32",
+      "type": "how",
+      "level": 1,
+      "q": "How do I whiteboard a pipeline?",
+      "easy": "Draw left to right: source, ingest, transform, store, serve, monitor. Label every arrow with a format and a rate. Then mark where it can break.",
+      "deep": "The drawing order is the outline of the talk. First the source box, with format and volume (ZTF: Avro packets over Kafka, a real night of 27,378 alerts replayed through a Dockerized broker). Second the main path: deserialize, score, land in the warehouse. Third the second plane: dbt staging, intermediate lightcurves, marts. Fourth, orchestration and monitoring around the edges: the Airflow DAG, a PSI drift monitor on the prediction distribution, CI running a dbt build on every push. Fifth, failure marks: where data can be late, wrong or duplicated, and what catches it (source freshness checks, the 21 dbt tests). Say one sentence per box while drawing, never draw silently for more than ten seconds, and leave room on the right for the '100x' question.",
+      "say": "I'll start with the source on the left: ZTF alerts as Avro over Kafka, and I replayed a real night of 27,378 of them. The first plane deserializes and scores each alert with a CNN. The second plane is dbt, from staging to lightcurves to marts, with 21 tests. Airflow runs the nightly batch, and a drift monitor watches the prediction distribution. The places it breaks are late data and schema drift, so freshness checks and tests sit there.",
+      "evidence": [
+        "portfolio: I ran the pipeline against a real night of the survey: 27,378 Avro alert packets extracted from July 20, 2026.",
+        "portfolio: A full dbt build returned 8 models and 21 tests with 32 checks passing and zero errors, on real data rather than a seed sample."
+      ],
+      "sources": [],
+      "tags": [
+        "whiteboard",
+        "ztf",
+        "pipeline"
+      ]
+    },
+    {
+      "id": "nc-33",
+      "type": "how",
+      "level": 2,
+      "q": "Why label rates and volumes on a whiteboard, and which ones?",
+      "easy": "Rates and volumes tell the interviewer which parts are hard. Thirty events a second and a million a second are different systems.",
+      "deep": "Label each arrow with format, rate and size, and let the labels justify the design aloud. Tanay's concrete labels: the Wikimedia stream at 26 to 36 events a second across about 100 wikis, so exact counting is affordable and the sketches can be compared with ground truth at all; the Kraken book at about 142 book updates a second at depth 100, where a sorted array with binary search updates keeps up; the JMA cell's raw JSON, two datasets that expanded past 31 GB in Power BI, reduced to under 5 MB of flat rows. Then answer the scale question with the same labels: say what saturates first at 10x and at 100x.",
+      "say": "I put the rate on every arrow. Wikipedia's stream carried 26 to 36 events a second in my runs. At that rate exact counting is cheap, which is the only reason I can compare the sketches with ground truth. At a few thousand times that, the exact counter is the first thing to go, and that's where the sketches earn their keep.",
+      "evidence": [
+        "portfolio: In my runs it carried 26 to 36 events a second across about 100 wikis",
+        "portfolio: Exact counting is affordable at this rate. That is what makes the comparison possible.",
+        "portfolio: 47,595 messages, of which 46,891 were book updates, about 142 a second",
+        "portfolio: Two raw datasets of 809 and 1,000 records expanded to more than 31 GB when loaded straight into Power BI.",
+        "portfolio: The output is under 5 MB and loads instantly."
+      ],
+      "sources": [],
+      "tags": [
+        "whiteboard",
+        "scale",
+        "wikipedia-edit-stream"
+      ]
+    },
+    {
+      "id": "nc-34",
+      "type": "how",
+      "level": 2,
+      "q": "How do I show on a whiteboard where a system can stop or fail?",
+      "easy": "Draw the happy path, then an exit arrow at every stage that can stop the request, labelled with the reason. It shows you designed for failure.",
+      "deep": "Groundwork's request path is the template. Input rail (injection, jailbreak, length, PII) can block. Retrieval can find nothing. The context rail can drop a passage carrying a payload. The gateway can return 401, 402 or 429 on auth, budget or rate. The output rail can abstain on citations, groundedness or PII egress. The decision stage can abstain when calibrated confidence is under threshold. The talking point is the last exit: an answer can pass every safety check and still be one the system should not assert, and separating safe from confident lets a product hedge instead of choosing between bluffing and refusing. Put the measured number on the exit that has one: at a 60% precision floor the system correctly declines 96.2% of unanswerable questions.",
+      "say": "Every stage gets an exit arrow. The input rail can block, retrieval can come back empty, and the gateway can refuse on auth or budget. The last exit is the one I care about, because an answer can pass every safety check and still not be confident enough to assert. I set the precision floor at 60%. At that floor, the system correctly declines 96.2% of unanswerable questions.",
+      "evidence": [
+        "repo:Groundwork/README.md: **Answering**: at a 60% precision floor the system answers 7.5% of answerable",
+        "repo:Groundwork/README.md: questions and correctly declines **96.2%** of unanswerable ones. The full",
+        "repo:Groundwork/README.md: is what lets a product hedge instead of choosing between bluffing and refusing.",
+        "repo:Groundwork/README.md: auth, budget, cache, route, retry ------> 401/402/429"
+      ],
+      "sources": [],
+      "tags": [
+        "whiteboard",
+        "groundwork",
+        "failure-modes"
+      ]
+    },
+    {
+      "id": "nc-35",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain a project to a recruiter. What changes?",
+      "easy": "No jargon, one outcome, one sentence on why it mattered to the business, and the role it maps to. Recruiters match you to roles, so hand them the words.",
+      "deep": "A recruiter screens for fit and clear communication, not mechanism. Translate terms ('HyperLogLog' becomes 'a memory saving way to count unique users'), keep at most one number with a plain comparator, and name the role family, because the recruiter is filling in a form. JMA works best here: a real client, a team Tanay led, and a finding leadership could act on. Leave out json_normalize, DAX and DMAIC unless asked.",
+      "say": "I led a four person team on a project for a 5G equipment manufacturer. Their two production lines measured performance in different ways, so nobody could compare them. I got every team to agree on one definition per metric, and built the data pipeline behind it. That showed the automated line was waiting on materials rather than breaking down. It's the kind of work I want to keep doing in a data science or analytics engineering role.",
+      "evidence": [
+        "profile: Role Project lead, 4 person team",
+        "profile: JMA Wireless is a US manufacturer of cell tower transmitters and active 5G infrastructure. This",
+        "portfolio: Before this project there was no way to compare them, because terms like Uptime and Schedule Attainment meant different things to different functions."
+      ],
+      "sources": [],
+      "tags": [
+        "audience",
+        "recruiter",
+        "jma"
+      ]
+    },
+    {
+      "id": "nc-36",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain a project to a product manager. What changes?",
+      "easy": "Talk in decisions and user impact: what the system does for a user, which tradeoff you chose, and what the number means for the product.",
+      "deep": "A PM wants the decision the work supports and its cost to users. In Groundwork the precision floor is the product decision, and the rest of the abstention policy follows from it. At a 60% precision floor the system answers 7.5% of answerable questions and correctly declines 96.2% of unanswerable ones, which a PM hears at once as very safe and very low coverage. Then give the lever: confidence AUC is 0.654, a weak signal, and that is why a 60% precision promise costs most of the coverage; a better confidence model is what moves the curve. Add the user facing cost of the guardrails: a 5.0% false positive rate on 600 real benign questions, about one legitimate user in twenty, which is the PM's call to accept or not.",
+      "say": "The product decision in Groundwork is how often the assistant should refuse. I set a floor of 60% precision on the answers it gives. At that floor it declines almost all unanswerable questions, 96.2% of them. The cost is coverage: it answers only 7.5% of the answerable ones. Moving that curve needs a better confidence signal, and that's where I'd put the next sprint.",
+      "evidence": [
+        "repo:Groundwork/README.md: **Answering**: at a 60% precision floor the system answers 7.5% of answerable",
+        "repo:Groundwork/README.md: questions and correctly declines **96.2%** of unanswerable ones. The full",
+        "repo:Groundwork/README.md: **Calibration**: ECE 0.045, Brier 0.213, AUC 0.654 over 4,881 held-out questions.",
+        "repo:Groundwork/README.md: precision promise costs most of the coverage, and the threshold sweep shows",
+        "repo:Groundwork/README.md: False-positive rate on 600 real benign user questions: **5.0%**."
+      ],
+      "sources": [],
+      "tags": [
+        "audience",
+        "product-manager",
+        "groundwork"
+      ]
+    },
+    {
+      "id": "nc-37",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain a project to a hiring manager. What changes?",
+      "easy": "Ownership, judgement and outcome: what you owned, a call you made, how you knew it was right, and what you handed over.",
+      "deep": "A hiring manager is asking whether they can hand you an ambiguous problem and get a correct result back without supervision. Show the decision points where correctness beat convenience. Distributed ViT: three predictions written down before the runs so they could be scored rather than retrofitted; a 57% efficiency drop isolated to a 4 vCPU host with one synthetic input experiment instead of a week of NCCL tuning; a refusal to disable torchvision's md5 check to make a mirror download look successful; and a gate that extracts every number with a unit from the docs and fails if it does not trace to an artifact, which found five unsupported claims the first time it ran. Each is a call a manager would otherwise have to make for you.",
+      "say": "What I'd want a manager to know is how I handle a number I can't yet explain. My scaling efficiency dropped to 57% when I turned on mixed precision. Instead of tuning the network layer, I ran one experiment that removed the dataloader, and the collective scaled fine. The cause was a host with 4 CPU cores. I also built a gate that fails the build when a number in the docs doesn't trace to an artifact, and it caught five of my own claims the first time.",
+      "evidence": [
+        "portfolio: identical config in fp16: 1.15x at 57%",
+        "portfolio: cause isolated to a 4 vCPU host",
+        "portfolio: It found five unsupported claims the first time it ran.",
+        "portfolio: Three predictions were written down before this ran, so they could be scored instead of retrofitted.",
+        "portfolio: Silencing a checksum to make a download look successful is how results stop being trustworthy."
+      ],
+      "sources": [],
+      "tags": [
+        "audience",
+        "hiring-manager",
+        "distributed-vit"
+      ]
+    },
+    {
+      "id": "nc-38",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain a project to a staff engineer. What changes?",
+      "easy": "Mechanism, alternatives and failure modes. They will probe the decision you are least sure of, so lead them to it.",
+      "deep": "A staff engineer judges design: did you see the alternatives, where does it break, and are the invariants tested. Tool dependency graph. Mechanism: handles resolve to namespaced entities in three tiers (leaf name, then the nearest meaningful ancestor such as threads in data.threads[].id, then the producing tool's own object). Rejected alternative: tool to tool edges, which collapse because one entity, the repository owner, is required by hundreds of tools and produced by dozens and alone emits tens of thousands of edges. The bipartite graph turns producers times consumers into producers plus consumers, and the two hop path answers 'what do I run first'. Failure mode: incidental producers (a workflow run response embeds a whole repository), suppressed by splitting producers on the head noun of the slug, which works because English compounds are head final. Open risk: 568 handle shaped parameters the registry does not cover yet.",
+      "say": "The decision I'd defend is making the graph bipartite. With tool to tool edges, one entity like the repository owner, required by hundreds of tools, emits tens of thousands of edges and the picture says nothing. With tools and entities both as nodes, edges become producers plus consumers, and a two hop path is exactly what to run first. The weakest part is the head noun rule for incidental producers, and I can walk through where it's right and where it could break.",
+      "evidence": [
+        "portfolio: one entity, the repository owner, is required by hundreds of tools and produced by dozens, so that entity alone emits tens of thousands of edges and the picture says nothing.",
+        "portfolio: Edge count drops from producers times consumers to producers plus consumers, the hub structure becomes legible, and the two hop path is exactly the answer to \"what do I run first\".",
+        "portfolio: English compounds are head final, which is what makes this work",
+        "portfolio: 568 handle shaped parameters the registry does not cover yet"
+      ],
+      "sources": [],
+      "tags": [
+        "audience",
+        "staff-engineer",
+        "tool-dependency-graph"
+      ]
+    },
+    {
+      "id": "nc-39",
+      "type": "how",
+      "level": 2,
+      "q": "How do I tell which audience I am talking to in the first minute?",
+      "easy": "Read their title and their first question. Recruiters ask about fit, PMs about users and decisions, managers about ownership, engineers about how.",
+      "deep": "Signals: the job title on the invite; the verb in the first question ('tell me about' versus 'how did you'); whether they interrupt for mechanism or for impact; whether they write when you say a number (scoring results) or when you name a technique (scoring depth). Calibrate with the 30 second pitch containing exactly one technical term and watch the reaction: a follow up on the term means go deeper, a follow up on impact means go broader. On a mixed panel, pitch to the most senior non technical person and then offer depth to the engineer by name. Keep adjusting; the first read is often wrong.",
+      "say": "Before I go deep, would it help more to hear how the system works, or what it changed for the people using it? Either way, the result first: the standup cut the time from a red KPI to a named owner acting from about 4 hours to about 25 minutes.",
+      "evidence": [
+        "portfolio: Median time from a KPI going red to a named owner taking the first action fell from about 4 hours to about 25 minutes"
+      ],
+      "sources": [],
+      "tags": [
+        "audience",
+        "reading-the-room"
+      ]
+    },
+    {
+      "id": "nc-40",
+      "type": "how",
+      "level": 1,
+      "q": "When do I say 'I' and when do I say 'we'?",
+      "easy": "'We' for the team's outcome, 'I' for what you personally did. Every 'we' sentence should be followed by an 'I' sentence that names your part.",
+      "deep": "Interviewers listen for ownership. 'We' everywhere hides it, and 'I' everywhere on a team project sounds like taking credit. JMA is the test case: a four person Whitman School team, Tanay as project lead, and a written record of what was personally Tanay's (the charter, SIPOC and CTQC tree, the KPI definition interviews, the Python pipeline, the Control Plan). Model: 'We picked three recommendations from six candidates with a Pugh matrix. I piloted the standup for two weeks and measured it.' Shared calls stay shared: 'the team wrote down conservative rate assumptions'. If asked what the project would have looked like without you, answer with the artifacts you produced.",
+      "say": "We were a four person team, and I was project lead. I wrote the charter, ran the definition interviews, built the pipeline, and wrote the Control Plan. We picked three recommendations from six candidates with a Pugh matrix. I piloted the standup myself for two weeks and measured it.",
+      "evidence": [
+        "portfolio: I was Project Lead on a four person Whitman School team running a full DMAIC engagement from January to May 2026",
+        "portfolio: I wrote the charter, SIPOC, and CTQC tree, ran the KPI definition interviews, built the Python pipeline that made the automated line",
+        "portfolio: Three recommendations came out of Improve, selected against six candidates with a Pugh matrix",
+        "portfolio: I piloted the standup for two weeks on the manual line first shift and measured it rather than asserting it worked."
+      ],
+      "sources": [],
+      "tags": [
+        "ownership",
+        "i-vs-we",
+        "jma"
+      ]
+    },
+    {
+      "id": "nc-41",
+      "type": "how",
+      "level": 2,
+      "q": "How do I talk about my part of a larger team or research project?",
+      "easy": "Name the larger project in one line, then claim only the parts you built and can explain in depth. For team coursework, say 'we' for the shared result and do not guess at roles that are not on the record.",
+      "deep": "Gravity Spy is the model: a large NSF funded citizen science project supporting LIGO, where Tanay's part is specific and documented (the ingestion pipeline over the Zooniverse Panoptes API, the OpenCV spectrogram workflow, the two input CNN, the descriptive analysis, all committed to the Syracuse CCDS GravitySpy Classifier repository). The recent portfolio projects (the live dashboards, the replications, Groundwork, handoff) are first person and Tanay's own, so 'I' is accurate there. Older coursework write ups use 'we' and 'our' in places ('our pipeline pre encoded categorical variables' in The Perfect Lap; 'We forecast residential consumption' in the energy project). For those, claim what you could rebuild on a whiteboard now and attribute the rest to the team. An interviewer who probes a 'we' and finds nothing behind it will discount every 'I' afterwards.",
+      "say": "Gravity Spy is a big NSF funded citizen science project that supports LIGO, so I'm careful to say what's mine. I built the ingestion pipeline that parses the volunteer classifications. I wrote the spectrogram workflow, trained the two input CNN, and ran the descriptive analysis. The code is committed to the lab's classifier repository.",
+      "evidence": [
+        "profile: Gravity Spy is NSF funded citizen science that supports LIGO. The science goal is causal",
+        "profile: I built the ingestion pipeline in Python with pandas and the Zooniverse Panoptes API. It parses",
+        "profile: I trained a two input CNN with a shared MobileNetV2 backbone in TensorFlow and Keras to predict",
+        "profile: I also ran the descriptive analysis. Volunteer effort is heavily right tailed: the top ten",
+        "profile: volunteer, 52% reach perfect consensus. The code is committed to the Syracuse CCDS GravitySpy",
+        "portfolio: CatBoost would normally have a categorical handling advantage, but our pipeline pre encoded categorical variables for fair comparison",
+        "portfolio: We forecast residential consumption under a sustained warming scenario"
+      ],
+      "sources": [],
+      "tags": [
+        "ownership",
+        "gravity-spy",
+        "research"
+      ]
+    },
+    {
+      "id": "nc-42",
+      "type": "how",
+      "level": 1,
+      "q": "How do I talk honestly about using AI coding tools?",
+      "easy": "Say plainly that you use them, then spend the answer on three things: what you delegated, how you verified it, and what you caught that reads as correct but is not.",
+      "deep": "Interviewers at AI startups assume you use a coding assistant; what they probe is whether you can tell when its output is wrong. Delegated: implementation under written rules. Several of Tanay's repositories carry a CLAUDE.md working context file with house rules for the coding agent, such as 'Never report a number the code did not measure' and 'Never weaken a check to make something pass' (distributed ViT) and 'Never add OnExpiry.ALLOW' (handoff). Verified: checks that trust neither author, human or model: the ViT gate that fails when a documented number does not trace to an artifact (five unsupported claims on its first run); a gradient equivalence test shipped with an inverse test that computes the wrong thing on purpose; eight hand written assertions in the tool graph, every one of which started out failing. Caught: errors that read as correct, such as a silent library default (max_seq_length = 100), an API answering a nearby question (is_bf16_supported counting emulation), or a score that disables a detector (0.444 under 0.5). Describe exactly what you delegated; never claim to have hand written what you did not.",
+      "say": "Yes, I use Claude Code, and my repos keep a working context file with house rules for it. One rule is never report a number the code didn't measure, and a gate enforces that instead of trusting it. The gate found five unsupported claims the first time it ran. What I keep for myself is deciding what counts as correct, which is why the tool graph's assertions are hand written against cases set down before the code existed. The bugs I've caught are the kind that read as fine, like a library default that silently truncated every document.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/CLAUDE.md: 1. **Never report a number the code did not measure.** Every cell in",
+        "repo:distributed-vit-cifar10/CLAUDE.md: 2. **Never weaken a check to make something pass.** The md5 failure in bug 2",
+        "repo:handoff/CLAUDE.md: 2. **Never add `OnExpiry.ALLOW`.** ADR 0004 carries the argument and",
+        "portfolio: It found five unsupported claims the first time it ran.",
+        "portfolio: It ships with a second test that deliberately computes the wrong thing, because a correctness test that cannot fail is decoration rather than evidence.",
+        "portfolio: Eight hand written assertions, run with one command. All eight pass now, and every one of them started out failing.",
+        "portfolio: The sentence-transformers port of the DPR context encoder ships with max_seq_length = 100, so every abstract was cut off after roughly its first paragraph. No error, no warning, no sign of it in the output.",
+        "repo:Groundwork/README.md: combiner mapped its single strongest pattern to 0.444, below a 0.5 threshold,",
+        "portfolio: A related trap is that on a T4, torch.cuda.is_bf16_supported() returns True. The card is sm_75 and has no hardware bf16, so that True reflects emulation."
+      ],
+      "sources": [],
+      "tags": [
+        "ai-coding-tools",
+        "verification"
+      ]
+    },
+    {
+      "id": "nc-43",
+      "type": "pushback",
+      "level": 2,
+      "q": "Pushback drill: 'How do I know an AI didn't just write all of this?'",
+      "easy": "Do not get defensive. Offer depth on demand: a bug's tell, a rejected alternative, a number's caveat. Depth a summary does not contain is the evidence.",
+      "deep": "Concede: coding assistants write real portions of most modern projects, and Tanay uses one. Evidence: understanding shows in what a generated summary does not contain, such as why a DPR title only score of 0.261 matching 0.260 implied the body was discarded, why 8 dataloader workers per rank did worse than 2 on a 4 vCPU host, or why handoff's expiry enum has no allow member and a test asserts its absence. Boundary: invite the interviewer to pick any file, number or defect log entry and ask why. A live walkthrough of a specific function is stronger than any claim of authorship.",
+      "say": "I do use a coding assistant, so that's a fair question. The best evidence I can give is depth: pick any number on my site and I'll tell you where it came from and what's wrong with it. For example, on the ViT project more dataloader workers made throughput worse. The host had four cores, so extra workers only bought context switches.",
+      "evidence": [
+        "portfolio: The tell was that searching with only the title scored 0.261 against title plus full text at 0.260.",
+        "portfolio: Raising workers from 2 to 8 per rank made it worse, 3,996 against 4,073, because 16 worker processes on 4 cores buy context switches and nothing else.",
+        "portfolio: A test asserts that the enum member does not exist, so adding it means deleting a test whose docstring explains why it should not."
+      ],
+      "sources": [],
+      "tags": [
+        "ai-coding-tools",
+        "pushback"
+      ]
+    },
+    {
+      "id": "nc-44",
+      "type": "case",
+      "level": 3,
+      "q": "What kinds of errors do you look for in generated or reviewed code?",
+      "easy": "Errors that read as correct: silent defaults, APIs that answer a slightly different question, a score and a threshold that disagree across files, and tests that cannot fail.",
+      "deep": "Four categories recur in Tanay's defect logs. (1) Silent library defaults: DPR's max_seq_length = 100 truncated every abstract with no warning. (2) An API answering a nearby question: is_bf16_supported returning True on a T4 through emulation; vLLM throughput on a T4 limited by per request sampling seeds rather than LoRA, where removing them tripled throughput. (3) Composition across modules: a combiner score of 0.444 under a 0.5 threshold disabled a detector; a config parser that flattened nested maps inside list items, so an edited approval came back with no edits. (4) Tests that cannot fail, which is why the ViT suite ships an inverse test. Each category becomes a review question: what default did this inherit, what exactly does this API return, what reads this score, and could this test fail if the code were wrong.",
+      "say": "I look for code that reads as correct and isn't. Silent defaults come first, like an encoder limit nobody set on purpose. Then APIs answering a slightly different question, like bf16 support that's really emulation. Then a score and a threshold written in different files that don't agree. And any test that couldn't fail if the code were wrong.",
+      "evidence": [
+        "portfolio: The sentence-transformers port of the DPR context encoder ships with max_seq_length = 100, so every abstract was cut off after roughly its first paragraph. No error, no warning, no sign of it in the output.",
+        "portfolio: A related trap is that on a T4, torch.cuda.is_bf16_supported() returns True. The card is sm_75 and has no hardware bf16, so that True reflects emulation.",
+        "portfolio: vLLM on a T4 ran at 350 tokens per second. The cause was per request sampling seeds, not LoRA, and removing them tripled throughput.",
+        "repo:Groundwork/README.md: combiner mapped its single strongest pattern to 0.444, below a 0.5 threshold,",
+        "repo:handoff/README.md: **A parser that quietly flattened config.** Nested maps inside list items",
+        "portfolio: It ships with a second test that deliberately computes the wrong thing, because a correctness test that cannot fail is decoration rather than evidence."
+      ],
+      "sources": [],
+      "tags": [
+        "ai-coding-tools",
+        "code-review",
+        "debugging"
+      ]
+    },
+    {
+      "id": "nc-45",
+      "type": "how",
+      "level": 1,
+      "q": "How do I move from one project to the next without a hard cut?",
+      "easy": "Bridge with the thread that connects them: a limitation in the first project that the second one addresses, or a method that carried over.",
+      "deep": "Transitions show the portfolio has a direction rather than being a list. Tanay's projects have explicit sequels: ZTF was designed to close the three gaps listed as limitations in ShopFloor AI (simulated Kafka, a synthetic dataset, no warehouse); handoff covers what happens when comms-agent's reviewer does not show up; Space Weather Nowcast builds the live input side of the Kp LSTM, which trained on clean OMNI2 history. Template: '[Project A] left one thing open, [limitation]. [Project B] is that thing.' One sentence, then start B with its hook. Avoid 'another project I did was...', which announces a list.",
+      "say": "My Kp forecaster trained on clean hourly history, and clean history is the easy part. A model like that would run on live feeds with gaps, revisions and instrument switches. So my space weather dashboard builds that input side: it joins NOAA's live feeds and propagates the solar wind from L1 to Earth.",
+      "evidence": [
+        "portfolio: My Kp forecasting project trained an LSTM on hourly solar wind history from NASA's OMNI2 dataset. Clean history is the easy part.",
+        "portfolio: I designed this project to close the three gaps I listed as limitations in ShopFloor AI",
+        "portfolio: handoff covers what happens when they do not, which is the case that breaks these systems in production.",
+        "portfolio: 9 NOAA feeds joined on time",
+        "portfolio: found the spacecraft labelled SOLAR1 active at 1.58 million km sunward",
+        "portfolio: arrival 73.5 minutes after measurement"
+      ],
+      "sources": [],
+      "tags": [
+        "transitions",
+        "space-weather",
+        "kp"
+      ]
+    },
+    {
+      "id": "nc-46",
+      "type": "how",
+      "level": 1,
+      "q": "How do I end an answer without summarising it?",
+      "easy": "Stop on the last fact, the lesson, or a branch offer. Do not repeat what you just said.",
+      "deep": "A recap ('so in summary I built X, did Y, got Z') adds 15 seconds, signals doubt that you were clear, and delays the next question. Three clean endings: the last fact ('...and the book recovered from a fresh snapshot.'), the lesson in one sentence, or a branch offer ('I can go into the checksum formatting or the order flow fit.'). Then stop and let the silence work. Practise by recording an answer and deleting its final two sentences; if nothing is lost, they were a recap.",
+      "say": "Run on NFCorpus alone, my replication would have hidden the bug entirely, because that dataset has so many judged documents per query that it absorbs the damage.",
+      "evidence": [
+        "portfolio: Run on NFCorpus alone, this replication would have hidden the bug entirely.",
+        "portfolio: NFCorpus carries 38.2 judged documents per query against SciFact’s 1.1",
+        "portfolio: To exercise the resync path, a deliberately corrupted update failed its checksum and the book recovered from a fresh snapshot; that case is also in the test suite."
+      ],
+      "sources": [],
+      "tags": [
+        "endings",
+        "beir"
+      ]
+    },
+    {
+      "id": "nc-47",
+      "type": "how",
+      "level": 1,
+      "q": "How fast should I talk, and how do I control pace under nerves?",
+      "easy": "Slower than feels natural, around 140 to 160 words a minute, with a short pause before every number and after every result.",
+      "deep": "Nerves push most speakers past 180 words a minute, where numbers blur together. Pause before a number so it lands, pause after a result so it can be absorbed, and slow down on proper names (Gutenberg-Richter, MobileNetV2, Dr. GRPO). Short sentences give natural places to breathe. Calibrate with a recording: the 30 second pitch should take 25 to 35 seconds, and if a 75 word pitch takes 20 you are rushing. On video calls add a beat after finishing, because audio lag invites collisions. Measured speech reads as confidence.",
+      "say": "HyperLogLog estimated 986.9 distinct editors. The exact count was 983. That's inside the bound the paper promises.",
+      "evidence": [
+        "portfolio: HyperLogLog estimated 986.9 distinct editors against an exact 983, an error of +0.4% against a one sigma bound of 1.6%."
+      ],
+      "sources": [],
+      "tags": [
+        "delivery",
+        "pacing"
+      ]
+    },
+    {
+      "id": "nc-48",
+      "type": "how",
+      "level": 2,
+      "q": "How do I cut filler words like 'um', 'like', 'basically' and 'so yeah'?",
+      "easy": "Replace filler with a silent pause, open on a content word, and end on a fact. Replace hedges like 'kind of' with an exact scope.",
+      "deep": "Filler clusters in three places: the start of an answer ('so, um, basically'), before a number you are retrieving, and the end ('so yeah, that's it'). Fixes: memorise the first sentence of each rung so you open on content; know the number bank cold so nothing needs retrieving; end on a fact or a branch offer so there is nothing to trail off from. Hedge fillers ('kind of', 'sort of', 'I guess') are worse than 'um' because they weaken claims; swap them for the exact scope ('on one seed', 'on the sample corpus'). Drill: record a 2 minute walkthrough, transcribe it, count fillers per minute, redo until fewer than two a minute remain. Aiming for zero sounds robotic. Before: 'So basically I kind of built some sketches and they were pretty accurate, like within a percent.' After: the sentence below.",
+      "say": "I ran HyperLogLog beside an exact counter on Wikipedia's live edit stream. It came in at 986.9 distinct editors against an exact 983.",
+      "evidence": [
+        "portfolio: HyperLogLog estimated 986.9 distinct editors against an exact 983, an error of +0.4% against a one sigma bound of 1.6%."
+      ],
+      "sources": [],
+      "tags": [
+        "delivery",
+        "filler"
+      ]
+    },
+    {
+      "id": "nc-49",
+      "type": "how",
+      "level": 1,
+      "q": "How do I tie a project to the company's problem?",
+      "easy": "Name one mechanism your project shares with their product, say how it fails there, and say what you would check first, framed as a question to them.",
+      "deep": "Generic ties ('this shows I can do ML') are noise. A specific tie names a shared mechanism and its failure mode. Retrieval or RAG company: the BEIR truncation generalises to any system whose chunks are longer than the embedding model's configured limit, so the first check in their stack is chunk length against each model's max_seq_length. Evals company: Project Mark showed frontier models decompose a composite metric reflexively, and Groundwork showed an injection classifier fitted on short user queries firing on 100% of a clean encyclopaedia corpus, so evaluation data must match the distribution it is applied to. Agents company: the tool dependency graph and handoff (next card). Prepare by reading their docs or engineering blog, pick one mechanism, and deliver the tie in two sentences at the end of the project answer.",
+      "say": "There's one thing from my BEIR work I'd check in your stack on day one. The DPR encoder silently truncated documents at 100 tokens, and any RAG pipeline with chunks longer than its embedder's limit has the same problem. How do you check chunk length against each model's limit today?",
+      "evidence": [
+        "portfolio: The sentence-transformers port of the DPR context encoder ships with max_seq_length = 100, so every abstract was cut off after roughly its first paragraph. No error, no warning, no sign of it in the output.",
+        "portfolio: The same failure mode is waiting in any retrieval system whose chunks are longer than an embedding model",
+        "repo:Groundwork/README.md: **2. A guardrail was flagging 100% of a clean corpus.** The trained injection"
+      ],
+      "sources": [],
+      "tags": [
+        "company-fit",
+        "beir",
+        "groundwork"
+      ]
+    },
+    {
+      "id": "nc-50",
+      "type": "case",
+      "level": 2,
+      "q": "Worked example: tie two projects to an agent infrastructure startup.",
+      "easy": "Name the failures their users hit (tool calls with unproducible arguments, approvals nobody answers), map one project to each, and end with a question about their system.",
+      "deep": "Agent startups worry about two failures Tanay has built against. Tool calls with arguments the agent cannot produce: the tool dependency graph derives from schemas alone which tools must run first; 1,768 of 1,770 typed required inputs have a producer, and generic names like id collide across services, so handles must be namespaced per service. Approvals that block forever: handoff gives every escalation a deadline and a declared behaviour for silence (deny, safe_fallback, escalate, hold, and deliberately no allow), and an unanswered 180 second page on an irreversible failover_database runs enable_read_only instead. Close with a question that shows you thought about their product: what does your agent do today when a human approval times out?",
+      "say": "Two failures your agents probably hit are tool calls with arguments they can't produce, and approvals nobody answers. For the first, I built a graph from tool schemas that says which tools must run first. For the second, handoff gives every escalation a deadline, and when a failover page goes unanswered it switches the database to read only instead. What does your system do today when an approval times out?",
+      "evidence": [
+        "portfolio: 1,768 of 1,770 typed required inputs have a producer",
+        "portfolio: The expiry behaviours are deny, safe_fallback, escalate and hold. There is deliberately no allow.",
+        "portfolio: The page goes to the engineer on call who holds the infrastructure skill, with 180 seconds to answer.",
+        "portfolio: It runs enable_read_only instead, the substitute the failover tool itself declares."
+      ],
+      "sources": [],
+      "tags": [
+        "company-fit",
+        "agents",
+        "handoff",
+        "tool-dependency-graph"
+      ]
+    },
+    {
+      "id": "nc-51",
+      "type": "how",
+      "level": 1,
+      "q": "How do I read the interviewer and know when to stop?",
+      "easy": "Stop when the question is answered, when they start to speak, or when their attention drops. A short answer they can extend beats a long one they have to interrupt.",
+      "deep": "Signals to stop: they lean in or unmute; they look at the clock or their notes for a while; rapid nodding (they have it); they repeat a word from your answer as a question (they want depth there, so go there). Signals to continue: they write while you talk, or ask 'and then?'. Default length is 60 to 90 seconds unless a walkthrough was requested. When unsure, stop and offer a branch. If interrupted, stop mid sentence, answer the new question, and do not return to the old one unless asked. Stopping early and being asked for more reads as senior; being cut off reads as unaware.",
+      "say": "That's the core of it: the checksum fails on any formatting drift, so I read price and size precision from the exchange instead of hardcoding them. I'll stop there, unless you want the resync path.",
+      "evidence": [
+        "portfolio: Price and size precision are read from the exchange's instrument channel rather than hardcoded.",
+        "portfolio: printing 0.0157 instead of 0.01570000 changes the string and fails every check."
+      ],
+      "sources": [],
+      "tags": [
+        "reading-the-room",
+        "order-book"
+      ]
+    },
+    {
+      "id": "nc-52",
+      "type": "case",
+      "level": 1,
+      "q": "'Walk me through a project.' I have many. How do I choose?",
+      "easy": "Pick the project that matches the role's core problem and has a twist (a bug, a reversed result, a finding that changed a decision), say why you picked it, and offer to switch.",
+      "deep": "Choose by role first, then by story. ML or AI engineer at a retrieval, evals or agents startup: BEIR (the truncation bug), Groundwork (evaluation that reversed design decisions), Dr. GRPO (reversed claims). Data or analytics engineer: JMA (31 GB of nested JSON to under 5 MB, and the definitions), ZTF (dbt with 21 tests on real alerts), Gravity Spy (five undocumented schemas). Data scientist: Gravity Spy (calibration), Project Mark (confounding traps), earthquake statistics (a coverage test). Opening with the reason for the pick shows the choice was deliberate, and the offer to switch gives the interviewer an exit.",
+      "say": "I'll take the BEIR replication, because it's closest to the retrieval work you do. I reproduced six of six published cells, and the interesting part is the one that first disagreed. If agent work is more relevant, I can switch to the tool dependency graph.",
+      "evidence": [
+        "portfolio: 6 of 6 published cells reproduced",
+        "portfolio: Two raw datasets of 809 and 1,000 records expanded to more than 31 GB when loaded straight into Power BI.",
+        "portfolio: The output is under 5 MB and loads instantly.",
+        "portfolio: A full dbt build returned 8 models and 21 tests with 32 checks passing and zero errors, on real data rather than a seed sample.",
+        "profile: reconciling five undocumented subject metadata schemas from different project iterations,"
+      ],
+      "sources": [],
+      "tags": [
+        "project-choice",
+        "role-fit"
+      ]
+    },
+    {
+      "id": "nc-53",
+      "type": "how",
+      "level": 2,
+      "q": "How do I narrate the limitations of my own project without underselling it?",
+      "easy": "Give the limitation that most bounds the headline, what it means for the result, and what would fix it. A limitation with a fix sounds like a plan.",
+      "deep": "Tanay's write ups each have a limitations section; aloud, pick the one that most bounds the headline. Order book: one venue at 100 levels, so liquidity beyond the subscribed depth is invisible. Earthquake statistics: the pooled b of 0.34 reflects mixed magnitude scales and networks more than physics, and the page says so beside the number. ZTF: the reference labels are themselves model outputs, so the benchmark is relative. Format: 'The biggest limit is X. It means the result holds for Y but not Z. Fixing it takes W.' Do not list every limitation unprompted; offer the rest.",
+      "say": "The biggest limit on ZTF is the labels. There's no spectroscopic confirmation, and the reference labels are themselves model outputs. So my benchmark is relative to another classifier, and a real accuracy claim would need confirmed transients.",
+      "evidence": [
+        "portfolio: Validation against broker labels. There is no spectroscopic confirmation, and the reference labels are themselves model outputs, so the benchmark is relative rather than ground truth.",
+        "portfolio: Across all events pooled together, b was 0.34.",
+        "portfolio: One venue, 100 levels."
+      ],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "ztf"
+      ]
+    },
+    {
+      "id": "nc-54",
+      "type": "how",
+      "level": 2,
+      "q": "How do I narrate a design decision?",
+      "easy": "Decision, the alternative you rejected, the reason, and the condition under which you would change it.",
+      "deep": "The rejected alternative proves a decision was made rather than a default accepted. handoff: no allow on expiry; the rejected alternative is a timeout that approves; the reason is that approving because nobody looked in time is the absence of a decision written down as one; the condition is none, and a test asserts the enum member does not exist. ZTF: DuckDB as the default warehouse; rejected BigQuery or Snowflake as the default; the reason is zero cloud setup for anyone running it; the condition is production volume, where the same models port with a profile change. comms-agent: no agent framework; rejected LangGraph as a dependency; the reason is a small, fully traced state graph engine; porting is a mechanical change. Stating the condition shows the decision is reasoned rather than ideological.",
+      "say": "There's deliberately no allow on expiry in handoff. The alternative is a timeout that approves the action, and I rejected it because approving something nobody looked at isn't a decision. A ladder that can end in ran it anyway is a delay dressed up as a control. A test asserts that the allow member doesn't exist, so adding it means deleting a test that explains why.",
+      "evidence": [
+        "portfolio: The expiry behaviours are deny, safe_fallback, escalate and hold. There is deliberately no allow.",
+        "portfolio: A ladder whose terminal state can be \"ran it anyway\" is a delay mechanism wearing the costume of a control.",
+        "portfolio: A test asserts that the enum member does not exist, so adding it means deleting a test whose docstring explains why it should not.",
+        "portfolio: It defaults to DuckDB so anyone can run it with zero cloud setup, and the same models port to BigQuery and Snowflake with only a profile change."
+      ],
+      "sources": [],
+      "tags": [
+        "design-decisions",
+        "handoff",
+        "ztf"
+      ]
+    },
+    {
+      "id": "nc-55",
+      "type": "how",
+      "level": 2,
+      "q": "How do I answer 'how did you know it was correct'?",
+      "easy": "Name the reference you checked against, the test that could have failed, and a case where it did fail.",
+      "deep": "Validation answers need a reference, a test, and proof the test has teeth. References in Tanay's work: published test vectors and SMHasher's verification value for MurmurHash3; Kraken's CRC32 checksum on every message (46,892 of 46,892 matched); one rank with batch 2B as the reference for DDP gradients, checked to rtol=1e-4; PyTorch and MLX losses agreeing to 1e-6. Teeth: a deliberately corrupted order book update that failed its checksum and triggered a resync; the ViT inverse guard test; the earthquake coverage test requiring at least 16 of 20 synthetic catalogs to cover the true b. A failing case: the first b-value test failed on its seed, and the response was a coverage test rather than a looser bound. End on the reference, not on 'and it all passed'.",
+      "say": "The book is checked against Kraken's own checksum on every message. In the final run all 46,892 checksums matched. To prove the check has teeth, I fed it a deliberately corrupted update, and it failed and resynced from a fresh snapshot. That case is in the test suite too.",
+      "evidence": [
+        "portfolio: MurmurHash3, checked against published test vectors and SMHasher's verification value",
+        "portfolio: All 46,892 checksums (the snapshot and every update) matched, with no resyncs.",
+        "portfolio: To exercise the resync path, a deliberately corrupted update failed its checksum and the book recovered from a fresh snapshot; that case is also in the test suite.",
+        "portfolio: The suite spawns a real gloo process group and checks it to rtol=1e-4.",
+        "portfolio: The PyTorch and MLX losses agree to 1e-6 on identical inputs.",
+        "portfolio: a separate test requires at least 16 of 20 catalogs to cover the true value."
+      ],
+      "sources": [],
+      "tags": [
+        "validation",
+        "order-book",
+        "testing"
+      ]
+    },
+    {
+      "id": "nc-56",
+      "type": "how",
+      "level": 1,
+      "q": "Which headline numbers must I know cold, each with its comparator and caveat?",
+      "easy": "One per lead project: the number, what it was measured against, and the one caveat that travels with it. Drill until each is a single sentence.",
+      "deep": "Number bank. Wikipedia Edit Stream: HyperLogLog 986.9 against 983 exact, inside a 1.6% one sigma bound; caveat, only the small range path runs in a short session. Order book: 46,892 of 46,892 checksums verified; caveat, one venue. Earthquakes: California b = 0.73, bootstrap [0.66, 0.85]; caveat, pooled b of 0.34 reflects mixed scales. Dr. GRPO: 51.6% against 51.2% on MATH500, both length claims reversed; caveat, one seed. Tool graph: 1,768 of 1,770 typed required inputs have a producer; caveat, 65 percent of required inputs are typed handles. Distributed ViT: 98% efficiency in fp32 against 57% in fp16, 1.92x with no dataloader; caveat, synthetic runs are an upper bound. ZTF: 27,378 real alerts, dbt with 8 models and 21 tests; caveat, replay rather than live consumption. Groundwork: BM25 recall@5 0.921 against hybrid 0.853, ECE 0.045, declines 96.2% of unanswerable questions at a 60% precision floor; caveat, offline extractive reader and hashing embedder. BEIR: 6 of 6 cells, DPR 0.260 recovered to 0.318; caveat, BM25 is a Python reimplementation, not Anserini. JMA: 97.3% uptime against 46.3% schedule attainment, ~$355K; caveat, a projection. Gravity Spy: 0.89 AUC, ECE 0.10 to 0.05; caveat, volunteer labels. Kp: 1 hour RMSE 0.738, 45% better than the mean baseline; caveat, skill falls with horizon.",
+      "say": "If you stop me at any project, I have one sentence ready. On BEIR, DPR went from 0.260 to the published 0.318 once the encoder limit was fixed. On Dr. GRPO, accuracy held at 51.6% against 51.2%, on a single seed.",
+      "evidence": [
+        "portfolio: HyperLogLog estimated 986.9 distinct editors against an exact 983, an error of +0.4% against a one sigma bound of 1.6%.",
+        "portfolio: A short visit exercises only the small range path of HyperLogLog.",
+        "portfolio: All 46,892 checksums (the snapshot and every update) matched, with no resyncs.",
+        "portfolio: One venue, 100 levels.",
+        "portfolio: For California, b came out at 0.73 ± 0.03 with a bootstrap interval of [0.66, 0.85] above a completeness magnitude of 0.9",
+        "portfolio: Across all events pooled together, b was 0.34.",
+        "portfolio: MATH500: Dr. GRPO 51.6% vs GRPO 51.2%, paired +0.4 points [-3.4, +4.0]",
+        "portfolio: 1 seed, 100 steps, 500 paired eval problems",
+        "portfolio: 1,768 of 1,770 typed required inputs have a producer",
+        "portfolio: The honest version is that 65 percent of required inputs are typed handles and almost all of those are satisfiable.",
+        "portfolio: DDP in fp32: 1.96x at 98% efficiency",
+        "portfolio: identical config in fp16: 1.15x at 57%",
+        "portfolio: With no dataloader the same configuration scales at 1.92x, 96% efficiency.",
+        "portfolio: The synthetic runs also index a small pool, so their 96% is an upper bound on what fixing the input path could achieve, not a promise.",
+        "portfolio: I ran the pipeline against a real night of the survey: 27,378 Avro alert packets extracted from July 20, 2026.",
+        "portfolio: A full dbt build returned 8 models and 21 tests with 32 checks passing and zero errors, on real data rather than a seed sample.",
+        "repo:Groundwork/README.md: | sparse (BM25) | 0.782 | **0.921** | **0.843** | 0.869 |",
+        "repo:Groundwork/README.md: | hybrid (RRF) | 0.599 | 0.853 | 0.702 | 0.756 |",
+        "repo:Groundwork/README.md: **Calibration**: ECE 0.045, Brier 0.213, AUC 0.654 over 4,881 held-out questions.",
+        "repo:Groundwork/README.md: **Answering**: at a 60% precision floor the system answers 7.5% of answerable",
+        "repo:Groundwork/README.md: questions and correctly declines **96.2%** of unanswerable ones. The full",
+        "portfolio: 6 of 6 published cells reproduced",
+        "portfolio: DPR on SciFact recovered from 0.260 to a published 0.318",
+        "portfolio: This is the likely source of the only two inexact cells, +0.012 and -0.005.",
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem.",
+        "portfolio: ~$355K projected annualized opportunity",
+        "profile: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on",
+        "profile: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05.",
+        "portfolio: 1h RMSE = 0.738 (45% better than baseline)"
+      ],
+      "sources": [],
+      "tags": [
+        "number-bank",
+        "metric-honesty"
+      ]
+    },
+    {
+      "id": "nc-57",
+      "type": "how",
+      "level": 2,
+      "q": "How should I practise narration so it holds up under pressure?",
+      "easy": "Out loud, recorded, timed, and checked against keypoints. Silent rereading does not transfer to speech.",
+      "deep": "Loop: (1) pick a prompt and a rung; (2) answer aloud against a timer; (3) record and transcribe; (4) check the keypoints: result in the first sentence, one number per sentence, a comparator on each number, the caveat beside its number, no recap ending; (5) count fillers per minute; (6) redo once, immediately. Rotate audiences by giving the same project to an imagined recruiter, PM, manager and staff engineer back to back, which builds the reflex for switching depth. Drill transitions and the pushback formula separately, because they break under stress even when the walkthrough is solid. The drills in this deck's narration list are built for this loop. Before and after, from a real transcript pattern: 'So we kind of found that hybrid was, like, worse?' becomes the sentence below.",
+      "say": "My evaluation removed hybrid retrieval from my own system. It was 6.8 points of recall at 5 worse than BM25 alone, because the dense side was a hashing embedder.",
+      "evidence": [
+        "repo:Groundwork/README.md: default recommendation, and here it is 6.8 points of recall@5 *worse* than",
+        "repo:Groundwork/README.md: BM25 alone, because the hashing embedder has no semantic generalisation."
+      ],
+      "sources": [],
+      "tags": [
+        "practice",
+        "delivery"
+      ]
+    }
+  ],
+  "sources": []
+}
