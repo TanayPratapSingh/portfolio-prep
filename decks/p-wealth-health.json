@@ -1,0 +1,716 @@
+{
+  "deck_id": "p-wealth-health",
+  "title": "Challenging \"Wealth Equals Health\"",
+  "group": "Portfolio",
+  "repo": "",
+  "summary_easy": "A data storytelling project in R on Gapminder data for 180+ countries from 2000 to 2020. Tanay tested whether national income predicts life expectancy (it does) and whether schooling still predicts child mortality once income is accounted for (it does), then wrote the result up for a non technical community audience as an argument for education investment in rural communities.",
+  "summary_deep": "Life expectancy was regressed on log GDP per capita (slope 17.6, p < 2e-16; Bayes factor 5.66 x 10^218 for GDP as a predictor). Child mortality was regressed on mean years of schooling for adults 25 to 34 and log GDP together: schooling -0.76 and log GDP -74.14, both p < 2e-16, with a combined Bayes factor of 1.65 x 10^288 for the two predictor model. Confirmations were a Welch's t test (high education countries about 57 fewer child deaths per 1,000 births) and a one way ANOVA of life expectancy across Low, Medium, and High GDP groups (F = 426.5). The data are observational and aggregated to countries, so the results are conditional associations; the probes to expect are confounding versus mediation, reverse causation, non independent country years, the ecological fallacy, and the fact that coefficients in different units cannot rank the two predictors.",
+  "sheet": {
+    "easy": "## What it is\n- Course project in quantitative data storytelling (Jan 2025 to May 2025), done in R with ggplot2.\n- Tests the belief that **wealth equals health** on Gapminder data: 180+ countries, 2000 to 2020.\n- Written for a non technical audience (adults, teenagers, children) to support education investment in rural communities.\n\n## The two questions\n1. Does income predict life expectancy? **Yes.** Slope 17.6 on log GDP, p < 2e-16.\n2. Does education compete with income for child mortality? Both matter in a joint model: schooling -0.76 per year, log GDP -74.14, both p < 2e-16.\n\n## Variables\n| Variable | Meaning | Range |\n|---|---|---|\n| GDP per capita | income, log transformed | very skewed |\n| Life expectancy | main health outcome | about 40 to 85 years |\n| Child mortality | deaths per 1,000 births | under 5 to over 150 |\n| Mean schooling, ages 25 to 34 | education access | 2 to 15 years |\n\n## Confirmations\n- Welch's t test: high education countries had about **57 fewer child deaths per 1,000 births**.\n- One way ANOVA on life expectancy across Low, Medium, High GDP groups: **F = 426.5**.\n\n## The conclusion for the audience\n- Keep children (especially girls) in school through secondary, add health instruction, push for school buildings.\n\n## Say carefully\n- It is an **association**, not proof of cause.\n- The coefficients are in different units, so they do not show schooling is as strong as income.\n- Repeated years per country make p values too small unless clustered.\n- Country patterns do not automatically apply to one village or one mother.\n",
+    "deep": "## Setup\n- Gapminder country indicators, 180+ countries, 2000 to 2020. R, ggplot2, linear and multiple regression, Bayesian regression and model comparison, Welch's t test, one way ANOVA.\n- Unknown from the write up (check the script before an interview): log base, GDP units, whether rows are country years or country averages, row counts per model, cut points for education and GDP groups, Bayes factor package, prior, and comparison model.\n\n## Models\nModel 1: $LE = \\beta_0 + \\beta_1 \\log GDP + \\varepsilon$, $\\hat\\beta_1 = 17.6$, $p < 2\\times10^{-16}$, $BF = 5.66\\times10^{218}$ for GDP as a predictor.\n\nModel 2: $CM = \\beta_0 + \\beta_1 S + \\beta_2 \\log GDP + \\varepsilon$, $\\hat\\beta_1 = -0.76$, $\\hat\\beta_2 = -74.14$, both $p < 2\\times10^{-16}$; combined $BF = 1.65\\times10^{288}$ for the two predictor model (the page's stat line renders 388, the body 288; the body is the one to use, and the site needs a fix).\n\n## Reading coefficients\n- Level log: multiplying GDP by $k$ moves $y$ by $\\beta\\log_b k$. Base 10: tenfold richer, +17.6 years. Natural log: doubling, $17.6\\ln 2 \\approx 12.2$ years.\n- Plausibility: $\\hat\\beta = r\\,s_y/s_x$; incomes span about 2 orders of magnitude, so a natural log slope of 17.6 would imply about 90 years of fitted spread against an observed 40 to 85. Base 10 fits (inference; confirm log() vs log10()).\n- Model 2 under base 10: tenfold income at fixed schooling about 74 deaths per 1,000; full 2 to 15 year schooling range at fixed income about 10. Units differ; rank with standardized $\\beta_j s_{x_j}/s_y$, partial $R^2$, or Shapley $R^2$.\n\n## Controlling, OVB, collinearity\n- FWL: $\\hat\\beta_S$ equals the slope of residualized $CM$ on residualized $S$ (both on $\\log GDP$).\n- OVB: $E[\\tilde\\beta_1] = \\beta_1 + \\beta_2\\,\\mathrm{Cov}(x_1,x_2)/\\mathrm{Var}(x_1)$.\n- $VIF_j = 1/(1-R_j^2)$; warning above 5 to 10.\n\n## Tests\n- Welch: $t = (\\bar x_1-\\bar x_2)/\\sqrt{s_1^2/n_1+s_2^2/n_2}$, Welch-Satterthwaite $\\nu$. Gap about 57 deaths per 1,000, $p < 2.2\\times10^{-16}$. Unadjusted for GDP.\n- ANOVA: $F = \\frac{SS_B/(k-1)}{SS_W/(N-k)}$, $k=3$, $F = 426.5$. $\\eta^2 = \\frac{F(k-1)}{F(k-1)+N-k}$ needs $N$ (not reported). Post hoc: Tukey HSD. Welch ANOVA if variances differ.\n- p value: $P(T \\ge t_{obs}\\mid H_0)$; '< 2e-16' is R's print floor (machine epsilon about $2.22\\times10^{-16}$).\n- Bayes factor: $BF_{10} = p(D\\mid M_1)/p(D\\mid M_0)$; above 100 decisive (Jeffreys); $\\log BF$ grows with $n$; $BF \\approx \\exp((BIC_0-BIC_1)/2)$.\n\n## Causal threats\n| Threat | Here | Probe |\n|---|---|---|\n| Confounding | governance, health systems, fertility | add controls after drawing the DAG |\n| Mediation | income buys schooling | total vs direct, $a\\times b$ |\n| Reverse causation | lower mortality, more schooling | lagged panel |\n| Ecological fallacy | country data, village advice | household surveys |\n| Non independence | up to 21 years per country | cluster by country; design effect $1+(m-1)\\rho$, up to about 4.6x on SEs |\n| Functional form | mortality floor near 0 | interaction, log or logit outcome |\n| Measurement | Gapminder gap years estimated; schooling both sexes | women's schooling series |\n\n## Storytelling choices\n- Hook: a familiar belief. Exploratory scatter plots first, then models, then high vs low group tests, then an action list.\n- Units people feel (deaths per 1,000 births); keep 'associated with'.\n\n## Next\n1. Clustered SEs or country averages. 2. Standardized comparison, both vs each single predictor model. 3. Interaction and a log or logit outcome. 4. Women's schooling. 5. Country and year fixed effects with lagged schooling. 6. Effect sizes with intervals.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "I tested the claim that richer countries are healthier, using Gapminder data on 180 plus countries from 2000 to 2020, in R. Income does predict life expectancy: the slope on log GDP was 17.6. Then I asked whether schooling predicts child mortality once income is in the model. It does, and both coefficients were clearly significant. I wrote it for a non technical community audience, so the output was an argument for education investment that a rural leader can act on.",
+      "keypoints": [
+        "Gapminder, 180+ countries, 2000 to 2020, R",
+        "Life expectancy on log GDP: slope 17.6",
+        "Schooling predicts child mortality with GDP in the model",
+        "Non technical audience, actionable conclusion",
+        "Associational, not causal"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "Development funding often treats GDP growth as the master strategy, with health and education downstream. I wanted to test that framing and give a rural community leader evidence they could use. The data was Gapminder: 180 plus countries from 2000 to 2020. I used GDP per capita, log transformed because income is heavily right skewed, life expectancy, child mortality per 1,000 births, and mean years of schooling for adults 25 to 34, roughly the parents of young children. Question one was whether income predicts life expectancy. A linear regression on log GDP gave a slope of 17.6 with p below 2e-16, and a Bayesian regression gave an overwhelming Bayes factor. So yes, GDP matters. Question two was whether education competes with income for child mortality. I regressed child mortality on schooling and log GDP together. Schooling came out at -0.76 per year and log GDP at -74.14, both significant. Then I confirmed with two group tests. A Welch's t test showed high education countries had about 57 fewer child deaths per 1,000 births, and an ANOVA across three GDP groups gave F of 426.5. The report went to a non technical audience, so the conclusion was an action list: keep children in school through secondary, pair it with health instruction, and push for school infrastructure. Looking back, I'd tighten three things. The coefficients are in different units, so the write up's line that education is just as strong as GDP overreaches; the defensible claim is that schooling carries information beyond income. If the rows are country years, the standard errors need clustering by country. And the Bayes factors mostly reflect sample size. Next I'd run a within country panel with lagged schooling.",
+      "keypoints": [
+        "Problem: funders default to the GDP lever",
+        "Data: Gapminder, four variables, log GDP",
+        "Q1: slope 17.6 on log GDP",
+        "Q2: -0.76 schooling and -74.14 log GDP, both significant",
+        "Welch gap about 57 deaths per 1,000; ANOVA F = 426.5",
+        "Self critique: units, clustering, Bayes factor scale",
+        "Next: within country panel with lagged schooling"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Take me through the full technical story, including what you would defend and what you would change.",
+      "script": "The project tested a framing, wealth equals health, that shapes where development money goes, and it was written for a non technical community audience. I'll go through the data, the models, the numbers, and then the critique, because the critique is where an engineer should push. Data. Gapminder's country indicators for 180 plus countries from 2000 to 2020. Four variables. GDP per capita, log transformed because income is right skewed and because health flattens as income rises, which is the Preston curve; on a log axis equal distances are equal ratios. Life expectancy, roughly 40 to 85 years. Child mortality, from under 5 to over 150 deaths per 1,000 births. Mean years of schooling for adults aged 25 to 34, from 2 to 15 years. I picked that age band because it's roughly the parents of young children, and their schooling happened years before the child deaths I'm predicting, which helps the time order. Model one: life expectancy on log GDP. Slope 17.6, p below 2e-16, and a Bayesian regression gave a Bayes factor of 5.66 times 10 to the 218 for including GDP. The log base matters for reading 17.6. With base 10 it means a tenfold income difference goes with 17.6 years; with a natural log it would be about 12 years per doubling. The magnitude only fits the observed range under base 10. Model two: child mortality on schooling and log GDP together. Schooling at -0.76 per year, log GDP at -74.14, both p below 2e-16. By Frisch-Waugh-Lovell, the schooling coefficient uses only the part of schooling that income doesn't predict, so it answers the question I cared about: does schooling carry information at the same income. The Bayesian comparison favored the two predictor model, with a Bayes factor of 1.65 times 10 to the 288. Confirmations. A Welch's t test, because variances clearly differ between groups, found about 57 fewer child deaths per 1,000 births in high education countries. A one way ANOVA across low, medium, and high GDP groups gave F of 426.5. Both are regressions on binned predictors, so they're presentation tools more than new evidence. Now the critique, which I'd raise myself. First, units. Minus 0.76 per year and minus 74 per log unit can't be ranked directly. Under base 10, a tenfold income gap at fixed schooling is about 74 deaths, and the whole schooling range at fixed income is about 10. So the line in my write up that education is just as strong a predictor overreaches. I'd defend the narrower claim: schooling predicts child mortality beyond income, and it's the lever a community controls. Settling strength needs standardized coefficients or partial R squared. Second, independence. If the rows are country years, a country contributes up to 21 nearly identical rows. The design effect can understate standard errors by up to about 4.6 times. Clustered errors, country averages, or a random intercept model fix that, and I'd rerun before claiming significance survives. Third, the Bayes factors. Past 100 they change no decision, and with a real effect they grow with n. For the independent information claim, the right comparison is the two predictor model against each single predictor model. Fourth, causality. Schooling could be a mediator of income or a confounder, and reverse causation through the demographic transition is plausible. The write up stays associational, which is right. Fifth, functional form and aggregation. Linear mortality has a floor, so 'regardless of wealth' needs an interaction test, and country patterns don't transfer to individual mothers. Next would be a country and year fixed effects panel with schooling lagged, women's schooling as its own variable, and effect sizes with intervals in place of p values.",
+      "keypoints": [
+        "Data choices: log GDP for skew and the Preston curve; schooling 25 to 34 for time order",
+        "Model one: slope 17.6, log base matters, base 10 fits the range",
+        "Model two: -0.76 and -74.14; FWL reading of 'controlling for'",
+        "Welch gap about 57; ANOVA F = 426.5; both are binned regressions",
+        "Critique: units make 'just as strong' an overreach",
+        "Critique: country years need clustered errors, design effect up to 4.6x",
+        "Critique: Bayes factors scale with n; name the comparison",
+        "Next: fixed effects panel, lagged schooling, women's schooling"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone with no statistics background.",
+      "script": "A lot of development money assumes that if a country gets richer, its people get healthier, so the plan is to grow the economy first. I checked that idea on data from more than 180 countries over twenty years. Richer countries do live longer. But when I compared countries with the same income, the ones where young adults had more years of school still lost fewer children before age five. That matters for a village, because a village can't change national income but it can keep kids in school. So my report, written for adults and teenagers, argued for school access, keeping girls in school longer, and teaching health basics alongside. The data shows a strong link, though it can't prove that school alone causes the drop.",
+      "keypoints": [
+        "Common belief: grow the economy first",
+        "180+ countries, twenty years",
+        "Same income, more schooling, fewer child deaths",
+        "Schooling is something a community controls",
+        "Honest limit: a link, not proof of cause"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Sketch the analysis on the whiteboard.",
+      "script": "First I draw the causal picture, because everything else depends on it. Three boxes: income, schooling, child mortality. Arrows from income to mortality and schooling to mortality, then a double arrow between income and schooling, and I say that this link is the whole problem: schooling could be on the path from income or a common cause of both. Second, two small scatter plots. Life expectancy against log GDP, rising and nearly straight on the log axis, and I write 17.6 on the slope and note the log base. Next to it, child mortality against schooling, falling. I say this is where the story started, because the schooling relationship looked tight. Third, the regression table for model two: schooling -0.76, log GDP -74.14, both p below 2e-16. Under it I write the Frisch-Waugh-Lovell idea in one line: the schooling slope uses only the part of schooling income doesn't predict. Fourth, a box of confirmations: Welch gap about 57 deaths per 1,000, ANOVA F of 426.5 across three GDP groups. Last, a column headed 'what this doesn't show', and I list four things: units differ, so no ranking without standardizing; country years need clustered errors; association, not cause; country patterns, not individual mothers. I finish by drawing the next step: a panel with country fixed effects and lagged schooling.",
+      "keypoints": [
+        "Draw the causal triangle first: income, schooling, mortality",
+        "Two scatter plots, slope 17.6 on log GDP",
+        "Model two table: -0.76 and -74.14",
+        "One line FWL explanation of controlling",
+        "Confirmations: about 57 deaths; F = 426.5",
+        "'What this doesn't show' column",
+        "Next step: fixed effects panel with lags"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why did you log transform GDP, and how does that change how you read the coefficient?",
+      "script": "Income is right skewed, a few very rich countries sit far out, and health gains flatten as income rises, which is the Preston curve. Logging spreads out the poor countries where most of the health variation is and makes the curve close to straight. The cost is that the slope is per log unit, so the base matters. With base 10, my 17.6 means a country ten times richer lives about 17.6 years longer on average. With a natural log it would mean about 12 years per doubling. The size only fits the observed 40 to 85 year range under base 10, so that's how I read it.",
+      "keypoints": [
+        "Right skew and diminishing returns (Preston curve)",
+        "Equal distances are equal ratios",
+        "Slope is per log unit; base matters",
+        "Base 10: tenfold richer, about 17.6 years",
+        "Natural log: about 12 years per doubling"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What does the Bayes factor add over the p value?",
+      "script": "In principle, it compares two models directly and can support the null, which a p value can't. A Bayes factor of 100 means the data were 100 times more likely under one model. In this project it added less than it looks, because with thousands of rows and a real effect, both the p value and the Bayes factor go to extremes. 5.66 times 10 to the 218 says I had a lot of data. What I'd keep is the model comparison framing, stated properly: the two predictor model against each single predictor model, with the prior written down.",
+      "keypoints": [
+        "Ratio of marginal likelihoods; can favor the null",
+        "100 already counts as decisive",
+        "Huge values mostly reflect sample size",
+        "State the comparison and the prior",
+        "Right comparison: both predictors vs each alone"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why mean schooling for adults aged 25 to 34?",
+      "script": "Two reasons. It's the most reliable cross country education measure in the data, available across the 180 plus countries. And that age band is roughly the parents of young children, so it's the education closest to the households where child mortality happens. It also helps the time order: the schooling of a 30 year old happened 10 to 20 years before the child deaths I'm predicting. The weakness is that it covers both sexes, so it can't test the maternal education story directly. I'd rerun with women's schooling only.",
+      "keypoints": [
+        "Most reliable cross country education proxy",
+        "Roughly the parents of young children",
+        "Schooling predates current child mortality",
+        "Covers both sexes, not mothers",
+        "Next: women's schooling 25 to 34"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you get closer to a causal answer?",
+      "script": "I'd move from a pooled cross country regression to a panel with country and year fixed effects. That only uses changes within each country over time, so anything fixed about a country, like geography or history, drops out. I'd lag schooling five to ten years so the time order is clean. If I wanted a sharper design, I'd look for school expansion reforms and run a difference in differences, or use reforms as instruments. Each of those has its own assumption, parallel trends or exclusion, and I'd say which one I'm betting on.",
+      "keypoints": [
+        "Country and year fixed effects panel",
+        "Within country change removes fixed confounders",
+        "Lag schooling five to ten years",
+        "Difference in differences around school reforms",
+        "Name the assumption each design needs"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your own coefficients say income matters far more than schooling. Isn't the headline wrong?",
+      "script": "Partly, yes, and I'd rather say it first. The raw coefficients are in different units, so -0.76 against -74.14 doesn't rank anything. But read in natural units, a tenfold income gap at fixed schooling is about 74 deaths per 1,000, and the whole schooling range is about 10. So my write up's line that education is just as strong a predictor overreaches. What holds is narrower: schooling predicts child mortality at the same income, and it's the lever a community actually controls. To settle strength, I'd report standardized coefficients and partial R squared.",
+      "keypoints": [
+        "Concede the 'just as strong' line overreaches",
+        "Units differ, so raw coefficients don't rank",
+        "In natural units income has the larger association",
+        "Defend: schooling carries information beyond income",
+        "Fix: standardized coefficients, partial R squared"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "With repeated years per country, your p values and Bayes factors are meaningless.",
+      "script": "If the rows are country years, they're too extreme, I agree. A country's income and schooling barely change year to year, so up to 21 rows per country carry little more than one. The design effect can understate standard errors by up to about 4.6 times, and the Bayes factors are inflated far more. I wouldn't call the results meaningless, though. The direction is consistent across the regressions, the group tests, and the scatter plots. The fix is clustering by country or using country averages, and I'd rerun before claiming significance survives.",
+      "keypoints": [
+        "Concede: non independent rows make p values too small",
+        "Up to 21 rows per country, design effect up to 4.6x",
+        "Bayes factors inflated even more",
+        "Defend: direction consistent across methods",
+        "Fix: cluster by country or average, then rerun"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "wh-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is this project, and why does it matter?",
+      "easy": "Tanay tested the common claim that richer countries are healthier, on Gapminder data for 180+ countries from 2000 to 2020. Income does predict life expectancy, and schooling still predicts child mortality after income is in the model, so the report argues that a rural community can act on schooling directly instead of waiting for national income to grow.",
+      "deep": "A quantitative data storytelling project (Jan 2025 to May 2025) in R with ggplot2. The stake is where development money goes: funding tends to treat GDP growth as the master strategy, with health and education as downstream beneficiaries. Two research questions: (1) to what extent does income influence life expectancy across countries, and (2) can education be a more effective tool than income for reducing child mortality. Methods: simple linear regression of life expectancy on log GDP per capita, multiple regression of child mortality on mean years of schooling and log GDP, Bayesian regression and Bayesian model comparison (Bayes factors), and two confirmatory group tests, a Welch's t test and a one way ANOVA. The audience was deliberately non technical (adults, teenagers, and children), so the deliverable is a written argument with evidence and an action list, not a deployed model.",
+      "say": "I tested the idea that wealth equals health on Gapminder data for 180 plus countries. Income does predict life expectancy. The more useful finding was that schooling still predicts child mortality once income is in the model, and schooling is something a rural community can act on. I wrote it for a non technical audience, so the output was an argument with evidence behind it.",
+      "evidence": [
+        "portfolio: META: Quantitative Data Storytelling / Jan 2025 to May 2025",
+        "portfolio: To what extent does income influence life expectancy across countries?",
+        "portfolio: Can education serve as a more effective tool than income in reducing child mortality?",
+        "portfolio: Development funding tends to flow toward GDP growth as the master strategy, with health and education treated as downstream beneficiaries.",
+        "portfolio: The explicit goal here was evidence a community leader can use to argue for education investment in rural communities.",
+        "portfolio: The final report is written for an intentionally non technical audience: adults, teenagers, and children who can act on the conclusion."
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "observational",
+        "r",
+        "gapminder"
+      ]
+    },
+    {
+      "id": "wh-02",
+      "type": "how",
+      "level": 1,
+      "q": "What data did you use, what does each variable measure, and what are its quirks?",
+      "easy": "The Gapminder global dataset: 180+ countries, 2000 to 2020. Four variables: GDP per capita (log transformed), life expectancy (about 40 to 85 years), child mortality (under 5 to over 150 deaths per 1,000 births), and mean years of schooling for adults aged 25 to 34 (2 to 15 years).",
+      "deep": "Gapminder is a public compilation of country level indicators stitched together from many statistical sources, with gap years filled by estimates, so some country years are modelled rather than measured. Variable choices in the write up: GDP per capita is the income measure, log transformed for right skew; life expectancy is the primary health outcome; child mortality is described as the most policy responsive health metric; mean schooling of adults 25 to 34 is used as the most reliable cross country proxy for education access, and that age band is roughly the parents of young children, which suits a child mortality outcome. Quirks to own in an interview: (1) the structure is a panel, the same country appears in up to 21 years, so rows are not independent; (2) the schooling variable covers both sexes, not mothers; (3) the write up does not state the GDP units (constant or PPP dollars) or the log base, so check the script; (4) R's lm() drops any row with a missing value by default (na.action = na.omit), so the two predictor model can silently use fewer country years than the one predictor model, and the write up does not report row counts per model.",
+      "evidence": [
+        "portfolio: The data is the Gapminder global dataset, covering 180+ countries between 2000 and 2020, with these variables:",
+        "portfolio: GDP per capita as the measure of national income, log transformed to address right skew from extreme high income outliers.",
+        "portfolio: Life expectancy as the primary health outcome, ranging from roughly 40 to 85 years.",
+        "portfolio: Child mortality as the most policy responsive health metric, ranging from fewer than 5 deaths per 1,000 births in high income countries to over 150 in low income countries.",
+        "portfolio: Mean years of schooling for adults aged 25 to 34, the most reliable cross country proxy for education access, ranging from 2 to 15 years."
+      ],
+      "sources": [],
+      "tags": [
+        "data",
+        "gapminder",
+        "panel",
+        "missing-data"
+      ]
+    },
+    {
+      "id": "wh-03",
+      "type": "why",
+      "level": 1,
+      "q": "Why log transform GDP per capita?",
+      "easy": "Income is very skewed: a few very rich countries sit far to the right, and health gains flatten as income rises. Taking the log spreads the poor countries out, pulls the rich ones in, and turns a bending curve into something close to a straight line.",
+      "deep": "The life expectancy and income relationship is the Preston curve (Preston 1975): steep gains at low incomes, flattening at high incomes. A straight line on raw GDP is dominated by a handful of high income outliers and underfits the steep low income region where most of the variation in health is. On a log scale, equal distances are equal ratios, so going from $1,000 to $2,000 counts the same as $20,000 to $40,000, which encodes diminishing returns. Side benefits: less right skew in the predictor, less influence from extreme points, and residual spread closer to constant. Costs: coefficients are now per log unit, the log base must be reported, and nonpositive values cannot be logged (not an issue for GDP). The write up's stated reason is right skew from extreme high income outliers. A plot of the residuals against fitted values is the check that the transform did its job.",
+      "evidence": [
+        "portfolio: GDP per capita as the measure of national income, log transformed to address right skew from extreme high income outliers.",
+        "portfolio: Figure 1. Log GDP vs life expectancy, all countries 2000 to 2020"
+      ],
+      "sources": [],
+      "tags": [
+        "log-transform",
+        "preston-curve",
+        "regression"
+      ]
+    },
+    {
+      "id": "wh-04",
+      "type": "formula",
+      "level": 2,
+      "q": "How do you interpret the 17.6 coefficient on log GDP, and does the log base matter?",
+      "easy": "It is the change in life expectancy per one unit of log GDP. With a base 10 log, a country ten times richer is associated with about 17.6 more years of life expectancy. With a natural log, doubling income goes with about 12.2 more years. The base changes the reading, and the write up does not state it.",
+      "deep": "Level log model: $y = \\beta_0 + \\beta_1 \\log_b x + \\varepsilon$. Multiplying $x$ by $k$ changes the fitted $y$ by $\\beta_1 \\log_b k$. Natural log: doubling gives $17.6 \\times \\ln 2 \\approx 12.2$ years, and a 1% rise gives about $0.01 \\times 17.6 = 0.18$ years. Base 10: a tenfold rise gives 17.6 years, and a doubling gives $17.6 \\times \\log_{10}2 \\approx 5.3$ years. A rough plausibility check points to the base: an OLS slope is $\\hat\\beta_1 = r\\,s_y/s_x$, so the fitted line usually spans less than the observed outcome range. Country incomes in this period span roughly two orders of magnitude, about 2 units of $\\log_{10}$ or about 5 units of $\\ln$. A natural log slope of 17.6 would imply roughly 90 years of fitted spread, wider than the observed 40 to 85 range; a base 10 slope implies roughly 40 years, which fits. That is an inference, not a documented fact: R's log() is natural and log10() is base 10, so Tanay should confirm which one the script called. Either way the coefficient is a cross country association, not the effect of growing one country's income.",
+      "say": "It's the change in life expectancy per unit of log income. The base matters. With base 10 it means a country ten times richer lives about 17.6 years longer on average; with a natural log it would mean about 12 years per doubling. The magnitude only makes sense for base 10, so that's how I read it, and it's an association across countries.",
+      "evidence": [
+        "portfolio: Linear regression of life expectancy on log GDP per capita gave a coefficient of 17.6 (p < 2e-16), a strong positive relationship.",
+        "portfolio: Life expectancy as the primary health outcome, ranging from roughly 40 to 85 years."
+      ],
+      "sources": [],
+      "tags": [
+        "interpretation",
+        "log-transform",
+        "coefficients"
+      ]
+    },
+    {
+      "id": "wh-05",
+      "type": "number",
+      "level": 1,
+      "q": "What did the life expectancy regression find?",
+      "easy": "Life expectancy rises with log income: coefficient 17.6, p < 2e-16. A Bayesian regression gave a Bayes factor of 5.66 x 10^218 in favor of GDP as a predictor. The answer to question one was yes, GDP matters.",
+      "deep": "Model: life expectancy on log GDP per capita, one predictor. Results: slope 17.6 years per log unit, p < 2e-16 (R's display floor), and a Bayes factor of 5.66 x 10^218, read most naturally as the GDP model against an intercept only model (the write up says 'in favor of GDP as a predictor'). The one way ANOVA across Low, Medium, and High GDP groups (F = 426.5) points the same way. Caveats that travel with the number: (1) one predictor and no controls, so the slope absorbs everything that travels with income, including schooling, health systems, and governance (omitted variable bias, see wh-08); (2) the rows span 2000 to 2020, and if they are country years they are not independent, which makes both the p value and the Bayes factor too extreme; (3) the write up reports no R squared or residual diagnostics, so how much variation income explains is not stated.",
+      "evidence": [
+        "portfolio: Linear regression of life expectancy on log GDP per capita gave a coefficient of 17.6 (p < 2e-16), a strong positive relationship.",
+        "portfolio: Bayesian regression returned a Bayes Factor of 5.66 x 10&#178;&#185;&#x2078; in favor of GDP as a predictor, which is overwhelming evidence.",
+        "portfolio: One way ANOVA on life expectancy by GDP group (Low, Medium, High) returned F = 426.5, p < 2e-16:"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "regression",
+        "bayes-factor"
+      ]
+    },
+    {
+      "id": "wh-06",
+      "type": "number",
+      "level": 1,
+      "q": "What did the child mortality regression with both predictors find?",
+      "easy": "Both predictors were negative and clearly significant: mean years of schooling -0.76 and log GDP per capita -74.14, each with p < 2e-16. Bayesian model comparison gave a combined Bayes factor of 1.65 x 10^288 for the model with both predictors.",
+      "deep": "Model: child mortality (deaths per 1,000 births) on mean schooling of adults 25 to 34 and log GDP per capita. Reading each coefficient: holding log GDP fixed, one more year of average schooling is associated with about 0.76 fewer child deaths per 1,000 births; holding schooling fixed, one more log unit of GDP is associated with about 74 fewer. The write up reads the Bayes factor as evidence that each predictor carries independent information. Caveats: (1) the coefficients are in different units, so their sizes do not compare directly (see wh-19); (2) the comparison model behind the Bayes factor is not named, and the test that each predictor adds information is the two predictor model against each one predictor model; (3) the same independence caveat as wh-05. A presentation bug to fix before quoting: the stat line at the top of the project page renders the combined Bayes factor exponent as 388 (HTML entity for superscript 3), while the body text says 288. Use the body value and correct the site.",
+      "evidence": [
+        "portfolio: - Mean years of schooling: estimate = -0.76, p < 2e-16",
+        "portfolio: - Log GDP per capita: estimate = -74.14, p < 2e-16",
+        "portfolio: Bayesian model comparison returned a combined Bayes Factor of 1.65 x 10&#178;&#x2078;&#x2078; in favor of the model that includes both predictors.",
+        "portfolio: That is overwhelming evidence that each predictor carries independent information about child mortality.",
+        "portfolio: 180+ countries  |  Period: 2000 to 2020  |  Combined BF = 1.65 x 10&#179;&#x2078;&#x2078;  |  ANOVA F = 426.5 (p < 2e-16)"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "multiple-regression",
+        "bayes-factor",
+        "discrepancy"
+      ]
+    },
+    {
+      "id": "wh-07",
+      "type": "concept",
+      "level": 1,
+      "q": "What does controlling for GDP mean in a multiple regression?",
+      "easy": "It asks how child mortality differs between countries with different schooling but the same income. The schooling coefficient is the slope you would see if you could compare countries at equal GDP.",
+      "deep": "OLS solves $\\hat\\beta = (X^\\top X)^{-1}X^\\top y$. By the Frisch-Waugh-Lovell theorem, the schooling coefficient equals the slope from regressing the residuals of child mortality on log GDP against the residuals of schooling on log GDP, so it uses only the part of schooling that income does not predict. Consequences: (1) when schooling and GDP are highly correlated, little independent variation is left and standard errors grow; the variance inflation factor is $VIF_j = 1/(1-R_j^2)$, where $R_j^2$ comes from regressing predictor $j$ on the others, and values above 5 to 10 are the usual warning; (2) the adjustment is linear and additive by assumption, so it only matches real countries at equal income where the data overlap; (3) it removes confounding only by variables in the model, while institutions, health spending, urbanization, and fertility remain. Inference assumptions: correct functional form, independent errors, constant error variance, no perfect collinearity, and roughly normal errors for exact small sample t tests.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "multiple-regression",
+        "fwl",
+        "multicollinearity",
+        "vif"
+      ]
+    },
+    {
+      "id": "wh-08",
+      "type": "formula",
+      "level": 2,
+      "q": "If schooling matters for health, what happens to the GDP coefficient in a model that leaves schooling out?",
+      "easy": "It picks up part of schooling's association, because richer countries also have more schooling. Leaving out a variable that is related to both the outcome and an included predictor biases the included coefficient.",
+      "deep": "Omitted variable bias. True model $y = \\beta_0 + \\beta_1 x_1 + \\beta_2 x_2 + u$; the short regression of $y$ on $x_1$ alone gives $E[\\tilde\\beta_1] = \\beta_1 + \\beta_2\\delta_1$, where $\\delta_1 = \\mathrm{Cov}(x_1,x_2)/\\mathrm{Var}(x_1)$ is the slope of $x_2$ on $x_1$. Both conditions are needed: $x_2$ affects $y$ ($\\beta_2 \\neq 0$) and $x_2$ correlates with $x_1$ ($\\delta_1 \\neq 0$). Sign table: if both are positive or both negative, the bias is upward. Here $x_1$ is log GDP and $x_2$ is schooling; $\\delta_1 > 0$, and for life expectancy $\\beta_2 > 0$ is plausible, so the 17.6 in the one predictor model likely overstates income's own association. For child mortality, $\\beta_2 < 0$ and $\\delta_1 > 0$ give a negative bias, which would make GDP look more protective than it is. This reading treats schooling as a confounder. If schooling is a mediator (income buys schooling), the short regression gives the total association and is the quantity of interest, which is why the causal story has to come before the regression.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "omitted-variable-bias",
+        "confounding",
+        "regression"
+      ]
+    },
+    {
+      "id": "wh-09",
+      "type": "define",
+      "level": 1,
+      "q": "Define a confounder, using this project.",
+      "easy": "A confounder is a third factor that drives both the suspected cause and the outcome, so the two look linked even if one does not affect the other.",
+      "deep": "In a causal graph, a confounder is a common cause of the treatment and the outcome, and it opens a backdoor path between them. For schooling and child mortality, candidates are national income (in the model), quality of governance, health system coverage such as vaccination and clinics, urbanization, fertility, and conflict. The backdoor criterion: adjust for a set of variables that blocks every backdoor path and contains no descendant of the treatment. Two mistakes the criterion guards against: adjusting for a collider (a common effect, which opens a path and creates bias) and adjusting for a mediator (which removes part of the effect being estimated). Residual confounding remains when a control is measured with error, as Gapminder's estimated country years are, because a noisy control only partly adjusts.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "confounding",
+        "dag",
+        "causal-inference"
+      ]
+    },
+    {
+      "id": "wh-10",
+      "type": "compare",
+      "level": 2,
+      "q": "Is education a confounder or a mediator of the income and health relationship, and why does it matter?",
+      "easy": "If richer countries buy more schooling and schooling saves children, education sits on the path from income to health: a mediator. If educated populations both earn more and keep children alive, education is a common cause: a confounder. The same regression is read differently in each case.",
+      "deep": "Mediator story: GDP to schooling to child mortality. The GDP coefficient in the GDP only model is the total association, the GDP coefficient with schooling added is the direct part, and the indirect part is $a \\times b$ ($a$: schooling on GDP, $b$: mortality on schooling given GDP), the Baron and Kenny product of coefficients, with a bootstrap interval for its uncertainty. Modern causal mediation needs sequential ignorability, meaning no unmeasured confounding of the mediator and outcome. Confounder story: schooling raises both income and child survival, so leaving it out biases the GDP coefficient (wh-08). In reality both run at once over decades, and a cross country regression cannot separate them. For this project: the schooling coefficient conditional on GDP answers 'does schooling carry information beyond income' under either story, but neither story turns -0.76 into a causal effect. Using schooling of adults 25 to 34, whose schooling largely predates current child mortality, helps the time order.",
+      "say": "It could be either, and the data can't tell them apart. If income buys schooling, schooling is a mediator and adding it shows how much of income's association runs through education. If education drives both income and survival, it's a confounder and leaving it out inflates GDP. My joint model answers the narrower question: does schooling still predict child mortality at the same income. It does.",
+      "evidence": [
+        "portfolio: - Mean years of schooling: estimate = -0.76, p < 2e-16",
+        "portfolio: - Log GDP per capita: estimate = -74.14, p < 2e-16",
+        "portfolio: Mean years of schooling for adults aged 25 to 34, the most reliable cross country proxy for education access, ranging from 2 to 15 years."
+      ],
+      "sources": [],
+      "tags": [
+        "mediation",
+        "confounding",
+        "causal-inference"
+      ]
+    },
+    {
+      "id": "wh-11",
+      "type": "concept",
+      "level": 1,
+      "q": "Your results are correlations. What would it take to make a causal claim about schooling?",
+      "easy": "Three things could produce the pattern without schooling causing anything: better child health could drive schooling, a third factor could drive both, or the measurements could be biased. A causal claim needs a design that rules these out, for example a policy change that raised schooling in some places and not others.",
+      "deep": "Non causal explanations: reverse causation (falling child mortality lowers fertility and raises investment per child), common causes (governance, health systems, geography), and selection or measurement error. Designs that get closer: (1) a country fixed effects panel $y_{it} = \\alpha_i + \\lambda_t + \\beta x_{it} + \\varepsilon_{it}$, which uses only within country change and removes time invariant confounders; (2) difference in differences around school expansion reforms, which assumes parallel trends; (3) instrumental variables, such as school construction programs or compulsory schooling law changes used in the economics literature, which need relevance and the exclusion restriction; (4) regression discontinuity at school entry age cutoffs. Each design trades one untestable assumption for another, and none comes free with pooled Gapminder data. The write up's conclusion uses associational language ('is associated with'), which is the right register for these data.",
+      "evidence": [
+        "portfolio: Each additional year of schooling is associated with a measurable drop in child deaths, regardless of country wealth."
+      ],
+      "sources": [],
+      "tags": [
+        "causal-inference",
+        "fixed-effects",
+        "iv",
+        "did"
+      ]
+    },
+    {
+      "id": "wh-12",
+      "type": "define",
+      "level": 2,
+      "q": "What is the ecological fallacy, and where does it bite here?",
+      "easy": "It means drawing conclusions about individuals or small communities from patterns between large groups. A country level link between average schooling and child deaths does not prove that one mother's extra year of school lowers her own child's risk by that amount.",
+      "deep": "Robinson (1950) showed that the state level correlation between literacy and the share of foreign born residents had the opposite sign to the individual level correlation. Mechanism: an aggregate correlation mixes within group and between group relationships plus group level confounders, and Simpson's paradox is the extreme case. In this project the unit of analysis is the country (or country year), while the recommendation is addressed to a rural community leader. The step from country to community needs either micro data (household surveys that link a mother's schooling to her children's survival) or an explicit argument that the mechanism works the same way locally. The reverse mistake, the atomistic fallacy, is generalizing from individuals to groups. An honest version of the report says the country pattern is consistent with individual level evidence, and that the project itself did not test individuals.",
+      "evidence": [
+        "portfolio: The explicit goal here was evidence a community leader can use to argue for education investment in rural communities."
+      ],
+      "sources": [],
+      "tags": [
+        "ecological-fallacy",
+        "aggregation",
+        "simpsons-paradox"
+      ]
+    },
+    {
+      "id": "wh-13",
+      "type": "define",
+      "level": 2,
+      "q": "What does p < 2e-16 actually mean, and why does every test here report it?",
+      "easy": "A p value is how surprising the data would be if there were truly no relationship. 'Less than 2e-16' is the smallest value R will print, so it means 'too small to display', and it carries no information about how big the effect is.",
+      "deep": "Definition: $p = P(T \\geq t_{obs} \\mid H_0)$ for the test statistic $T$. R's summary of an lm prints '< 2e-16' and t.test prints '< 2.2e-16' because machine epsilon for doubles is about $2.22\\times10^{-16}$; the Welch test caption in this project shows the second form. With thousands of rows and a real relationship, p collapses toward zero regardless of effect size, so p mainly reports sample size here; the coefficient, its interval, and a variance explained measure carry the information. Common misreadings: p is not the probability that the null is true, not the probability that the result is a fluke, and not a measure of importance. It is also only valid if the test's assumptions hold, and non independent country years make it too small.",
+      "evidence": [
+        "portfolio: Figure 4. Child mortality by education group (Welch's t test). Mean difference &#8776; 57 deaths per 1,000 births, p < 2.2e-16",
+        "portfolio: - Mean years of schooling: estimate = -0.76, p < 2e-16"
+      ],
+      "sources": [],
+      "tags": [
+        "p-value",
+        "hypothesis-testing",
+        "r"
+      ]
+    },
+    {
+      "id": "wh-14",
+      "type": "define",
+      "level": 2,
+      "q": "What is a Bayes factor, and how should a reader treat a value like 5.66 x 10^218?",
+      "easy": "A Bayes factor is the ratio of how well two models predicted the observed data. A value of 100 means the data were 100 times more likely under one model than the other. Values in the hundreds and beyond all mean 'decisive', so huge exponents mostly reflect a large sample.",
+      "deep": "$BF_{10} = \\frac{p(D\\mid M_1)}{p(D\\mid M_0)}$, where the marginal likelihood $p(D\\mid M) = \\int p(D\\mid\\theta, M)\\,p(\\theta\\mid M)\\,d\\theta$ averages the fit over the prior. Posterior odds equal the Bayes factor times prior odds. Conventional scales: Jeffreys calls above 100 decisive, and Kass and Raftery (1995) call above 150 very strong. The value depends on the prior on coefficients; default regression Bayes factors in R (for example lmBF or regressionBF in the BayesFactor package) use Zellner-Siow Cauchy priors, and a wider prior penalizes the larger model more (the Jeffreys-Lindley effect). With a real effect, log BF grows roughly linearly in n, so 10^218 says more about the number of rows than about effect size, and non independent rows inflate it further. A BIC approximation: $BF_{10} \\approx \\exp\\big((BIC_0 - BIC_1)/2\\big)$. The write up does not name the package, the prior, or the comparison model, so in an interview state the comparison explicitly.",
+      "evidence": [
+        "portfolio: Bayesian regression returned a Bayes Factor of 5.66 x 10&#178;&#185;&#x2078; in favor of GDP as a predictor, which is overwhelming evidence.",
+        "portfolio: Bayesian model comparison returned a combined Bayes Factor of 1.65 x 10&#178;&#x2078;&#x2078; in favor of the model that includes both predictors."
+      ],
+      "sources": [],
+      "tags": [
+        "bayes-factor",
+        "bayesian-inference",
+        "model-comparison"
+      ]
+    },
+    {
+      "id": "wh-15",
+      "type": "formula",
+      "level": 2,
+      "q": "Explain the Welch's t test you ran and what it found.",
+      "easy": "It compares average child mortality between high education and low education country groups without assuming both groups have the same spread. The gap was about 57 deaths per 1,000 births, p < 2.2e-16.",
+      "deep": "$t = \\frac{\\bar x_1 - \\bar x_2}{\\sqrt{s_1^2/n_1 + s_2^2/n_2}}$ with Welch-Satterthwaite degrees of freedom $\\nu = \\frac{(s_1^2/n_1 + s_2^2/n_2)^2}{\\frac{(s_1^2/n_1)^2}{n_1-1} + \\frac{(s_2^2/n_2)^2}{n_2-1}}$. Why Welch over Student's t: child mortality in low education countries is far more variable (the outcome runs from under 5 to over 150), so equal variances are not credible, and Welch loses almost nothing when variances are equal, which is why R's t.test defaults to var.equal = FALSE. Assumptions: independent observations and an approximately normal sampling distribution of each mean (the central limit theorem covers large groups). Caveats: (1) the write up does not state the cut point that defines the groups, and dichotomizing a continuous predictor throws information away and lets the cut be chosen to flatter; (2) the test does not hold income fixed, so the 57 death gap mixes schooling with GDP; (3) repeated country years violate independence.",
+      "evidence": [
+        "portfolio: Figure 4. Child mortality by education group (Welch's t test). Mean difference &#8776; 57 deaths per 1,000 births, p < 2.2e-16",
+        "portfolio: Child mortality as the most policy responsive health metric, ranging from fewer than 5 deaths per 1,000 births in high income countries to over 150 in low income countries."
+      ],
+      "sources": [],
+      "tags": [
+        "t-test",
+        "welch",
+        "hypothesis-testing"
+      ]
+    },
+    {
+      "id": "wh-16",
+      "type": "formula",
+      "level": 2,
+      "q": "Explain the one way ANOVA and what F = 426.5 means.",
+      "easy": "The ANOVA compared average life expectancy across Low, Medium, and High GDP groups. F = 426.5 means the differences between group averages are huge compared with the variation inside each group.",
+      "deep": "$F = \\frac{SS_B/(k-1)}{SS_W/(N-k)}$ with $SS_B = \\sum_g n_g(\\bar y_g - \\bar y)^2$ and $SS_W = \\sum_g\\sum_i (y_{gi}-\\bar y_g)^2$, here $k = 3$. Under the null of equal means, $F \\sim F_{k-1,\\,N-k}$. Assumptions: independent observations, roughly normal residuals, equal group variances (check with Levene's test; Welch's ANOVA, oneway.test in R, drops that assumption). Effect size: $\\eta^2 = SS_B/SS_T = \\frac{F(k-1)}{F(k-1) + N - k}$, which needs N, and the write up does not report N, so the effect size cannot be recovered from F alone. A significant F says at least one mean differs; which pairs differ needs a post hoc test such as Tukey HSD, and with ordered groups a linear trend contrast is more powerful. Binning GDP into three groups discards the within group variation that the regression already used, so the ANOVA works as a confirmation and a presentation device more than as new evidence.",
+      "evidence": [
+        "portfolio: One way ANOVA on life expectancy by GDP group (Low, Medium, High) returned F = 426.5, p < 2e-16:",
+        "portfolio: BADGE: 180+ countries / ANOVA F = 426.5 (p < 2e-16)"
+      ],
+      "sources": [],
+      "tags": [
+        "anova",
+        "f-test",
+        "effect-size"
+      ]
+    },
+    {
+      "id": "wh-17",
+      "type": "why",
+      "level": 2,
+      "q": "The conclusion says each year of schooling lowers child deaths 'regardless of country wealth'. What would you need to support that?",
+      "easy": "The model assumed the schooling slope is the same at every income level. To claim it holds regardless of wealth, you test whether the slope changes with income by adding an interaction term.",
+      "deep": "The additive model $CM = \\beta_0 + \\beta_1 S + \\beta_2 \\log GDP + \\varepsilon$ forces one schooling slope everywhere. 'Holding GDP constant' is what $\\beta_1$ means; 'regardless of wealth' is the stronger claim that the slope does not vary with wealth. Test: add $\\beta_3 (S \\times \\log GDP)$, so the schooling slope becomes $\\beta_1 + \\beta_3 \\log GDP$; center both variables first so $\\beta_1$ stays interpretable as the slope at mean income. Heterogeneity is likely: high income countries sit near a floor of under 5 deaths per 1,000, so another year of schooling cannot remove 0.76 deaths there, and a linear model can predict negative mortality at the extremes. Better functional forms: log or logit of the mortality rate, a Poisson or binomial model for death counts, separate fits by income group, or a generalized additive model. Defensible wording: 'conditional on GDP, averaged across the sample'.",
+      "evidence": [
+        "portfolio: Each additional year of schooling is associated with a measurable drop in child deaths, regardless of country wealth.",
+        "portfolio: Child mortality as the most policy responsive health metric, ranging from fewer than 5 deaths per 1,000 births in high income countries to over 150 in low income countries.",
+        "portfolio: - Mean years of schooling: estimate = -0.76, p < 2e-16"
+      ],
+      "sources": [],
+      "tags": [
+        "interaction",
+        "functional-form",
+        "heterogeneity"
+      ]
+    },
+    {
+      "id": "wh-18",
+      "type": "concept",
+      "level": 2,
+      "q": "How did you tell this story to a non technical audience, and what choices did that force?",
+      "easy": "The report was written for adults, teenagers, and children, so it had one hook (the familiar belief that wealth equals health), one surprise (schooling still matters at the same income), and one action list a community leader can carry out.",
+      "deep": "Choices visible in the write up: the title challenges a common belief; two plain research questions; three exploratory scatter plots before any model (log GDP vs life expectancy, log GDP vs child mortality, schooling vs child mortality); confirmatory group comparisons that read as 'high vs low' (Welch's t test, ANOVA by GDP group); and a practical conclusion with concrete actions: keep children, especially girls, in school through secondary education, combine schooling with practical instruction on hygiene, nutrition, vaccination, and early childhood care, and advocate for school infrastructure. Principles behind those choices: claim first, then evidence; one message per chart; show the relationship before the coefficient; translate statistics into units people feel (deaths per 1,000 births); label log axes with dollar values instead of log units. The cost of simplifying: lay framing pulls toward causal language ('school saves children'), so the honest version keeps 'associated with' and says what the data cannot show. Tools: R and ggplot2.",
+      "say": "The audience included teenagers and children, so I built the report around one belief, wealth equals health, and one finding that complicates it. I showed scatter plots before any model, and I reported the gap in child deaths per 1,000 births because people can feel that unit. The hard part was keeping the language associational while still giving a community leader something to do.",
+      "evidence": [
+        "portfolio: The final report is written for an intentionally non technical audience: adults, teenagers, and children who can act on the conclusion.",
+        "portfolio: For a community leader, the evidence based course is to keep children (especially girls) in school through secondary education, combine schooling with practical instruction on hygiene, nutrition, vaccination, and early childhood care, and advocate for school infrastructure investment.",
+        "portfolio: Figure 3. Mean years of schooling vs child mortality. The negative relationship is stronger and tighter than for GDP",
+        "portfolio: TAGS: R, ggplot2, Multiple Regression, ANOVA, Bayesian Inference, Gapminder"
+      ],
+      "sources": [],
+      "tags": [
+        "storytelling",
+        "communication",
+        "visualization"
+      ]
+    },
+    {
+      "id": "wh-19",
+      "type": "pushback",
+      "level": 2,
+      "q": "Schooling is -0.76 and log GDP is -74.14. Doesn't that say income matters about a hundred times more than education?",
+      "easy": "The units differ (per year of schooling versus per unit of log income), so the raw numbers do not compare. The honest answer also concedes that, read in natural units, income has the larger association in this model, so the claim that education is just as strong needs a different comparison.",
+      "deep": "Raw coefficients are per unit of each predictor. Common scale options: standardized coefficients $\\beta_j s_{x_j}/s_y$; partial $R^2$, or the drop in $R^2$ when each predictor is removed; relative importance analysis (a Shapley decomposition of $R^2$); or realistic contrasts (5 to 10 years of schooling against the 25th to 75th percentile of income). The concession: if log GDP is base 10 (wh-04), a tenfold income gap at fixed schooling goes with about 74 fewer deaths per 1,000, while the whole 2 to 15 year schooling range at fixed income goes with about 10. The write up reports neither standardized coefficients nor partial $R^2$, so its sentence that education is just as strong a predictor as GDP rests on the bivariate Figure 3 (described as stronger and tighter than for GDP) and the Bayes factor, not on the joint model. Collinearity between schooling and income also makes each individual coefficient unstable. Defensible claim: schooling has a clear association conditional on income, and it is the lever a community controls.",
+      "say": "The units are different, so the raw numbers don't compare. I'll concede the bigger point, though. In natural units income has the larger association in that model, and today I'd say schooling carries independent information rather than that it's just as strong. The report's case for schooling rests on that plus the fact that a community can act on schools and can't act on GDP.",
+      "evidence": [
+        "portfolio: - Mean years of schooling: estimate = -0.76, p < 2e-16",
+        "portfolio: - Log GDP per capita: estimate = -74.14, p < 2e-16",
+        "portfolio: Education is just as strong a predictor of child mortality as GDP is, and unlike GDP, a rural community can act on it directly through school access, teacher training, and maternal literacy programs.",
+        "portfolio: Figure 3. Mean years of schooling vs child mortality. The negative relationship is stronger and tighter than for GDP"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "coefficients",
+        "standardization",
+        "honesty"
+      ]
+    },
+    {
+      "id": "wh-20",
+      "type": "pushback",
+      "level": 2,
+      "q": "A Bayes factor of 10^288 is absurd. What does it even tell you?",
+      "easy": "Fair. Past about 100, a Bayes factor changes no decision, and with a real effect it grows exponentially with the number of rows. The useful information is which models were compared and how large the effect is.",
+      "deep": "Concede: (1) log BF scales roughly with n for a nonzero effect, so 10^218 and 10^288 report sample size; (2) if rows are country years, the effective sample is much smaller than the row count and the Bayes factor is inflated by many orders of magnitude; (3) the comparison behind 'in favor of the model that includes both predictors' is not named, and the claim that each predictor carries independent information requires $BF$(both vs GDP only) and $BF$(both vs schooling only), since $BF$(both vs null) can be huge even if one predictor adds nothing. Defend: the conditional t tests on each coefficient in the multiple regression (both p < 2e-16) already speak to each predictor given the other, so the qualitative conclusion does not hang on the Bayes factor. Housekeeping: the project page's stat line renders the exponent as 388 while the body says 288; fix it before quoting either.",
+      "say": "It's absurd as a number and I'd present it differently now. Past about 100 a Bayes factor doesn't change any decision, and when the effect is real it grows with the number of rows. What matters is which models were compared, and for the claim I made, it should be the two predictor model against each single predictor model. The coefficient tests in the joint model already show each predictor matters given the other.",
+      "evidence": [
+        "portfolio: Bayesian model comparison returned a combined Bayes Factor of 1.65 x 10&#178;&#x2078;&#x2078; in favor of the model that includes both predictors.",
+        "portfolio: 180+ countries  |  Period: 2000 to 2020  |  Combined BF = 1.65 x 10&#179;&#x2078;&#x2078;  |  ANOVA F = 426.5 (p < 2e-16)",
+        "portfolio: That is overwhelming evidence that each predictor carries independent information about child mortality."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "bayes-factor",
+        "honesty"
+      ]
+    },
+    {
+      "id": "wh-21",
+      "type": "pushback",
+      "level": 2,
+      "q": "Why run a t test and an ANOVA after you already had regressions? Isn't that redundant?",
+      "easy": "Statistically, mostly yes: both are linear models with a coarser, binned predictor. Their value was communication, because a gap between high and low groups is easier to grasp than a slope. Their weakness is that neither holds the other variable fixed.",
+      "deep": "A t test is a regression on one group dummy, and a one way ANOVA is a regression on two dummies for three groups. Binning a continuous predictor discards information and costs power, and the cut points are a researcher choice that can be tuned. For a lay audience, 'high schooling countries have about 57 fewer child deaths per 1,000 births' lands where '-0.76 per year, conditional on log GDP' does not. The weakness: the education group comparison does not adjust for income, so part of the 57 death gap is income. Better: an ANCOVA (group plus log GDP), or model predicted child mortality for high and low schooling at the same income level, which keeps the plain language and the adjustment.",
+      "say": "Statistically they're the same linear model with a coarser predictor. I ran them because 'about 57 fewer child deaths per 1,000 births' lands with a teenager and a slope doesn't. The weakness is that the t test doesn't hold income fixed. Now I'd show predicted mortality for high and low schooling at the same income instead.",
+      "evidence": [
+        "portfolio: Figure 4. Child mortality by education group (Welch's t test). Mean difference &#8776; 57 deaths per 1,000 births, p < 2.2e-16",
+        "portfolio: One way ANOVA on life expectancy by GDP group (Low, Medium, High) returned F = 426.5, p < 2e-16:"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "t-test",
+        "anova",
+        "communication"
+      ]
+    },
+    {
+      "id": "wh-22",
+      "type": "pushback",
+      "level": 3,
+      "q": "180 countries over 21 years is thousands of rows, but they aren't independent. Aren't your p values wrong?",
+      "easy": "If the rows are country years, yes, the p values are too small. A country's income and schooling barely move from one year to the next, so the effective sample is closer to the number of countries than the number of rows. Clustered standard errors or country averages fix it.",
+      "deep": "Design effect $1 + (m-1)\\rho$ with $m \\approx 21$ years per country and intraclass correlation $\\rho$ near 1 for slow moving variables: standard errors can be understated by up to about $\\sqrt{21} \\approx 4.6$ times. Fixes: cluster standard errors by country (sandwich estimators, for example lmtest with sandwich, or fixest in R); collapse to one row per country; a random intercept model (lme4: cm ~ school + log_gdp + (1 | country)); or a fixed effects panel. Consequence: p < 2e-16 only says |t| exceeded about 8, so after a correction of up to 4.6 times the significance is plausible but not guaranteed and must be rerun; the Bayes factors would shrink by many orders of magnitude. Serial correlation in residuals inside a country is a second, related violation. The write up does not state whether rows were country years or country averages, and Tanay should know which before the interview.",
+      "say": "If the rows are country years, they aren't independent and the p values are too small. A country's schooling and income barely change year to year, so I effectively have closer to 180 observations than several thousand. The fix is clustering by country or collapsing to country averages. I'd rerun before claiming the result survives, because p below 2e-16 only tells me the t statistic was above about 8.",
+      "evidence": [
+        "portfolio: The data is the Gapminder global dataset, covering 180+ countries between 2000 and 2020, with these variables:"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "independence",
+        "clustered-errors",
+        "panel"
+      ]
+    },
+    {
+      "id": "wh-23",
+      "type": "pushback",
+      "level": 2,
+      "q": "Maybe lower child mortality causes more schooling, not the other way around.",
+      "easy": "That is plausible, and these data cannot rule it out. Using schooling for adults aged 25 to 34 helps a little, because that schooling happened years before the child deaths being predicted, but a country that was well run back then would have both.",
+      "deep": "Mechanisms for reverse causation: the demographic transition (falling child mortality lowers fertility, so families invest more in each child), and healthier children attend school more and learn more. Mean schooling of adults 25 to 34 reflects schooling decisions made roughly 10 to 25 years earlier, so it largely predates current child mortality, which fixes the time order but not persistent common causes. Ways to probe: lagged panel models, cross lagged models, or quasi experiments such as school expansion reforms (wh-11). The honest conclusion stays associational.",
+      "say": "That's plausible and my data can't rule it out. One choice helps: I used schooling for adults aged 25 to 34, which reflects decisions made a decade or two before the child mortality I'm predicting. That gets the time order right, but a country that was well governed back then would have both, so it's still an association.",
+      "evidence": [
+        "portfolio: Mean years of schooling for adults aged 25 to 34, the most reliable cross country proxy for education access, ranging from 2 to 15 years."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "reverse-causality",
+        "causal-inference"
+      ]
+    },
+    {
+      "id": "wh-24",
+      "type": "pushback",
+      "level": 2,
+      "q": "You recommend keeping girls in school and maternal literacy programs, but your education variable isn't broken out by sex.",
+      "easy": "Fair. The variable was mean schooling for all adults aged 25 to 34, so the analysis supports schooling in general. The emphasis on girls and mothers comes from the wider literature, and the report should label it that way.",
+      "deep": "What the data tested: mean years of schooling for adults 25 to 34, both sexes, at country level. What the recommendations add: girls' schooling through secondary education, maternal literacy, and paired instruction on hygiene, nutrition, vaccination, and early childhood care. Those are reasonable readings of the broader maternal education literature, but they were not estimated here. Fix: rerun with schooling for women aged 25 to 34 (Gapminder also publishes schooling by sex) and compare the female and male coefficients; in the report, separate 'what this analysis shows' from 'what other evidence suggests'.",
+      "say": "Fair point. My variable was mean schooling for all adults 25 to 34, so the analysis supports schooling in general. The emphasis on girls came from the wider literature on maternal education, and I should have labelled it that way. The clean fix is rerunning with women's schooling only.",
+      "evidence": [
+        "portfolio: Mean years of schooling for adults aged 25 to 34, the most reliable cross country proxy for education access, ranging from 2 to 15 years.",
+        "portfolio: For a community leader, the evidence based course is to keep children (especially girls) in school through secondary education, combine schooling with practical instruction on hygiene, nutrition, vaccination, and early childhood care, and advocate for school infrastructure investment.",
+        "portfolio: Education is just as strong a predictor of child mortality as GDP is, and unlike GDP, a rural community can act on it directly through school access, teacher training, and maternal literacy programs."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "measurement",
+        "recommendations"
+      ]
+    },
+    {
+      "id": "wh-25",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations, and what would a production version of this analysis need?",
+      "easy": "The analysis is observational, aggregated to countries, possibly treats repeated years as independent, assumes a straight line for an outcome with a floor, and compares coefficients in different units. A production version would fix the standard errors, add controls and time structure, and make the data pull reproducible.",
+      "deep": "Limitations: (1) causal: confounding, mediation, reverse causation (wh-09 to wh-11, wh-23); (2) aggregation: country level evidence used for community advice (wh-12); (3) inference: non independent country years (wh-22), and p values and Bayes factors that mostly reflect sample size; (4) model form: linear child mortality with a floor near zero can predict negative values, and the additive model is read as 'regardless of wealth' without an interaction test (wh-17); (5) comparison: unstandardized coefficients behind the 'just as strong' sentence (wh-19); (6) measurement: Gapminder gap years are estimates, schooling is both sexes; (7) missing data handled by lm()'s listwise deletion, with row counts per model not reported; (8) no R squared, residual diagnostics, or out of sample check reported. Scale: countries cannot grow 10x, so scaling means going subnational (household survey clusters or districts, tens of thousands of units), which brings mixed models and spatial correlation; compute stays trivial. A recurring report needs a versioned data extract, a scripted pipeline (R Markdown or Quarto), recorded row counts, and a fixed analysis plan before looking at results.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "production",
+        "reproducibility"
+      ]
+    },
+    {
+      "id": "wh-26",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next?",
+      "easy": "Rerun with standard errors clustered by country, compare predictors on a common scale, test whether the schooling slope changes with income, use women's schooling, and move to a within country panel to get closer to cause and effect.",
+      "deep": "In order: (1) clustered standard errors or country averages, so the significance claims are honest; (2) standardized coefficients, partial R squared, and the two predictor model against each one predictor model, to settle 'just as strong'; (3) an interaction between schooling and log GDP, and a log or logit mortality outcome to respect the floor; (4) women's schooling 25 to 34 alongside men's; (5) a country and year fixed effects panel with schooling lagged five to ten years, which removes time invariant confounders and fixes the time order; (6) add controls for health system coverage (for example vaccination rates) and fertility, after drawing the causal graph to avoid conditioning on mediators; (7) report effect sizes and intervals instead of p < 2e-16, and keep Bayes factors only with the comparison and prior stated.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next-steps",
+        "panel",
+        "fixed-effects"
+      ]
+    },
+    {
+      "id": "wh-27",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager in under a minute.",
+      "easy": "Lead with the question, the data, the finding, and what it shows about how Tanay works: they test a common belief, report what holds, and are honest about what the data cannot show.",
+      "deep": "Hiring manager version: the business analogue is 'the metric everyone optimizes may not be the lever you control'. Mention the data (Gapminder, 180+ countries, 2000 to 2020), the two models, the headline (income predicts life expectancy; schooling predicts child mortality at the same income), the audience (non technical), and one honest limitation (observational, coefficients in different units).",
+      "say": "I took a belief that drives development funding, that richer countries are healthier, and tested it on 180 plus countries over twenty years. Income does predict life expectancy. But schooling still predicts child mortality at the same income, and schooling is something a community controls. I wrote it for a non technical audience. The skill I'd bring to your team is the same: test the assumption, say what the data supports, and say what it doesn't.",
+      "evidence": [
+        "portfolio: The data is the Gapminder global dataset, covering 180+ countries between 2000 and 2020, with these variables:",
+        "portfolio: Development funding tends to flow toward GDP growth as the master strategy, with health and education treated as downstream beneficiaries."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "wh-28",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the methods to a staff data scientist who will probe them.",
+      "easy": "Give the models, the numbers, and the critiques before they raise them: units, independence, causal reading, and the Bayes factor comparison.",
+      "deep": "Staff level version: two OLS models in R (life expectancy on log GDP; child mortality on schooling and log GDP), Bayesian regression and model comparison, Welch's t test and one way ANOVA as confirmations. Then the self critique: unstandardized coefficients cannot rank predictors; country years need clustered errors; Bayes factors mostly reflect n and need the comparison stated; the additive model does not license 'regardless of wealth'; country level results do not transfer to individuals.",
+      "say": "Two OLS models in R. Life expectancy on log GDP gave a slope of 17.6; child mortality on schooling and log GDP gave -0.76 and -74.14, both significant. I'd flag three problems before you do. The coefficients are in different units, so they don't rank the predictors. If the rows are country years, the errors need clustering by country. And the Bayes factors mostly reflect sample size, so I'd report the model comparison and effect sizes instead.",
+      "evidence": [
+        "portfolio: Linear regression of life expectancy on log GDP per capita gave a coefficient of 17.6 (p < 2e-16), a strong positive relationship.",
+        "portfolio: - Mean years of schooling: estimate = -0.76, p < 2e-16",
+        "portfolio: - Log GDP per capita: estimate = -74.14, p < 2e-16"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer",
+        "methods"
+      ]
+    },
+    {
+      "id": "wh-29",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain this project to a product manager.",
+      "easy": "Frame it as choosing a lever: the outcome everyone tracks (income) is real but not controllable by the audience, and the analysis found a second lever (schooling) that is.",
+      "deep": "PM version: problem (funders default to the GDP lever), user (a community leader who needs an argument), evidence (both predictors matter for child mortality), decision (invest in schooling and paired health instruction), and the caveat a PM should hear (this is association, so it supports prioritization, not a guaranteed effect size).",
+      "say": "The question was which lever a community should pull to keep more children alive. Income clearly matters, but a village can't raise national GDP. Schooling still predicts child mortality at the same income level, and a community can act on it. So the recommendation was school access, girls staying through secondary, and health instruction alongside. It's correlational, so I pitched it as where to invest first, not a promised number.",
+      "evidence": [
+        "portfolio: For a community leader, the evidence based course is to keep children (especially girls) in school through secondary education, combine schooling with practical instruction on hygiene, nutrition, vaccination, and early childhood care, and advocate for school infrastructure investment.",
+        "portfolio: The explicit goal here was evidence a community leader can use to argue for education investment in rural communities."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "pm"
+      ]
+    },
+    {
+      "id": "wh-30",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a recruiter with no statistics background.",
+      "easy": "Plain words, one finding, one tool list: R, regression, Bayesian statistics, and data storytelling for a non technical audience.",
+      "deep": "Recruiter version: what was studied (country health and wealth, 180+ countries), what was found (education matters for child survival even at the same income), who it was for (a community audience), and the skills (R, ggplot2, regression, ANOVA, Bayesian inference, writing for non specialists).",
+      "say": "I looked at whether richer countries are healthier, using data on more than 180 countries over twenty years. They are, but education also matters for whether children survive, even when you compare countries with the same income. I wrote it for a general audience, including teenagers. It used R, regression, and Bayesian statistics, and the main skill was turning numbers into a clear argument.",
+      "evidence": [
+        "portfolio: The data is the Gapminder global dataset, covering 180+ countries between 2000 and 2020, with these variables:",
+        "portfolio: TAGS: R, ggplot2, Multiple Regression, ANOVA, Bayesian Inference, Gapminder"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": []
+}
