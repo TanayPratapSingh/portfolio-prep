@@ -1,24 +1,36 @@
 {
- "generated_at": "2026-10-15T16:33:13Z",
+ "generated_at": "2026-10-15T16:43:04Z",
  "totals": {
-  "decks": 5,
+  "decks": 9,
   "planned": 29,
-  "cards": 266,
-  "narrations": 65
+  "cards": 494,
+  "narrations": 109
  },
  "decks": [
   {
    "id": "p-wikipedia-edit-stream",
    "title": "Wikipedia Edit Stream",
    "group": "Portfolio",
-   "blurb": "HyperLogLog, Count-Min, and Space-Saving run beside exact counters on the live Wikimedia event stream.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-wikipedia-edit-stream.json",
+   "count": 59,
+   "narrations": 12,
+   "types": {
+    "concept": 8,
+    "define": 5,
+    "number": 5,
+    "how": 11,
+    "formula": 7,
+    "code": 1,
+    "why": 7,
+    "compare": 2,
+    "case": 3,
+    "pushback": 6,
+    "narrate": 4
+   },
+   "summary_easy": "A live browser dashboard that reads every edit to Wikipedia and its sister sites and counts it twice: exactly, and with three memory saving estimators (HyperLogLog, Count-Min, Space-Saving). Plotting the gap shows whether each estimator stays inside its promised error. On a 297 second run of 9,909 real events, the distinct editor estimate landed within 0.4% of the exact count.",
+   "repo": "https://github.com/TanayPratapSingh/wikipedia-edit-stream",
+   "ready": true,
+   "blurb": "HyperLogLog, Count-Min, and Space-Saving run beside exact counters on the live Wikimedia event stream."
   },
   {
    "id": "p-orderbook-microstructure",
@@ -152,14 +164,25 @@
    "id": "p-beir-replication",
    "title": "Replicating BEIR",
    "group": "Portfolio",
-   "blurb": "Reproducing a retrieval benchmark on one laptop and finding a silent truncation bug.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-beir-replication.json",
+   "count": 50,
+   "narrations": 11,
+   "types": {
+    "concept": 7,
+    "why": 5,
+    "how": 8,
+    "formula": 4,
+    "compare": 1,
+    "number": 6,
+    "case": 4,
+    "pushback": 7,
+    "narrate": 4,
+    "define": 4
+   },
+   "summary_easy": "Tanay rebuilt the main experiment of BEIR, a benchmark showing that neural search models trained on one dataset often lose to plain keyword search on new kinds of documents. On two scientific datasets every published number he checked came back, and a newer 2023 model beat keyword search on both. The one number that first missed led him to a library default that silently cut every document to 100 tokens; fixing it matched the paper exactly.",
+   "repo": "https://github.com/TanayPratapSingh/beir-replication",
+   "ready": true,
+   "blurb": "Reproducing a retrieval benchmark on one laptop and finding a silent truncation bug."
   },
   {
    "id": "p-shopfloor-ai",
@@ -178,14 +201,25 @@
    "id": "p-handoff",
    "title": "handoff",
    "group": "Portfolio",
-   "blurb": "Supervisor orchestration where every escalation carries an owner, a deadline, and a declared behavior for silence.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-handoff.json",
+   "count": 57,
+   "narrations": 11,
+   "types": {
+    "concept": 9,
+    "why": 9,
+    "number": 2,
+    "how": 18,
+    "define": 5,
+    "formula": 1,
+    "pushback": 6,
+    "case": 2,
+    "compare": 1,
+    "narrate": 4
+   },
+   "summary_easy": "handoff is a supervisor for incident response agents where every request for human approval has an owner, a deadline, and a rule written in advance for what happens if nobody answers. On silence it can drop the action, run a safer substitute, ask the next tier, or freeze, and it never treats silence as approval. It has 212 tests, 11 scenarios, and no dependencies, and it runs on a simulated cluster with rule based workers.",
+   "repo": "https://github.com/TanayPratapSingh/handoff",
+   "ready": true,
+   "blurb": "Supervisor orchestration where every escalation carries an owner, a deadline, and a declared behavior for silence."
   },
   {
    "id": "p-comms-agent",
@@ -430,14 +464,21 @@
    "id": "n-portfolio-story",
    "title": "Your story across the portfolio",
    "group": "Narration",
-   "blurb": "Tell me about yourself in three lengths and three framings, and every behavioral prompt mapped to a real project.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/n-portfolio-story.json",
+   "count": 62,
+   "narrations": 10,
+   "types": {
+    "concept": 1,
+    "narrate": 14,
+    "how": 2,
+    "case": 6,
+    "behavioral": 38,
+    "pushback": 1
+   },
+   "summary_easy": "Ready to say answers for the questions that are about Tanay rather than about one project: tell me about yourself in three lengths for three kinds of role, walk me through your resume, which projects to lead with, what connects the work, and the full set of behavioral stories, each built from real projects with the numbers checked against the source.",
+   "repo": "",
+   "ready": true,
+   "blurb": "Tell me about yourself in three lengths and three framings, and every behavioral prompt mapped to a real project."
   }
  ]
 }
