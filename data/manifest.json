@@ -1,10 +1,10 @@
 {
- "generated_at": "2026-10-15T20:43:36Z",
+ "generated_at": "2026-10-15T20:56:03Z",
  "totals": {
-  "decks": 14,
+  "decks": 20,
   "planned": 29,
-  "cards": 772,
-  "narrations": 170
+  "cards": 1057,
+  "narrations": 238
  },
  "decks": [
   {
@@ -84,14 +84,25 @@
    "id": "p-space-weather-nowcast",
    "title": "Space Weather Nowcast",
    "group": "Portfolio",
-   "blurb": "Nine NOAA feeds, solar wind propagated from L1 to Earth, and the aurora outlook over Syracuse.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-space-weather-nowcast.json",
+   "count": 52,
+   "narrations": 11,
+   "types": {
+    "concept": 4,
+    "why": 7,
+    "define": 6,
+    "how": 10,
+    "code": 1,
+    "formula": 4,
+    "pushback": 7,
+    "number": 4,
+    "case": 5,
+    "narrate": 4
+   },
+   "summary_easy": "A live browser page that reads nine NOAA space weather feeds, follows the solar wind from a spacecraft 1.58 million km toward the Sun to Earth, and shows how hard it pushes on Earth's magnetic shield, the storm level, and the aurora chance over Syracuse. It was built as the live input side for Tanay's Kp forecasting model. On the measured run the wind was at 360 km/s and would reach Earth 73.5 minutes after it was measured.",
+   "repo": "https://github.com/TanayPratapSingh/space-weather-nowcast",
+   "ready": true,
+   "blurb": "Nine NOAA feeds, solar wind propagated from L1 to Earth, and the aurora outlook over Syracuse."
   },
   {
    "id": "p-drgrpo-replication",
@@ -195,14 +206,24 @@
    "id": "p-groundwork",
    "title": "Groundwork",
    "group": "Portfolio",
-   "blurb": "RAG evaluation, guardrails, and an LLM gateway on real data.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-groundwork.json",
+   "count": 59,
+   "narrations": 13,
+   "types": {
+    "concept": 4,
+    "why": 10,
+    "how": 18,
+    "formula": 4,
+    "define": 3,
+    "number": 6,
+    "case": 4,
+    "pushback": 6,
+    "narrate": 4
+   },
+   "summary_easy": "Groundwork is a small AI question answering system over Wikipedia, built with the parts real products need and demos skip: measuring whether answers are right, refusing when it should, checking that safety filters do not block real users, and metering what each model call costs. On public data where half the questions have no answer, it correctly refuses 96.2% of those, and keyword search finds the right paragraph in the top five 92.1% of the time.",
+   "repo": "https://github.com/TanayPratapSingh/Groundwork",
+   "ready": true,
+   "blurb": "RAG evaluation, guardrails, and an LLM gateway on real data."
   },
   {
    "id": "p-beir-replication",
@@ -293,14 +314,25 @@
    "id": "p-project-mark",
    "title": "Project Mark",
    "group": "Portfolio",
-   "blurb": "Deterministic analytics traps that stress test frontier models.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-project-mark.json",
+   "count": 57,
+   "narrations": 11,
+   "types": {
+    "concept": 12,
+    "number": 3,
+    "why": 7,
+    "how": 6,
+    "define": 6,
+    "formula": 6,
+    "compare": 2,
+    "pushback": 7,
+    "case": 4,
+    "narrate": 4
+   },
+   "summary_easy": "Tanay built product analytics tasks on real, licensed data that were meant to make the strongest AI models fail while staying fair to a careful human: each had one correct business recommendation and a misleading but real headline number. They built and verified four trap families. On the most developed task, about student engagement data, frontier models rebuilt the analysis and answered correctly anyway, which Tanay reports as a calibrated negative result.",
+   "repo": "",
+   "ready": true,
+   "blurb": "Deterministic analytics traps that stress test frontier models."
   },
   {
    "id": "p-media-pulse",
@@ -317,29 +349,51 @@
   },
   {
    "id": "p-kp-prediction",
-   "title": "Kp Index Prediction",
+   "title": "Multi Horizon Kp Prediction",
    "group": "Portfolio",
-   "blurb": "Multi horizon deep learning forecasts of geomagnetic activity.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-kp-prediction.json",
+   "count": 42,
+   "narrations": 11,
+   "types": {
+    "concept": 2,
+    "why": 10,
+    "define": 4,
+    "how": 5,
+    "code": 1,
+    "number": 2,
+    "case": 8,
+    "pushback": 6,
+    "narrate": 4
+   },
+   "summary_easy": "A four person course project that trained one LSTM neural network on NASA's hourly OMNI2 space weather data to forecast the Kp geomagnetic storm index 1, 3, 6 and 12 hours ahead. The reported 1 hour error was 0.738 Kp, 45% below always predicting the average, falling to about 10% better at 12 hours. The deck pairs those numbers with the weaknesses an interviewer will find: a weak baseline, an input that mirrors Kp, and a repo that cannot regenerate the results.",
+   "repo": "https://github.com/TanayPratapSingh/multi-horizon-aurora-kp-prediction",
+   "ready": true,
+   "blurb": "Multi horizon deep learning forecasts of geomagnetic activity."
   },
   {
    "id": "p-perfect-lap",
-   "title": "The Perfect Lap",
+   "title": "The Perfect Lap: F1 Pit Stop Strategy",
    "group": "Portfolio",
-   "blurb": "F1 pit stop strategy optimization with machine learning.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-perfect-lap.json",
+   "count": 45,
+   "narrations": 11,
+   "types": {
+    "concept": 6,
+    "narrate": 4,
+    "pushback": 10,
+    "formula": 3,
+    "how": 6,
+    "define": 2,
+    "why": 5,
+    "number": 2,
+    "compare": 3,
+    "case": 2,
+    "behavioral": 2
+   },
+   "summary_easy": "A five person class project (IST 707, Team Omega) that predicts the lap on which a Formula 1 driver makes their first pit stop, from race length, circuit traits, grid slot, team, and year. A Random Forest landed about 2.78 laps from what teams actually did on a random holdout of driver race rows, and a Streamlit app wraps a lighter version of the model. The strongest interview material is what the evaluation missed and where the write up and the repo disagree.",
+   "repo": "https://github.com/TanayPratapSingh/the-perfect-lap",
+   "ready": true,
+   "blurb": "F1 pit stop strategy optimization with machine learning."
   },
   {
    "id": "p-energy-demand",
@@ -356,16 +410,27 @@
   },
   {
    "id": "p-wealth-health",
-   "title": "Wealth Equals Health?",
+   "title": "Challenging \"Wealth Equals Health\"",
    "group": "Portfolio",
-   "blurb": "Quantitative storytelling that finds education as the hidden lever.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-wealth-health.json",
+   "count": 30,
+   "narrations": 11,
+   "types": {
+    "concept": 4,
+    "how": 1,
+    "why": 2,
+    "formula": 4,
+    "number": 2,
+    "define": 4,
+    "compare": 1,
+    "pushback": 6,
+    "case": 2,
+    "narrate": 4
+   },
+   "summary_easy": "A data storytelling project in R on Gapminder data for 180+ countries from 2000 to 2020. Tanay tested whether national income predicts life expectancy (it does) and whether schooling still predicts child mortality once income is accounted for (it does), then wrote the result up for a non technical community audience as an argument for education investment in rural communities.",
+   "repo": "",
+   "ready": true,
+   "blurb": "Quantitative storytelling that finds education as the hidden lever."
   },
   {
    "id": "p-uber-pipeline",
