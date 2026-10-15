@@ -1,0 +1,783 @@
+{
+  "deck_id": "p-media-pulse",
+  "title": "media-pulse: Communications Measurement with Review",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/media-pulse",
+  "summary_easy": "A communications measurement tool for a fictional brand: it labels each media mention for tone and topic with a confidence, sends the uncertain labels to a reviewer, and reports share of voice, key message pull through, and a quality check of the model itself. On a synthetic sample with a simulated reviewer, held out topic accuracy rose from 0.88 to 0.96 and sentiment from 0.50 to 0.85.",
+  "summary_deep": "120 synthetic labeled mentions (about 30% dual topic with a randomly chosen true topic, sentiment truth drawn around each topic's lean) are split 72/48 with seed 7. Topic is TF-IDF unigrams and bigrams with sublinear tf into logistic regression (C = 4), or a numpy softmax regression fallback; sentiment is VADER's compound score with plus or minus 0.15 boundaries, or a tanh lexicon fallback, with confidence |c|/0.6. Each (mention, field) with confidence under 0.55 on the test split goes to a ReviewQueue resolved by an oracle, logged as confirm or correct, and written back. Metrics include ISO week coverage, mixes, reach weighted share of voice, key message pull through, held out accuracy before and after review, five bin topic ECE (0.156), and accuracy by outlet type, shown in a four tab Streamlit app with a threshold slider. Code review finds that sentiment labels are largely independent of the text, the sentiment confidence measures distance from zero, the dashboard ECE is computed after review, the audit log is an in memory list, and backends fall back silently.",
+  "cards": [
+    {
+      "id": "mp-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is media-pulse, in one plain sentence and then technically?",
+      "easy": "A small communications measurement system: it reads media mentions of a brand, labels each for tone and topic with a confidence, sends the uncertain labels to a person, and reports the numbers a comms team tracks along with a check on how trustworthy the model is.",
+      "deep": "media-pulse (August 2026) runs ingest, classify, human review, and measure as one Python pipeline with a Streamlit dashboard. Ingestion is a Source protocol with a bundled SampleSource (120 synthetic labeled mentions of a fictional brand) and an RSSAdapter. Topic is TF-IDF plus logistic regression (scikit-learn, or a numpy fallback); sentiment is VADER's compound score (or a lexicon fallback). Any (mention, field) prediction with confidence below 0.55 goes to a ReviewQueue that an oracle resolves from ground truth, overwriting labels and writing audit entries. Metrics cover coverage by week, sentiment and topic mix, reach weighted share of voice, key message pull through, and model quality on a 48 item held out test set: accuracy before and after review, topic ECE, and accuracy by outlet type. Published results: topic 0.88 to 0.96, sentiment 0.50 to 0.85, ECE 0.156.",
+      "say": "media-pulse is the full measurement loop for a comms team: ingest mentions, classify tone and topic with a confidence, route the uncertain ones to a human, and report. It also audits the model itself with held out accuracy and calibration. On a synthetic sample, review lifted topic accuracy from 0.88 to 0.96, with a simulated reviewer.",
+      "evidence": [
+        "portfolio: META: Applied NLP / Human in the Loop / Aug 2026",
+        "portfolio: 120 sample mentions / topic accuracy 0.88 -> 0.96 after review / sentiment 0.50 -> 0.85 / topic ECE 0.156 / held out test n = 48",
+        "repo:media-pulse/src/mediapulse/pipeline.py: def run(source=None, review_threshold: float = 0.55, brand: str = \"Northwind\") -> Result:"
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "nlp",
+        "human in the loop"
+      ]
+    },
+    {
+      "id": "mp-02",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain media-pulse to a hiring manager in under a minute.",
+      "easy": "A full measurement loop with a human review gate and a model quality report, honest that the data is synthetic and the reviewer simulated.",
+      "deep": "Lead with the loop, the review gate, the responsible AI checks, then the numbers and the two caveats that matter most: a perfect simulated reviewer, and sentiment labels in the synthetic data that are partly random.",
+      "say": "I built a media monitoring system that classifies coverage, sends low confidence labels to a reviewer, and reports share of voice and message pull through. It also checks its own model: held out accuracy, calibration error, and accuracy by outlet type. With review, held out topic accuracy went from 0.88 to 0.96. The reviewer is simulated and the data is synthetic, so that's a demonstration of the loop, not a real world accuracy claim.",
+      "evidence": [
+        "portfolio: 120 sample mentions / topic accuracy 0.88 -> 0.96 after review / sentiment 0.50 -> 0.85 / topic ECE 0.156 / held out test n = 48"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring manager"
+      ]
+    },
+    {
+      "id": "mp-03",
+      "type": "how",
+      "level": 1,
+      "q": "Walk through the architecture module by module.",
+      "easy": "Four stages in four files: ingest loads mentions, classify labels them, review queues and fixes the uncertain ones, metrics computes the report. One pipeline function runs them in order for the demo, the tests, and the dashboard.",
+      "deep": "ingest.py: Article dataclass (id, date, outlet, outlet_type, reach_weight, brand, headline, text, optional ground truth fields), a Source protocol with fetch(), SampleSource, RSSAdapter. classify.py: SentimentClassifier, TopicClassifier, pull_messages, relevance_score, a Classifier that returns a Prediction per article (labels, per field confidences, messages, relevance, review_conf = min of the two). review.py: ReviewItem, AuditEntry, ReviewQueue with build, resolve, apply, stats. metrics.py: comms metrics plus accuracy, ECE, subgroup accuracy, summary. pipeline.py: run() loads, splits 72/48 with seed 7, fits topic on train, classifies all 120, deep copies predictions, reviews test items only, and returns before and after metrics in a Result. _fallback.py: numpy TF-IDF, softmax regression, and lexicon sentiment. app/streamlit_app.py: four tabs over run().",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/pipeline.py: \"\"\"End to end orchestration: ingest -> classify -> human review -> measure.",
+        "repo:media-pulse/src/mediapulse/pipeline.py: def _split(articles, test_frac: float = 0.4, seed: int = 7):"
+      ],
+      "sources": [],
+      "tags": [
+        "architecture",
+        "code"
+      ]
+    },
+    {
+      "id": "mp-04",
+      "type": "concept",
+      "level": 2,
+      "q": "How was the synthetic corpus generated, and what does it contain?",
+      "easy": "A script writes 120 mentions of a fictional brand from templates: eight story types, ten outlets with different reach, two competitors, three key messages. About 30% of mentions mix two story types, and the tone label is drawn at random around each story type's usual tone.",
+      "deep": "generate_sample_data.py seeds random with 42 and writes 120 articles dated within 90 days of 2026-08-10. Each picks a topic (Product Launch, Earnings, Leadership, Partnership, Sustainability, Controversy, Layoffs, Reviews), an outlet from ten (reach weights 0.2 for a personal blog to 0.95 for Reuters; types trade, wire, business, regional, blog), a product, a competitor (Vireo or Halcyon Tech), a headline template, and two body snippets. With probability 0.30 a second topic's headline and snippet are appended and the true topic is chosen at random from the two. Sentiment truth: s = clip(lean + Uniform(-0.35, 0.35)), labeled positive above 0.15, negative below -0.15. Key messages are detected by substring; a competitor is recorded only if its name appears in the text.",
+      "evidence": [
+        "repo:media-pulse/scripts/generate_sample_data.py: random.seed(42)",
+        "repo:media-pulse/scripts/generate_sample_data.py: if random.random() < 0.30:",
+        "repo:media-pulse/scripts/generate_sample_data.py: s = max(-1.0, min(1.0, lean + random.uniform(-0.35, 0.35)))",
+        "repo:media-pulse/README.md: About 30 percent of articles genuinely span two topics, with the true label assigned to one of them"
+      ],
+      "sources": [],
+      "tags": [
+        "data",
+        "synthetic data"
+      ]
+    },
+    {
+      "id": "mp-05",
+      "type": "pushback",
+      "level": 1,
+      "q": "In your synthetic data, can the sentiment label even be predicted from the text?",
+      "easy": "Only partly. The tone label is drawn at random around the story type's average tone, separately from the words in the article. So a text model hits a ceiling, and the jump from 0.50 to 0.85 mostly reflects the simulated reviewer copying the answer key.",
+      "deep": "Sentiment truth is s = clip(lean + Uniform(-0.35, 0.35)) where lean depends only on the topic (for example -0.6 for Controversy, 0.55 for Product Launch), and the body snippets are chosen independently of s. Two articles with identical text can carry different sentiment labels. Any classifier can at best learn the topic's typical label, which caps accuracy well below 1 for topics whose lean sits near a boundary (Earnings has lean 0.0, so its label is a coin flip among three classes). The review stage then replaces flagged predictions with these random labels, which raises measured accuracy without any information a human could have read from the text. The fix: generate the text conditioned on s (tone words added according to the label), or label sentiment from the text with human annotators.",
+      "say": "Partly not, and I found that reviewing my own generator. The tone label is drawn around the topic's average, independent of the words. So 0.50 is close to the ceiling for any text model, and the jump to 0.85 is the simulated reviewer reading the answer key. I'd regenerate the text conditioned on the label.",
+      "evidence": [
+        "repo:media-pulse/scripts/generate_sample_data.py: s = max(-1.0, min(1.0, lean + random.uniform(-0.35, 0.35)))",
+        "portfolio: On the sample corpus this lifts held out topic accuracy from 0.88 to 0.96 and sentiment accuracy from 0.50 to 0.85, and the dashboard shows the uplift directly."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "label noise",
+        "synthetic data"
+      ]
+    },
+    {
+      "id": "mp-06",
+      "type": "why",
+      "level": 2,
+      "q": "What do the dual topic mentions do to topic accuracy and to the review stage?",
+      "easy": "About 30% of mentions mix two stories, and the official topic is picked at random between them. The model cannot know which one was picked, so these are the mentions it gets wrong or is unsure about, and the reviewer fixes them by looking up the answer.",
+      "deep": "For a dual topic article, the generator appends a second topic's headline and snippet and sets topic_true to a uniform choice of the two. From the text alone the Bayes optimal accuracy on such items is about 50% (unless position cues leak which came first). The logistic regression spreads probability between the two classes, so these items tend to land below the 0.55 threshold, which is the design intent stated in the generator comment. The oracle then supplies the coin flip label. In a real pipeline a mixed article would get a multilabel answer or a primary topic rule, and the reviewer adds value by applying that rule consistently.",
+      "evidence": [
+        "repo:media-pulse/scripts/generate_sample_data.py: topic = random.choice([topic, other])",
+        "repo:media-pulse/scripts/generate_sample_data.py: # ~30% of articles genuinely span two topics with comparable signal"
+      ],
+      "sources": [],
+      "tags": [
+        "ambiguity",
+        "label design"
+      ]
+    },
+    {
+      "id": "mp-07",
+      "type": "how",
+      "level": 2,
+      "q": "How is the data split, and why is only the test set reviewed?",
+      "easy": "A fixed shuffle puts 72 mentions in training and 48 in test. The topic model learns from the 72; the reviewer only looks at flagged items among the 48, so the before and after accuracy is measured on mentions the model never saw.",
+      "deep": "_split keeps labeled articles, shuffles with random.Random(7), and cuts at int(0.6 n), so 72 train and 48 test for n = 120. The topic model is fit on train texts and labels; all 120 are classified. queue.build(preds) flags every (id, field) below threshold, then the pipeline keeps only items whose id is in test_ids, so training rows (which the model fits in sample) cannot inflate the uplift. A side effect: metrics_after business metrics (topic mix, sentiment mix) cover all 120 mentions but only test items were reviewed, and training items carry in sample topic predictions. The sentiment model is not trained, so the split matters only for topic.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/pipeline.py: def _split(articles, test_frac: float = 0.4, seed: int = 7):",
+        "repo:media-pulse/src/mediapulse/pipeline.py: items = [it for it in queue.build(preds) if it.id in test_ids]",
+        "repo:media-pulse/src/mediapulse/pipeline.py: # Only the held-out test items are adjudicated so the uplift we report is",
+        "portfolio: 120 sample mentions / topic accuracy 0.88 -> 0.96 after review / sentiment 0.50 -> 0.85 / topic ECE 0.156 / held out test n = 48"
+      ],
+      "sources": [],
+      "tags": [
+        "validation",
+        "train test split"
+      ]
+    },
+    {
+      "id": "mp-08",
+      "type": "concept",
+      "level": 2,
+      "q": "How does the topic model work: TF-IDF plus logistic regression, with the settings used?",
+      "easy": "Each mention becomes a vector of word and word pair weights, where words common across all mentions count less. A logistic regression then learns one weight per word per topic and outputs a probability for each topic; the top probability is the confidence.",
+      "deep": "TfidfVectorizer(ngram_range=(1, 2), min_df=1, sublinear_tf=True): features are unigrams and bigrams; term weight $(1 + \\log tf)\\cdot \\mathrm{idf}$ with smoothed $\\mathrm{idf}(t) = \\ln\\frac{1+n}{1+df(t)} + 1$, rows L2 normalized. LogisticRegression(max_iter=1000, C=4.0): multinomial softmax $p(k\\mid x) = \\frac{e^{w_k^\\top x + b_k}}{\\sum_j e^{w_j^\\top x + b_j}}$ fit by minimizing cross entropy plus an L2 penalty with strength $1/C$, so C = 4 is weak regularization. Confidence is $\\max_k p(k\\mid x)$. With 72 training documents and thousands of n gram features, the model is high variance; the per class templates are distinctive, which is why accuracy is high on single topic items.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/classify.py: (\"tfidf\", TfidfVectorizer(ngram_range=(1, 2), min_df=1, sublinear_tf=True)),",
+        "repo:media-pulse/src/mediapulse/classify.py: (\"clf\", LogisticRegression(max_iter=1000, C=4.0)),"
+      ],
+      "sources": [
+        "https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html",
+        "https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html"
+      ],
+      "tags": [
+        "tf-idf",
+        "logistic regression",
+        "nlp"
+      ]
+    },
+    {
+      "id": "mp-09",
+      "type": "how",
+      "level": 2,
+      "q": "What is in the numpy fallback, and what is its training math?",
+      "easy": "Hand written versions of the same two pieces: a TF-IDF that mirrors scikit-learn's smoothed formula, and a softmax regression trained by plain gradient descent. They let the project run with only numpy.",
+      "deep": "SimpleTfidf: tokens are lowercase alphanumerics plus adjacent bigrams; vocabulary from document frequency; $\\mathrm{idf} = \\ln\\frac{1+n}{1+df} + 1$; weight $(1+\\ln c)\\cdot \\mathrm{idf}$; row L2 normalization. SoftmaxRegression(l2 = 1e-3, lr = 0.5, epochs = 400): full batch gradient descent from zero weights on $L = -\\frac1n\\sum_i \\log p_{i,y_i} + \\frac{\\lambda}{2}\\lVert W\\rVert^2$ with gradients $\\nabla_W = \\frac1n X^\\top(P - Y) + \\lambda W$, $\\nabla_b = \\overline{P - Y}$; softmax is stabilized by subtracting the row max. No convergence check, so 400 steps is a fixed budget. FallbackTopicModel exposes classes_ and predict_proba so TopicClassifier calls it exactly like the scikit-learn pipeline.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/_fallback.py: def __init__(self, l2: float = 1e-3, lr: float = 0.5, epochs: int = 400):",
+        "repo:media-pulse/src/mediapulse/_fallback.py: self.idf[i] = math.log((1 + n) / (1 + df[tok])) + 1.0",
+        "repo:media-pulse/src/mediapulse/_fallback.py: X[r, j] = (1 + math.log(c)) * self.idf[j]  # sublinear tf x idf"
+      ],
+      "sources": [],
+      "tags": [
+        "numpy",
+        "softmax regression",
+        "gradient descent"
+      ]
+    },
+    {
+      "id": "mp-10",
+      "type": "concept",
+      "level": 2,
+      "q": "How is sentiment scored with VADER and with the fallback lexicon?",
+      "easy": "VADER gives each text a compound score from -1 to 1 using a rated word list and rules for things like negation and emphasis. Above 0.15 is positive, below -0.15 negative, otherwise neutral. The fallback counts positive and negative words, flips a word after not or never, and squashes the total into the same range.",
+      "deep": "VADER's compound score is a normalized sum of lexicon valences adjusted for capitalization, punctuation, degree modifiers, and negation, mapped into [-1, 1]. SentimentClassifier labels by POS and NEG thresholds of plus and minus 0.15. The fallback LexiconSentiment counts tokens in a positive set and a negative set (+1 and -1), flips the sign when the previous token is a negator (not, no, never, without), and returns compound = tanh(score / 3), so one net word gives about 0.32 and two give about 0.58. VADER is a general purpose social media lexicon; neither knows business vocabulary well (\"cuts\" in \"price cuts\" is not bad news).",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/classify.py: POS, NEG = 0.15, -0.15",
+        "repo:media-pulse/src/mediapulse/_fallback.py: compound = math.tanh(score / 3.0)",
+        "repo:media-pulse/src/mediapulse/_fallback.py: _NEGATORS = {\"not\", \"no\", \"never\", \"without\"}"
+      ],
+      "sources": [],
+      "tags": [
+        "sentiment",
+        "vader",
+        "lexicon"
+      ]
+    },
+    {
+      "id": "mp-11",
+      "type": "why",
+      "level": 2,
+      "q": "Is the sentiment confidence what its code comment says it is?",
+      "easy": "No. The comment says distance from the nearest decision boundary, but the code measures distance from zero. So every neutral prediction gets a very low confidence and always goes to review, even when it sits squarely in the neutral range.",
+      "deep": "conf = min(1, |c| / 0.6). The boundaries are at $c = \\pm 0.15$. A text with $c = 0$ is as far from both boundaries as a neutral prediction can be, yet scores confidence 0; a text with $c = 0.16$, barely positive, scores 0.27. Boundary distance would be $|\\,|c| - 0.15\\,|$ scaled. With the 0.55 threshold, any prediction with $|c| < 0.33$ is flagged, which includes all neutral predictions and, with the fallback lexicon, every single word prediction ($\\tanh(1/3) \\approx 0.32$). That is one reason most review items in this project are sentiment items. A calibrated alternative: fit a small model (or isotonic regression) mapping $c$ to the probability that the label is right, on held out data.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/classify.py: conf = min(1.0, abs(c) / 0.6)",
+        "repo:media-pulse/src/mediapulse/classify.py: # distance from the nearest decision boundary, scaled to 0..1",
+        "repo:media-pulse/src/mediapulse/pipeline.py: def run(source=None, review_threshold: float = 0.55, brand: str = \"Northwind\") -> Result:"
+      ],
+      "sources": [],
+      "tags": [
+        "confidence",
+        "bug",
+        "calibration"
+      ]
+    },
+    {
+      "id": "mp-12",
+      "type": "how",
+      "level": 2,
+      "q": "How does the review queue work, step by step?",
+      "easy": "Every label below 0.55 confidence becomes a review item. The reviewer either confirms the model's label or replaces it; both are logged. Then the corrected labels are written over the model's predictions, and the queue reports how many were flagged, corrected, and confirmed.",
+      "deep": "build(predictions): for each prediction, a ReviewItem(id, field, model_label, model_conf) is added separately for sentiment if sentiment_conf < threshold and for topic if topic_conf < threshold, so one mention can create two items. resolve(queue, oracle, reviewer=analyst): for each item, truth = oracle(id, field); equal means resolved_label = model label and a human_confirm audit entry; different means resolved_label = truth and a human_correct entry; each entry has a UTC timestamp. apply(predictions, queue) overwrites labels in place for resolved items. stats: flagged = items, corrected, confirmed, correction_rate = corrected / flagged. The Prediction's review_conf (min of the two confidences) is computed but routing uses the per field confidences.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/review.py: if p.sentiment_conf < self.threshold:",
+        "repo:media-pulse/src/mediapulse/review.py: \"correction_rate\": round(corrected / len(queue), 3) if queue else 0.0,",
+        "repo:media-pulse/src/mediapulse/pipeline.py: queue.resolve(items, oracle=lambda i, f: truth.get((i, f)))"
+      ],
+      "sources": [],
+      "tags": [
+        "review queue",
+        "human in the loop",
+        "code"
+      ]
+    },
+    {
+      "id": "mp-13",
+      "type": "number",
+      "level": 1,
+      "q": "Recall the published results and the caveats that travel with them.",
+      "easy": "On 48 held out mentions: topic accuracy 0.88 before review and 0.96 after, sentiment 0.50 before and 0.85 after, and topic calibration error 0.156. Synthetic data and a simulated, always correct reviewer.",
+      "deep": "Every figure is on the 48 item test split of a 120 item synthetic corpus. Before means model only; after means model plus an oracle that replaces flagged labels with ground truth, so after accuracy is an upper bound on what a real reviewer would achieve, and its remaining errors are exactly the confident mistakes. The sentiment baseline of 0.50 is limited by labels drawn at random around each topic's lean, and the write up itself notes the fallback lexicon is weaker. ECE 0.156 is topic only, five bins, 48 items. A rerun for this deck matched the published topic figures with the numpy fallback backend rather than scikit-learn; the repo stores no run output, so confirm which backend produced them before quoting.",
+      "evidence": [
+        "portfolio: 120 sample mentions / topic accuracy 0.88 -> 0.96 after review / sentiment 0.50 -> 0.85 / topic ECE 0.156 / held out test n = 48",
+        "portfolio: On the sample corpus this lifts held out topic accuracy from 0.88 to 0.96 and sentiment accuracy from 0.50 to 0.85, and the dashboard shows the uplift directly.",
+        "portfolio: Fallback models are weaker. The lexicon sentiment model used offline is less accurate than a hosted model, which is part of why the human review uplift is large."
+      ],
+      "sources": [],
+      "tags": [
+        "number",
+        "results",
+        "caveats"
+      ]
+    },
+    {
+      "id": "mp-14",
+      "type": "pushback",
+      "level": 1,
+      "q": "Your reviewer is an oracle that always knows the answer. Isn't the accuracy uplift guaranteed?",
+      "easy": "Yes, for the flagged items it is guaranteed by construction. What the number really shows is how many errors the confidence threshold captures, which is useful, but it is not evidence about real reviewers.",
+      "deep": "With a perfect oracle, after accuracy = 1 minus (confident errors / n). So the uplift measures the gate's recall over errors, and the residual measures what the gate misses. That is a legitimate quantity for choosing a threshold. What it hides: real reviewers disagree with each other, make mistakes, and slow down; the cost per item; and on ambiguous items (the dual topic mentions) the reviewer cannot know the coin flip label either. A stronger evaluation reports gate recall and residual error explicitly, models reviewer accuracy below 1 (for example simulate 90% correct reviewers), and measures inter annotator agreement on a real sample.",
+      "say": "Yes, with an oracle the flagged items are fixed by construction. So I read the uplift as how many errors the threshold catches, and the remainder as what it misses. For real reviewers I'd simulate imperfect accuracy and measure agreement on a real sample.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/pipeline.py: queue.resolve(items, oracle=lambda i, f: truth.get((i, f)))",
+        "portfolio: On the sample corpus this lifts held out topic accuracy from 0.88 to 0.96 and sentiment accuracy from 0.50 to 0.85, and the dashboard shows the uplift directly."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "evaluation",
+        "human in the loop"
+      ]
+    },
+    {
+      "id": "mp-15",
+      "type": "formula",
+      "level": 2,
+      "q": "Define expected calibration error as implemented, and what 0.156 means.",
+      "easy": "Group predictions by how confident the model was, compare the average confidence in each group with how often it was actually right, and average the gaps weighted by group size. 0.156 means confidence and accuracy differ by about 16 points on average.",
+      "deep": "$\\mathrm{ECE} = \\sum_{b=1}^{B} \\frac{|S_b|}{n}\\,\\big|\\overline{\\mathrm{conf}}(S_b) - \\mathrm{acc}(S_b)\\big|$ with $B = 5$ equal width bins over [0, 1] (bin index $\\min(B-1, \\lfloor 5c \\rfloor)$), computed for topic predictions on the test set. Perfect calibration gives 0. The function also returns per bin n, mean confidence, and accuracy, which is the reliability table the dashboard shows. ECE says nothing about direction by itself; the bins do (accuracy above confidence means underconfident). Temperature scaling (Guo et al. 2017) fits one scalar on validation logits to reduce ECE without changing accuracy.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/metrics.py: def expected_calibration_error(preds, articles, field: str, bins: int = 5) -> dict:",
+        "repo:media-pulse/src/mediapulse/metrics.py: b = min(bins - 1, int(conf * bins))",
+        "repo:media-pulse/src/mediapulse/metrics.py: ece += (len(items) / n) * abs(avg_conf - acc)",
+        "portfolio: 120 sample mentions / topic accuracy 0.88 -> 0.96 after review / sentiment 0.50 -> 0.85 / topic ECE 0.156 / held out test n = 48"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "calibration",
+        "ece",
+        "formula"
+      ]
+    },
+    {
+      "id": "mp-16",
+      "type": "why",
+      "level": 3,
+      "q": "How much can you trust an ECE computed on 48 predictions?",
+      "easy": "Not much. With 48 items in five bins, some bins hold one or two predictions, so a single right or wrong answer swings the result. It is a smoke test that the confidences are roughly sensible, not a measurement.",
+      "deep": "Binned ECE is biased upward in small samples, because even a perfectly calibrated model shows random gaps between accuracy and confidence in each bin, and the absolute value turns noise into positive error. The variance is large when bins are sparse. Remedies: report a bootstrap interval over test items; compare against the ECE of a perfectly calibrated simulation at the same n (resample correctness as Bernoulli(confidence)); use fewer or equal mass bins; or use a proper scoring rule such as Brier score or log loss, which need no binning. With more data, a reliability diagram with counts is the honest display.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/metrics.py: ece += (len(items) / n) * abs(avg_conf - acc)",
+        "portfolio: 120 sample mentions / topic accuracy 0.88 -> 0.96 after review / sentiment 0.50 -> 0.85 / topic ECE 0.156 / held out test n = 48"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "calibration",
+        "small samples",
+        "statistics"
+      ]
+    },
+    {
+      "id": "mp-17",
+      "type": "pushback",
+      "level": 2,
+      "q": "Which calibration error does the dashboard actually display?",
+      "easy": "The one computed after human review, which mixes the model's confidences with labels the reviewer corrected. That is not the model's calibration. The demo script prints the before review value, which is the right one.",
+      "deep": "In streamlit_app.py, m = r.metrics_after and q = m[model_quality], and the Model QA tab shows q[topic_calibration][ece]. After review, flagged labels are replaced by truth while the stored topic_conf values stay as the model produced them, so the low confidence bins become fully correct and ECE changes for reasons unrelated to the model. run_demo.py prints mb, the before review ECE, which is the published 0.156. Fix: show model only calibration in the QA tab, and if useful, a separate system accuracy after review.",
+      "say": "The dashboard shows ECE after review, which mixes corrected labels with the model's original confidences, so it isn't the model's calibration. The demo script prints the right one. It's a one line fix to point the tab at the before review metrics.",
+      "evidence": [
+        "repo:media-pulse/app/streamlit_app.py: c.metric(\"Topic ECE\", q[\"topic_calibration\"][\"ece\"],",
+        "repo:media-pulse/app/streamlit_app.py: m = r.metrics_after",
+        "repo:media-pulse/scripts/run_demo.py: print(f\"  topic ECE            {mb['topic_calibration']['ece']}\")"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "calibration",
+        "dashboard"
+      ]
+    },
+    {
+      "id": "mp-18",
+      "type": "concept",
+      "level": 2,
+      "q": "Why report accuracy by outlet type, and what limits that view here?",
+      "easy": "To see whether the model works worse for some kinds of sources, such as blogs or regional papers, which a single overall accuracy would hide. Here the groups are tiny, so the breakdown is a sketch.",
+      "deep": "accuracy_by_subgroup groups test predictions by outlet_type (trade, wire, business, regional, blog) and reports per group topic accuracy. It is the simplest disaggregated evaluation, the same idea as fairness slicing by demographic group: aggregate accuracy can look fine while one slice fails. With 48 test items across five groups, some groups have only a handful of items, so a single error moves a group by double digit points. In the synthetic data outlet type does not change the text (templates are shared across outlets), so any differences are sampling noise. A real deployment would report counts and confidence intervals per group and look for systematic gaps, for example in blogs with informal language.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/metrics.py: def accuracy_by_subgroup(preds, articles, field: str, subgroup: str = \"outlet_type\") -> dict:",
+        "portfolio: 120 sample mentions / topic accuracy 0.88 -> 0.96 after review / sentiment 0.50 -> 0.85 / topic ECE 0.156 / held out test n = 48"
+      ],
+      "sources": [],
+      "tags": [
+        "subgroup analysis",
+        "responsible ai"
+      ]
+    },
+    {
+      "id": "mp-19",
+      "type": "pushback",
+      "level": 2,
+      "q": "The write up says every action is written to an immutable audit log. Is it immutable?",
+      "easy": "No. The audit log is an ordinary in memory Python list that disappears when the program ends, and nothing stops code from editing or deleting entries. It is a complete log of decisions for one run, not an immutable store.",
+      "deep": "ReviewQueue.audit is list[AuditEntry]; AuditEntry is a regular (not frozen) dataclass; entries are appended with a UTC timestamp, id, field, action, from and to labels, and reviewer. The action type lists auto_accept, but no code path ever logs it, so confident predictions that were trusted are not recorded. The dashboard caption repeats the immutable claim. Production would need an append only table (database with insert only permissions, or object storage with versioning or write once retention), hash chaining for tamper evidence, persisted reviewer identity, and entries for auto accepted items too.",
+      "say": "It isn't. It's a list in memory, gone when the run ends, and nothing prevents edits. It does record every review decision for the run. For production I'd write to an append only store with hash chaining, and log auto accepts too.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/review.py: self.audit: list[AuditEntry] = []",
+        "repo:media-pulse/src/mediapulse/review.py: # \"auto_accept\" | \"human_correct\" | \"human_confirm\"",
+        "portfolio: A reviewer confirms or corrects it, the corrected label overwrites the model output, and every action is written to an immutable audit log.",
+        "repo:media-pulse/app/streamlit_app.py: \"Every decision below is written to an immutable audit log.\")"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "audit trail",
+        "responsible ai"
+      ]
+    },
+    {
+      "id": "mp-20",
+      "type": "how",
+      "level": 2,
+      "q": "Which communications metrics are computed, and how is each defined?",
+      "easy": "Mentions per week, the count of positive, negative, and neutral mentions, mentions per topic, share of voice weighted by outlet reach, and how often each approved key message appears.",
+      "deep": "coverage_over_time: Counter by ISO week (YYYY-Www). sentiment_mix and topic_mix: Counters over predictions. share_of_voice: each article adds reach_weight to the brand and, if a competitor is named, to the competitor; normalized and sorted. message_pull_through: share of predictions whose text contains each key message (AI-powered, privacy-first, carbon neutral by 2030), by case insensitive substring. relevance_score per mention: 0.4 times min(1, brand hits / 2) plus 0.6 times reach_weight, computed but not used in any metric. All business metrics are computed both before and after review.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/metrics.py: tally[brand] += a.reach_weight",
+        "repo:media-pulse/src/mediapulse/classify.py: return [m for m in messages if m.lower() in low]",
+        "repo:media-pulse/src/mediapulse/classify.py: return round(0.4 * salience + 0.6 * reach_weight, 3)"
+      ],
+      "sources": [],
+      "tags": [
+        "metrics",
+        "communications measurement"
+      ]
+    },
+    {
+      "id": "mp-21",
+      "type": "formula",
+      "level": 2,
+      "q": "Write the share of voice formula used and explain its bias.",
+      "easy": "Every article counts toward the brand, weighted by outlet reach; a competitor only gets weight when it is named in one of those brand articles. Share of voice is each name's weight over the total.",
+      "deep": "$\\mathrm{SOV}_b = \\frac{\\sum_a w_a}{\\sum_a w_a + \\sum_{a:\\,c(a)} w_a}$, $\\mathrm{SOV}_c = \\frac{\\sum_{a:\\,c(a)=c} w_a}{\\text{same total}}$, $w_a$ = outlet reach weight. The corpus contains only brand mentions, so the brand collects weight from all 120 while competitors collect only from co mentions, which in the generator happen only through Partnership templates. That inflates the brand's share structurally. Proper SOV pulls coverage for each tracked name from the same sources and window and weights by reach or impressions; sentiment weighted SOV is a common variant. The test only checks that shares sum to 1.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/metrics.py: tally[brand] += a.reach_weight",
+        "repo:media-pulse/tests/test_pipeline.py: def test_share_of_voice_sums_to_one():"
+      ],
+      "sources": [],
+      "tags": [
+        "share of voice",
+        "formula",
+        "bias"
+      ]
+    },
+    {
+      "id": "mp-22",
+      "type": "how",
+      "level": 2,
+      "q": "How is ingestion made pluggable, and what does the RSS adapter do?",
+      "easy": "Every source returns the same Article record, so anything downstream works regardless of where mentions come from. The RSS adapter reads feeds, keeps entries that mention the brand, and maps them into that record.",
+      "deep": "Source is a Protocol with fetch() returning Articles; load(source) defaults to SampleSource, which reads data/sample_articles.json. RSSAdapter(feed_urls, brand) imports feedparser lazily, builds text from title and summary, skips entries without the brand name, makes a 12 character sha1 id from the link, takes the first 10 characters of published as the date, sets outlet_type to rss and reach_weight to 0.5, and leaves ground truth fields empty. Gaps for real use: no deduplication across feeds or syndicated copies, no date parsing, a flat reach weight, and accuracy metrics silently skip items without ground truth.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/ingest.py: class RSSAdapter:",
+        "repo:media-pulse/src/mediapulse/ingest.py: reach_weight=0.5, brand=self.brand,"
+      ],
+      "sources": [],
+      "tags": [
+        "ingestion",
+        "interfaces"
+      ]
+    },
+    {
+      "id": "mp-23",
+      "type": "how",
+      "level": 2,
+      "q": "What does the Streamlit dashboard show?",
+      "easy": "Four tabs: an overview of mentions, tone, share of voice, and key messages; coverage over time and by topic; the review queue with its audit table; and model quality with accuracy before and after review, calibration, and accuracy by outlet type. A slider sets the review threshold.",
+      "deep": "The sidebar slider ranges 0.30 to 0.80 in steps of 0.05, default 0.55; run(review_threshold) is wrapped in st.cache_data so moving the slider reruns the pipeline once per value. Overview: four metric tiles and bar charts. Coverage: ISO week line chart. Review: flagged, corrected, correction rate, and the audit DataFrame. Model QA: topic and sentiment accuracy with deltas versus model only, the ECE tile (computed after review, see the pushback card), the reliability bin table, and outlet type bars. The slider is the most useful interview prop: it shows the tradeoff between reviewer workload and residual error live.",
+      "evidence": [
+        "repo:media-pulse/app/streamlit_app.py: threshold = st.sidebar.slider(\"Review confidence threshold\", 0.30, 0.80, 0.55, 0.05,",
+        "portfolio: A four tab Streamlit dashboard (overview, coverage, review queue, model QA) sits on top."
+      ],
+      "sources": [],
+      "tags": [
+        "dashboard",
+        "streamlit"
+      ]
+    },
+    {
+      "id": "mp-24",
+      "type": "why",
+      "level": 2,
+      "q": "How should the 0.55 review threshold be chosen?",
+      "easy": "By trading off how many items reviewers can check against how many mistakes the report can tolerate. A lower threshold sends fewer items to people but lets more errors through.",
+      "deep": "Each threshold t gives a review load L(t) = number of flagged (mention, field) items and a residual error E(t) = errors among unflagged items. With an oracle, after accuracy is 1 minus E(t)/n. Pick t where the marginal reviewer minute buys the most error reduction, subject to team capacity per week, possibly with different thresholds per field (sentiment confidences here are systematically low, so one shared threshold over reviews sentiment). The dashboard slider exposes this curve but the repo does not tabulate it. With uncalibrated confidences the threshold has no probabilistic meaning, so calibrate first, then choose.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/pipeline.py: def run(source=None, review_threshold: float = 0.55, brand: str = \"Northwind\") -> Result:",
+        "repo:media-pulse/app/streamlit_app.py: threshold = st.sidebar.slider(\"Review confidence threshold\", 0.30, 0.80, 0.55, 0.05,"
+      ],
+      "sources": [],
+      "tags": [
+        "threshold",
+        "human in the loop",
+        "tradeoffs"
+      ]
+    },
+    {
+      "id": "mp-25",
+      "type": "how",
+      "level": 2,
+      "q": "What do the tests check, and what do they miss?",
+      "easy": "Eight tests: every mention is classified with valid labels, review never lowers topic accuracy, corrections never exceed flags, every review decision is audited, share of voice sums to one, calibration is reported, key message detection works, and sentiment confidence stays within bounds.",
+      "deep": "tests/test_pipeline.py runs run(review_threshold=0.55) once and checks invariants; it runs under pytest or standalone. Covered invariants are mostly structural; test_human_review_never_lowers_accuracy holds by construction with an oracle. Gaps: no test that only test items are reviewed; nothing pins the published numbers (a regression test with tolerances would catch silent changes such as a backend switch); no test of the sentiment confidence semantics; no test that the dashboard shows before review ECE; RSSAdapter untested (marked no cover); behavior differs by installed backend, so CI should run both.",
+      "evidence": [
+        "repo:media-pulse/tests/test_pipeline.py: def test_human_review_never_lowers_accuracy():",
+        "repo:media-pulse/tests/test_pipeline.py: assert len(RESULT.audit) == RESULT.review_stats[\"flagged\"]",
+        "repo:media-pulse/README.md: When those packages are not available the project transparently falls back to bundled numpy implementations, so it runs anywhere and the tests always pass."
+      ],
+      "sources": [],
+      "tags": [
+        "testing"
+      ]
+    },
+    {
+      "id": "mp-26",
+      "type": "pushback",
+      "level": 2,
+      "q": "The write up says topic uses TF-IDF and logistic regression and sentiment uses VADER. Which models produced your published numbers?",
+      "easy": "Possibly not those. When VADER or scikit-learn is missing, the code silently swaps in simpler fallbacks, and the repo saves no run output that records which backend ran. A rerun for this deck matched the published topic figures with the numpy fallback, not scikit-learn.",
+      "deep": "classify.py tries to import vaderSentiment and scikit-learn and falls back to LexiconSentiment and FallbackTopicModel on ImportError. run_demo.py prints the topic backend name, but the sentiment backend is never reported, and no output file is committed. The write up's limitations mention that the lexicon sentiment model is the weaker one used offline. The rerun for this deck (not stored in the repo) reproduced the published topic accuracy and ECE only with the numpy fallback topic model. Fix: log both backends and package versions with every result, write metrics to a committed JSON per run, and fail loudly rather than silently when a production backend is expected.",
+      "say": "I'd check before quoting. The code silently falls back to a numpy topic model and a word list for sentiment when packages are missing, and only the topic backend gets printed. When I reran it, the published topic numbers matched the numpy fallback. I'd log both backends with every result.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/classify.py: except ImportError:  # zero-dependency fallback",
+        "portfolio: Each mention is scored for sentiment (VADER) and topic (a TF-IDF and logistic regression model), with a confidence attached to every prediction.",
+        "portfolio: 120 sample mentions / topic accuracy 0.88 -> 0.96 after review / sentiment 0.50 -> 0.85 / topic ECE 0.156 / held out test n = 48"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "reproducibility",
+        "metric honesty"
+      ]
+    },
+    {
+      "id": "mp-27",
+      "type": "concept",
+      "level": 2,
+      "q": "How would an LLM plug in, and what would you need to check first?",
+      "easy": "Any model that takes text and returns a label and a confidence can replace a classifier, because the pipeline only depends on that one method. The catch is that an LLM's stated confidence is usually not calibrated, so the review threshold would need recalibrating.",
+      "deep": "LLMSentiment is a stub whose predict(text) raises NotImplementedError; swapping it for SentimentClassifier requires no other change because Classifier only calls .predict(text) -> (label, confidence). Things to verify: confidence source (verbalized confidence, token log probabilities of the label, or agreement across several samples), calibration on held out labeled data with ECE and a reliability table, label set adherence with structured output, cost and latency per mention, determinism (temperature 0, cached responses for tests), and drift when the provider updates the model. The gate's value depends entirely on the confidence being informative.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/classify.py: class LLMSentiment:  # pragma: no cover - illustrative adapter",
+        "repo:media-pulse/src/mediapulse/classify.py: \"Wire up your LLM client here and return (label, confidence).\")"
+      ],
+      "sources": [],
+      "tags": [
+        "llm",
+        "interfaces",
+        "calibration"
+      ]
+    },
+    {
+      "id": "mp-28",
+      "type": "compare",
+      "level": 2,
+      "q": "How do media-pulse and comms-agent differ, and how would you present them together?",
+      "easy": "media-pulse is the measurement system with trained models, a review queue, and model quality checks. comms-agent is the automation layer that runs such a loop as a state graph and writes the brief.",
+      "deep": "media-pulse: scikit-learn or numpy topic model, VADER or lexicon sentiment, per field review items at 0.55, an oracle reviewer on the held out split only, ECE and subgroup accuracy, a Streamlit dashboard. comms-agent: a framework free graph engine, keyword classifier, a min confidence gate at 0.50 as a conditional edge, a templated LLM brief. Shared: synthetic Northwind corpora with ground truth, key messages, reach weighted share of voice with the same co mention bias, oracle reviewers. Present them as measurement quality (media-pulse) and orchestration and audit (comms-agent), and be ready to say that both use simulated reviewers on synthetic data.",
+      "evidence": [
+        "portfolio: Where media-pulse is the measurement system, comms-agent runs it and produces the brief."
+      ],
+      "sources": [],
+      "tags": [
+        "architecture",
+        "compare"
+      ]
+    },
+    {
+      "id": "mp-29",
+      "type": "define",
+      "level": 2,
+      "q": "Define human in the loop review, confidence routing, and the citizen science analogy in the write up.",
+      "easy": "Human in the loop review means people check the model's least certain outputs. Confidence routing is the rule that decides which outputs go to people. Citizen science classification projects use the same split: machines do the bulk, volunteers or experts settle the uncertain cases.",
+      "deep": "In media-pulse the routing rule is per field: sentiment_conf or topic_conf below the threshold creates a review item. The economics: reviewing every item is accurate but expensive; reviewing none is cheap but leaks model errors; routing by confidence aims to spend reviewer time where the model is most likely wrong, which only works if confidence ranks errors well (measured by AUROC of confidence for correctness, or by gate recall at a given load). Large classification efforts with volunteers combine machine scores with human votes and retrain on the human labels, closing the loop that media-pulse leaves open.",
+      "evidence": [
+        "repo:media-pulse/src/mediapulse/review.py: if p.sentiment_conf < self.threshold:",
+        "portfolio: Large citizen science classification pipelines use the same pattern"
+      ],
+      "sources": [],
+      "tags": [
+        "define",
+        "human in the loop"
+      ]
+    },
+    {
+      "id": "mp-30",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations, and what breaks at 10x or 100x volume?",
+      "easy": "Synthetic data with partly random tone labels, a perfect simulated reviewer, tiny test set, uncalibrated sentiment confidence, an in memory audit log, and one machine. Real volume needs streaming ingestion, deduplication, a persistent queue, and reviewer capacity planning.",
+      "deep": "From the write up: synthetic corpus, weaker fallback models, single node. From the code: sentiment truth independent of text, oracle reviewer, 48 item test set and five bin ECE, sentiment confidence measures distance from zero, dashboard ECE after review, mutable in memory audit, silent backend fallback, brand biased share of voice, unused relevance score. At 10x (thousands of mentions a week): batch classification is trivial, but review load scales with the flag rate, so thresholds must follow reviewer capacity. At 100x (streaming from many feeds): deduplication of syndicated stories, language detection, a message queue and workers, a database backed review queue with SLAs, append only audit storage, model and label versioning, drift monitoring per outlet type, and periodic retraining on reviewed labels.",
+      "evidence": [
+        "portfolio: Single node. It runs on one machine, not at production stream volume.",
+        "portfolio: Synthetic corpus. The data is a deterministic sample about a fictional brand, built to demonstrate the pipeline, not a live media feed."
+      ],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "scale",
+        "production"
+      ]
+    },
+    {
+      "id": "mp-31",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next?",
+      "easy": "Fix the data so tone labels follow the text, make the reviewer imperfect, measure the gate properly, fix the confidence and the dashboard, and make the audit log durable.",
+      "deep": "Ordered: (1) regenerate text conditioned on the sentiment label, or hand label a real sample; (2) report gate recall, review load, and residual error across thresholds, with bootstrap intervals; (3) simulate reviewers at 85 to 95% accuracy and with disagreement; (4) replace |c|/0.6 with a calibrated mapping fit on held out data, and calibrate topic with temperature scaling; (5) point the dashboard ECE at before review metrics and add counts per bin; (6) log backends and versions with each run and commit metrics JSON; (7) persist the audit to an append only store and log auto accepts; (8) retrain on reviewed labels and track the effect.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next steps"
+      ]
+    },
+    {
+      "id": "mp-32",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain media-pulse to a staff engineer, including what you found in review.",
+      "easy": "Per field confidence routing over TF-IDF logistic regression and VADER, oracle review on the held out split, and four findings that change how to read the numbers.",
+      "deep": "Cover the pipeline and split, the routing rule, the before and after numbers with ECE, then the generator's label noise, the sentiment confidence semantics, the dashboard ECE, and the silent backend fallback.",
+      "say": "Topic is TF-IDF with bigrams into logistic regression; sentiment is VADER's compound score. Anything under 0.55 confidence per field goes to an oracle reviewer, only on the 48 held out items. Topic went 0.88 to 0.96. Reviewing it later, I found the tone labels in my generator are partly random, the sentiment confidence measures distance from zero instead of the boundary, and the dashboard shows ECE after review. I'd fix those before trusting any of it.",
+      "evidence": [
+        "portfolio: 120 sample mentions / topic accuracy 0.88 -> 0.96 after review / sentiment 0.50 -> 0.85 / topic ECE 0.156 / held out test n = 48",
+        "repo:media-pulse/scripts/generate_sample_data.py: s = max(-1.0, min(1.0, lean + random.uniform(-0.35, 0.35)))",
+        "repo:media-pulse/src/mediapulse/classify.py: conf = min(1.0, abs(c) / 0.6)"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff engineer"
+      ]
+    },
+    {
+      "id": "mp-33",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain media-pulse to a product manager.",
+      "easy": "A tool that measures brand coverage for a comms team, holds back uncertain labels for a person to check, and shows how much that checking improves the numbers.",
+      "deep": "Frame the user, the core metrics (tone, share of voice, key message pull through), the review queue and its slider, and what remains to prove with real data.",
+      "say": "Comms teams need to know how the brand is covered: tone, how much of the conversation is ours, and whether our key messages land. This tool labels every mention, sends the uncertain ones to a reviewer, and shows the before and after accuracy. The slider lets the team pick how much review they can afford. The next step is proving it on real coverage with real reviewers.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "product manager"
+      ]
+    },
+    {
+      "id": "mp-34",
+      "type": "narrate",
+      "level": 3,
+      "q": "Explain media-pulse to a recruiter in plain words.",
+      "easy": "Tanay built a tool that tracks news coverage of a brand, uses AI to label it, and asks a person to double check anything the AI is unsure about.",
+      "deep": "One sentence on what it does, one on the human check, one on the dashboard, one on why it fits communications and AI roles.",
+      "say": "I built a tool that tracks how a brand shows up in the news. AI labels each article as positive or negative and by topic, and a person double checks anything the AI isn't sure about. A dashboard shows the results and how much the human checks improve them. It's the kind of AI plus human workflow a lot of communications teams are adopting.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "scikit-learn TfidfVectorizer",
+      "url": "https://scikit-learn.org/stable/modules/generated/sklearn.feature_extraction.text.TfidfVectorizer.html",
+      "why": "Smoothed idf, sublinear tf, n gram ranges, and normalization used by the topic model."
+    },
+    {
+      "title": "scikit-learn LogisticRegression",
+      "url": "https://scikit-learn.org/stable/modules/generated/sklearn.linear_model.LogisticRegression.html",
+      "why": "Multinomial logistic regression, the C regularization parameter, and solver settings."
+    },
+    {
+      "title": "On Calibration of Modern Neural Networks (Guo et al. 2017)",
+      "url": "https://arxiv.org/abs/1706.04599",
+      "why": "Expected calibration error, reliability diagrams, and temperature scaling."
+    }
+  ],
+  "sheet": {
+    "easy": "## What it is\n- A communications measurement tool (Aug 2026): read mentions of a brand, label tone and topic, send uncertain labels to a person, report the numbers.\n- Also checks the model: accuracy on held out mentions, whether its confidence is honest (calibration), and accuracy by kind of outlet.\n\n## Pipeline\ningest -> classify (tone, topic, confidence) -> review queue (confidence under 0.55) -> metrics and dashboard\n\n## Data\n- 120 made up mentions of a fictional brand, 8 story types, 10 outlets, 2 competitors, 3 key messages.\n- About 30% mix two stories, and the official topic is picked at random between them.\n- Tone labels are drawn around each story type's usual tone, not from the words.\n\n## Results (48 held out mentions, simulated reviewer that is always right)\n| | Before review | After review |\n|---|---|---|\n| Topic accuracy | 0.88 | 0.96 |\n| Sentiment accuracy | 0.50 | 0.85 |\n- Topic calibration error (ECE): 0.156.\n\n## Comms metrics\n- Mentions per week, tone mix, topic mix, share of voice weighted by outlet reach, key message pull through.\n\n## Honest limits\n- Synthetic data; tone labels partly random; perfect reviewer; only 48 test items.\n- Tone confidence measures distance from zero, so neutral is always reviewed.\n- Dashboard shows calibration after review; audit log lives in memory; backends switch silently.\n",
+    "deep": "## Modules\n| File | Role |\n|---|---|\n| ingest.py | Article dataclass, Source protocol, SampleSource, RSSAdapter (sha1 id, reach 0.5, brand filter) |\n| classify.py | SentimentClassifier (VADER compound, $\\pm0.15$, conf $=\\min(1,|c|/0.6)$), TopicClassifier (TF-IDF 1 to 2 grams, sublinear tf, LogisticRegression C=4, max_iter 1000), pull_messages, relevance_score, Classifier, LLMSentiment stub |\n| _fallback.py | SimpleTfidf (idf $=\\ln\\frac{1+n}{1+df}+1$, $(1+\\ln c)\\,$idf, L2 rows), SoftmaxRegression (GD, lr 0.5, 400 epochs, $\\lambda=10^{-3}$), LexiconSentiment ($\\tanh(s/3)$, negators) |\n| review.py | ReviewItem, AuditEntry, ReviewQueue(threshold 0.55): build per field, resolve with oracle, apply, stats |\n| metrics.py | coverage by ISO week, mixes, SOV, pull through, accuracy, ECE (5 bins), subgroup accuracy |\n| pipeline.py | split 72/48 (seed 7), fit on train, classify all, review test items only, before and after metrics |\n| app | 4 tabs, threshold slider 0.30 to 0.80, cache_data |\n\n## Data generator (seed 42, 120 items)\n- topic uniform over 8; outlet from 10 with reach 0.2 to 0.95; with prob 0.30 append a second topic and pick the true topic at random.\n- sentiment truth: $s=\\mathrm{clip}(\\text{lean}_{topic}+U(-0.35,0.35))$, positive $>0.15$, negative $<-0.15$, independent of the text.\n\n## Models\n- Softmax: $p(k\\mid x)=\\frac{e^{w_k^\\top x+b_k}}{\\sum_j e^{w_j^\\top x+b_j}}$; GD gradient $\\frac1n X^\\top(P-Y)+\\lambda W$.\n- Sentiment confidence measures $|c|$, not distance to the $\\pm0.15$ boundaries; flagged when $|c|<0.33$ at threshold 0.55.\n\n## Review\n- Items per (id, field) when that field's confidence $<0.55$, test ids only; oracle returns truth; human_confirm or human_correct with UTC timestamp; labels overwritten in place.\n- With an oracle: after accuracy $=1-$ confident errors $/n$; uplift = gate recall over errors.\n\n## Metrics\n- $\\mathrm{ECE}=\\sum_b \\frac{|S_b|}{n}|\\overline{\\mathrm{conf}}_b-\\mathrm{acc}_b|$, 5 equal width bins, topic, test set.\n- $\\mathrm{SOV}_b=\\sum_a w_a/(\\sum_a w_a+\\sum_{a:c(a)} w_a)$, brand counted on every article.\n- Pull through: share of mentions containing each key message (substring).\n\n## Results (write up)\n| Metric | Before | After |\n|---|---|---|\n| Topic accuracy (n = 48) | 0.88 | 0.96 |\n| Sentiment accuracy | 0.50 | 0.85 |\n| Topic ECE | 0.156 | |\n\n## Review findings\n| Claim | Code |\n|---|---|\n| immutable audit log | in memory list of mutable dataclasses; auto_accept never logged |\n| confidence is distance from nearest boundary | $|c|/0.6$, distance from zero |\n| dashboard shows model calibration | shows ECE after review (metrics_after) |\n| VADER and TF-IDF logistic regression | silent fallbacks; a rerun matched the published topic numbers with the numpy fallback |\n| sentiment uplift | labels drawn around topic lean, independent of text |\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is media-pulse?",
+      "script": "media-pulse is the full measurement loop for a comms team: ingest mentions, classify tone and topic with a confidence, send anything uncertain to a reviewer, and report share of voice and key message pull through. It also audits its own model with held out accuracy, calibration error, and accuracy by outlet type. On a synthetic sample with a simulated reviewer, topic accuracy went from 0.88 to 0.96. I'm upfront that the data and reviewer are simulated.",
+      "keypoints": [
+        "Full loop: ingest, classify, review, measure",
+        "Confidence based routing to a reviewer",
+        "Model quality checks: held out accuracy, ECE, subgroups",
+        "Topic 0.88 to 0.96",
+        "Synthetic data and simulated reviewer stated"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "Comms teams track how a brand is covered: tone, topics, share of voice, and whether approved messages land. media-pulse does that end to end, with people checking what the model isn't sure about.\n\nIngestion is a protocol, so a bundled sample source and an RSS adapter both produce the same article record. The sample is 120 synthetic mentions of a fictional brand.\n\nClassification has two models. Topic is TF-IDF on words and word pairs into logistic regression, trained on 72 mentions and tested on 48. Sentiment is VADER's compound score with cutoffs at plus and minus 0.15. Every prediction carries a confidence.\n\nAny label under 0.55 becomes a review item. A reviewer confirms or corrects it, the label is overwritten, and the decision is logged. Only test items are reviewed, so the before and after accuracy is on unseen data. The reviewer is simulated by the answer key.\n\nResults: topic accuracy went from 0.88 to 0.96 and sentiment from 0.50 to 0.85, with topic calibration error 0.156. A four tab Streamlit dashboard shows all of it, with a slider for the threshold.\n\nWhen I reviewed my own code, I found things I'd fix. My generator draws tone labels around each topic's average, independent of the words, so the sentiment baseline is capped and the uplift is the reviewer reading the key. The sentiment confidence measures distance from zero, not the boundary, so every neutral goes to review. The dashboard shows calibration after review. And the audit log I called immutable is a list in memory.\n\nNext, I'd make the labels follow the text, simulate imperfect reviewers, report gate recall and residual error by threshold, and calibrate the confidences.",
+      "keypoints": [
+        "Problem and pluggable ingestion",
+        "Topic model and sentiment model with settings",
+        "Review routing at 0.55, test only, oracle reviewer",
+        "Numbers: 0.88 to 0.96, 0.50 to 0.85, ECE 0.156",
+        "Self review findings: label noise, confidence semantics, dashboard ECE, audit log",
+        "Next steps"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "media-pulse is a measurement pipeline in four modules plus a dashboard, built to show the whole loop a press monitoring team relies on, not one model.\n\nIngest defines an Article dataclass and a Source protocol. SampleSource reads a bundled JSON file; RSSAdapter maps feed entries into the same record, filtering for the brand name and hashing the link into an ID. Everything downstream depends only on the record.\n\nThe corpus comes from a seeded generator: 120 mentions, eight topics, ten outlets with reach weights from 0.2 to 0.95, two competitors, three key messages. With probability 0.3 a second topic's headline and snippet are appended, and the true topic is a coin flip between the two. Sentiment truth is the topic's lean plus uniform noise of plus or minus 0.35, thresholded at 0.15. That last design choice matters, and I'll come back to it.\n\nThe pipeline splits 72 train and 48 test with seed 7. Topic is a scikit-learn pipeline: TF-IDF over unigrams and bigrams with sublinear term frequency, into logistic regression with C of 4. Confidence is the top class probability. If scikit-learn is missing, a numpy version takes over: the same smoothed idf, and softmax regression trained by full batch gradient descent, 400 epochs at learning rate 0.5. Sentiment is VADER's compound score, labeled positive above 0.15 and negative below minus 0.15, with confidence the absolute compound over 0.6. The fallback is a word list with negation flips and a tanh.\n\nReview builds one item per mention and field whose confidence is under 0.55, keeps only test items, and resolves them with an oracle from the labels. Each decision is logged as confirm or correct with a timestamp, and labels are overwritten. Metrics run before and after: coverage by ISO week, mixes, reach weighted share of voice, pull through, and on the test set, accuracy, a five bin ECE for topic, and accuracy by outlet type.\n\nPublished numbers: topic 0.88 to 0.96, sentiment 0.50 to 0.85, topic ECE 0.156, all on 48 items.\n\nNow the review. First, sentiment truth doesn't depend on the text, so 0.50 is near the ceiling for any text model, and the uplift is the oracle copying random labels. Second, the confidence comment says distance from the nearest boundary, but the code measures distance from zero, so neutrals always get flagged. Third, with a perfect oracle the after accuracy is one minus the confident errors over n, so the uplift is really gate recall. Fourth, the dashboard's ECE tile reads the after review metrics, mixing corrected labels with the model's confidences; the demo script prints the right one. Fifth, an ECE over 48 items in five bins has bins with one item and is biased upward. Sixth, the audit log is an in memory list, and auto accepts are never logged. Seventh, the code silently falls back to the numpy and lexicon models, and only the topic backend is printed; when I reran it, the published topic numbers matched the numpy fallback.\n\nWhat I'd do: generate text conditioned on the sentiment label or hand label a real sample, simulate reviewers at 85 to 95 percent, report review load against residual error across thresholds with bootstrap intervals, fit calibrated confidence maps on held out data, fix the dashboard, log backends and versions with each run, and persist the audit to append only storage.",
+      "keypoints": [
+        "Module structure and pluggable ingestion",
+        "Generator design including dual topic coin flips and noisy sentiment truth",
+        "Split, topic model settings, fallback math",
+        "Sentiment model, thresholds, confidence formula",
+        "Review mechanics and metrics",
+        "Published numbers with n = 48",
+        "Seven review findings",
+        "Ordered fixes"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to me like I'm not technical.",
+      "script": "Companies want to know how they're showing up in the news: is coverage good or bad, what stories are being told, and are their key messages getting through. I built a tool that reads each article, labels it, and when it isn't sure, hands it to a person to double check. A dashboard shows the results and how much the human checks improved accuracy. In my test with made up articles, checking the uncertain ones took topic accuracy from 88 to 96 percent. The articles and the checker were simulated, so the next step is trying it on real coverage with real people.",
+      "keypoints": [
+        "What comms teams want to know",
+        "AI labels, person checks uncertain ones",
+        "Dashboard shows improvement",
+        "88 to 96 percent on made up data",
+        "Next step: real coverage and reviewers"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw it for me.",
+      "script": "First, four boxes left to right: ingest, classify, review, measure. Under ingest I draw two arrows from a sample file and an RSS feed into one Article record, and say the schema is the contract.\n\nSecond, I split classify into two lanes. Top lane: text to TF-IDF on words and pairs to logistic regression to a topic and its top probability. Bottom lane: text to VADER's compound score, with marks at minus 0.15 and plus 0.15 for negative, neutral, positive, and the confidence written as absolute compound over 0.6. I circle that and note it's distance from zero, so the whole neutral band is low confidence.\n\nThird, review. I draw a funnel labeled under 0.55, per field, test split only, feeding a person icon with an answer key next to it, since the reviewer is an oracle. Out of it: confirm or correct, and a log.\n\nFourth, measure. Two columns, business and model quality. Business: weekly coverage, tone mix, share of voice, pull through. Model quality: accuracy before and after, 0.88 to 0.96 for topic and 0.50 to 0.85 for sentiment, and an ECE of 0.156 with a little reliability chart of five bins, one nearly empty.\n\nLast, a box at the bottom for the data generator, with tone equals topic lean plus noise. I draw a line from it to the 0.50 and say that's why sentiment can't get much better from text, and why the uplift is the answer key.",
+      "keypoints": [
+        "Four stage pipeline and the schema contract",
+        "Two classifier lanes with thresholds",
+        "Confidence formula flaw marked",
+        "Review funnel with oracle and log",
+        "Business and quality metrics with numbers",
+        "Generator label noise linked to the sentiment result"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you make sure the uplift wasn't inflated by training data?",
+      "script": "The split is 72 training and 48 test, with a fixed seed. The topic model only sees the 72. Review is restricted to flagged items whose IDs are in the test set, so the before and after numbers are both on mentions the model never trained on. What that doesn't fix is the oracle: with a reviewer who's always right, the uplift equals how many errors the threshold catches. So I'd describe it as gate recall on held out data, and I'd add a simulated imperfect reviewer to get a realistic number.",
+      "keypoints": [
+        "72/48 split with fixed seed",
+        "Review restricted to test IDs",
+        "Oracle makes uplift equal gate recall",
+        "Add imperfect reviewer simulation"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why is sentiment accuracy only 0.50 before review?",
+      "script": "Two reasons, one of which I created. The sentiment models are general purpose word lists that don't know business language. But the bigger one is my generator: the tone label is drawn around the topic's usual tone with random noise, independent of the words in the article. So two identical texts can have different labels, and no model can get much past knowing the topic. That also means the jump to 0.85 is the simulated reviewer copying the answer key. Conditioning the text on the label would fix the data.",
+      "keypoints": [
+        "General lexicons miss business language",
+        "Labels drawn independent of the text",
+        "Ceiling near knowing the topic",
+        "Uplift is the oracle; fix by conditioning text on label"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What does an ECE of 0.156 tell you, and would you trust it?",
+      "script": "It says that on average the topic model's confidence and its actual accuracy differ by about 16 points, weighted across five confidence bins. I wouldn't lean on the exact value. It's 48 predictions, so some bins have one or two items, and binned ECE is biased upward at small n. I'd add a bootstrap interval, compare it with what a perfectly calibrated model would score at the same n, and look at Brier score too. Also, the dashboard tile shows ECE after review, which isn't the model's calibration.",
+      "keypoints": [
+        "Average gap between confidence and accuracy",
+        "48 items, sparse bins, upward bias",
+        "Bootstrap, calibrated baseline, Brier",
+        "Dashboard tile uses after review metrics"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you choose the review threshold for a real team?",
+      "script": "From the team's capacity and the cost of a wrong number. For each threshold I'd compute review load, the count of flagged labels, and residual error, the mistakes among unflagged ones. Then pick the point where the team can clear the queue each week and the residual error is acceptable for the report. I'd probably use separate thresholds per field, because sentiment confidence here is systematically low. And I'd calibrate the confidences first, otherwise the threshold doesn't mean a probability.",
+      "keypoints": [
+        "Load versus residual error curve",
+        "Team capacity and error cost",
+        "Per field thresholds",
+        "Calibrate first"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "You call the audit log immutable. It's a Python list. Isn't that overclaiming?",
+      "script": "Yes, that's overclaiming, and I'd correct it. It's a complete in memory record of every review decision for a run, with timestamps, but nothing stops edits and it's gone when the process ends. It also never logs auto accepts, even though the action type exists. For production I'd write to an append only store, chain hashes so tampering is detectable, persist reviewer identity, and log trusted predictions as well, so the audit covers every label in the report.",
+      "keypoints": [
+        "Concedes the claim is wrong",
+        "What it is: complete per run record with timestamps",
+        "Auto accepts never logged",
+        "Production design: append only, hash chain, identity"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your sentiment uplift comes from a reviewer copying random labels. What's left of the result?",
+      "script": "For sentiment, not much, and I'd say so. The labels in my generator don't follow the text, so the jump from 0.50 to 0.85 doesn't show anything a human could do from reading. Topic is more meaningful: labels follow the text except on the dual topic items, and the uplift there measures how many errors the threshold catches on held out data. What stands overall is the system: routing, review, logging, before and after measurement, and calibration checks. The numbers need real data.",
+      "keypoints": [
+        "Concedes sentiment uplift is not meaningful",
+        "Topic uplift measures gate recall",
+        "System design stands",
+        "Numbers need real data"
+      ]
+    }
+  ]
+}
