@@ -1,0 +1,1279 @@
+{
+  "deck_id": "p-groundwork",
+  "title": "Groundwork",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/Groundwork",
+  "summary_easy": "Groundwork is a small AI question answering system over Wikipedia, built with the parts real products need and demos skip: measuring whether answers are right, refusing when it should, checking that safety filters do not block real users, and metering what each model call costs. On public data where half the questions have no answer, it correctly refuses 96.2% of those, and keyword search finds the right paragraph in the top five 92.1% of the time.",
+  "summary_deep": "A Python RAG stack over the SQuAD v2.0 dev set (1,204 paragraphs, 11,873 questions, 5,945 unanswerable) that runs offline with a deterministic extractive reader or calls Claude when a key is set. Retrieval is BM25 (k1 1.5, b 0.75) plus a 768 dimension hashing embedder fused by RRF (k 60); the ablation (BM25 recall@5 0.921, hybrid 0.853, dense 0.601) made sparse the default. A six feature logistic regression gives confidence, fitted and evaluated on a hash split (held out ECE 0.045, AUC 0.654), and the operating point maximises coverage under a 60% precision floor (7.5% of answerable answered, 96.2% of unanswerable declined). Guardrails combine weighted regex patterns and a hashed n-gram classifier by max (injection recall 0.733 at FPR 0.125 on deepset test, 0.884 on unseen Gandalf), with a pattern only context rail after the classifier flagged 100% of clean passages. The gateway handles auth, pessimistic preflight budgets, sliding window rate limits, a tenant scoped exact plus semantic cache, tier fallback, retries, cost accounting and a hash chained audit log. A release gate with ratcheting floors runs the full evaluation in CI in about 39 seconds alongside 113 tests.",
+  "sheet": {
+    "easy": "## What it is\nA small question answering system over Wikipedia (SQuAD v2.0) with the four production parts usually skipped: evaluation that can fail a build, guardrails with measured false alarm rates, a gateway that meters every model call, and security controls. Runs free on a laptop with no API key.\n\n## Headline numbers (offline reader, all 11,873 questions)\n| | |\n|---|---|\n| BM25 recall@5 | 0.921 |\n| Hybrid recall@5 | 0.853 (so hybrid was removed) |\n| Correctly declines unanswerable | 96.2% |\n| Answers of answerable | 7.5% (cost of a 60% precision promise) |\n| ECE / AUC | 0.045 / 0.654 |\n| Injection recall, unseen attacks | 0.884 |\n| False alarms on 600 real questions | 5.0% |\n| Tests | 113, CI green |\n\n## The data\nSQuAD v2.0 dev (1,204 paragraphs, 11,873 questions, 5,945 unanswerable), deepset injections, jailbreak set, Lakera Gandalf (held out), ai4privacy PII. SHA-256 recorded for each.\n\n## Three decisions the measurements reversed\n1. Hybrid retrieval removed: 6.8 points worse than BM25.\n2. Context rail: the trained classifier flagged 100% of clean Wikipedia, so documents are scanned with patterns only.\n3. A scoring formula hid single pattern attacks (0 of 60 caught) until a unit test found it.\n\n## Also worth telling\n- Temperature scaling made calibration worse; now off by default.\n- Card number recall 17.5% equals the share of the dataset's card numbers that pass Luhn.\n- The evaluation runs as its own gateway tenant instead of bypassing budgets.\n\n## Caveats\nAnswer quality numbers come from an extractive offline reader. The hashed embedder has no semantics. Confidence only moderately separates right from wrong. Gateway state is single node.\n",
+    "deep": "## Request path\ninput rail (length 6,000, injection, jailbreak, PII) -> retrieve (BM25 default) -> context rail (patterns only, drop poisoned) -> gateway (auth, estimate, entitlement, RPM, budget, cache, route, retry, fallback, record, cache store, audit) -> output rail (citations, groundedness, PII egress) -> decision (ANSWER, HEDGE, ABSTAIN, BLOCKED).\n\n## Retrieval\n- BM25: $\\sum_q \\mathrm{IDF}(q)\\frac{f(k_1+1)}{f+k_1(1-b+b|D|/\\mathrm{avgdl})}$, $\\mathrm{IDF}=\\ln(1+\\frac{N-n+0.5}{n+0.5})$, $k_1=1.5$, $b=0.75$; title prepended.\n- Hashing embedder: 768 dims, blake2b slot and sign, unigrams + bigrams, $1+\\ln(\\text{count})$, L2 norm.\n- RRF: $\\sum_r w_r/(60+\\mathrm{rank}_r)$, top 20 per side, top 5 final, context cap 6,000 chars.\n\n| mode | R@1 | R@3 | R@5 | R@10 | MRR | nDCG@10 |\n|---|---|---|---|---|---|---|\n| sparse | 0.7818 | 0.893 | 0.9209 | 0.9483 | 0.8426 | 0.8686 |\n| hybrid | 0.5988 | 0.7686 | 0.8532 | 0.9244 | 0.7022 | 0.7557 |\n| dense | 0.4188 | 0.5459 | 0.6012 | 0.6714 | 0.4972 | 0.5389 |\n\n## Answers and abstention\nContainment 0.0686 (ceiling 0.552), EM 0.0, F1 0.1305, answer rate 0.0746, gold retrieved 0.8027, correct abstention 0.9617, false answer rate 0.0383. Abstention classifier: P 0.5085, R 0.9617, F1 0.6653, FPR 0.9254.\n\n## Confidence and calibration\n$p=\\sigma(w\\cdot x+b)$ on six features: query_coverage_answer (+1.3754), query_coverage_top (+0.8835), query_coverage_context (-0.5977), top_score (-0.502), answer_length (-0.2692), answer_type_match (+0.2019). Selected by single feature AUC on 812 answered questions; answer_support dropped at 0.500.\n$\\mathrm{ECE}=\\sum_b\\frac{n_b}{N}|\\mathrm{acc}_b-\\mathrm{conf}_b|$ (15 bins). Held out 4,881: ECE 0.0446, MCE 0.1962, Brier 0.2127, AUC 0.6544, $T=1.0$.\nTemperature: $\\sigma(z/T)$; applied only if ECE > 0.08 and large gain (held out ECE had gone 0.053 to 0.084 at about 295 validation points).\nSplit: blake2b(\"20260811:qid\") < 0.5 goes to fit. Candidate answers always kept; apply_decision=False during eval.\nOperating point: max coverage s.t. precision at least 0.60 over 101 thresholds; defaults answer 0.55, hedge 0.35.\n\n## Release gate (config.EvalGate)\n| check | floor | measured |\n|---|---|---|\n| recall@5 | 0.90 | 0.9209 |\n| MRR | 0.80 | 0.8426 |\n| containment | 0.06 | 0.0686 |\n| abstention recall | 0.90 | 0.9617 |\n| ECE | max 0.08 | 0.0446 |\n| injection recall | 0.65 | 0.7333 |\n| injection FPR | max 0.15 | 0.125 |\nRegression tolerance 0.03 vs baseline; skipped if sample size differs; full run 38.76 s; floors only ratchet up.\n\n## Guardrails\nHeuristic $s=1-e^{-\\sum w}$ (old $1-\\frac{1}{1+\\sum w}$ gave 0.444 for one 0.80 pattern). Trained: hashed word 1 and 2 grams + char 4-grams, 2,048 dims, LR 300 epochs, lr 0.5, L2 2e-4, class reweighting. Fire if $\\max(s_h,s_t)\\ge0.50$. Threshold tuning: max recall s.t. FPR at most 0.05 on train negatives + 600 SQuAD questions.\n\n| rail | variant | corpus | P | R | FPR | AUC |\n|---|---|---|---|---|---|---|\n| injection | heuristic | deepset test | 1.0 | 0.0833 | 0.0 | 0.5667 |\n| injection | trained+heuristic | deepset test | 0.8627 | 0.7333 | 0.125 | 0.911 |\n| injection | heuristic | Gandalf held out | 1.0 | 0.553 | n/a | n/a |\n| injection | trained+heuristic | Gandalf held out | 1.0 | 0.884 | n/a | n/a |\n| jailbreak | heuristic | jailbreak test | 1.0 | 0.4892 | 0.0 | 0.8129 |\n| jailbreak | trained+heuristic | jailbreak test | 0.9843 | 0.8993 | 0.0163 | 0.9771 |\n\nOutput rail: groundedness = supported sentences / counted (at least 3 terms, overlap at least 0.6); pass at 0.60, abstain below 0.30. PII recall 0.57 over 486 spans; CREDIT_CARD 0.1746 equals Luhn pass rate.\n\n## Gateway\nTiers: frontier claude-opus-5 ($5/$25), balanced claude-sonnet-5 ($3/$15, default), cheap claude-haiku-4-5 ($1/$5). Cost $=[(t_{in}-t_c)p_{in}+0.1t_cp_{in}+t_{out}p_{out}]/10^6$; estimate assumes full max output. Tenants: analytics $25/60 RPM, support $10/120, public-demo $1/10 cheap only, evaluation $500/100,000. Sliding 60 s window. Cache: SHA-256 exact, cosine at least 0.93 semantic, TTL 900 s, 4,096 entries, tenant scoped, no refusals or truncations. Retries 2, backoff 0.25 s doubling, retryable only. Status 401, 402, 403, 429, 503.\n\n## Security and ops\nSHA-256 key digests, hmac.compare_digest, 12 char key_id, dev keys fail closed, header only. Audit: JSON lines hash chained from 64 zero GENESIS, resume from tail, verify returns first bad. Container non root, read only, caps dropped, digest pinned; NetworkPolicy egress to DNS and provider only. Drift: PSI (alert at 0.25) and KS (0.20), 20 sample floor.\n\n## Tests and CI\n113 tests: evaluation 25, security 22, guardrails 20, gateway 20, pipeline 14, retrieval 12. CI: fetch (continue on error), pytest, build index, run_eval --full, upload artifacts.\n\n## Known issues\nBenign 5.0% FPR measured on the threshold tuning set; rail fires at config 0.50, not the tuned threshold; doc drift (6.8 vs 5.7 points; 0.552 vs 0.58 ceiling); one gold passage per question; offline reader.\n\n## Glossary\nRAG, BM25, IDF, RRF, hashing embedder, recall@k, MRR, nDCG, EM, token F1, containment, abstention, calibration, ECE, MCE, Brier, AUC, temperature scaling, operating point, precision floor, release gate, ratchet, prompt injection (direct, indirect), jailbreak, input rail, output rail, groundedness, PII, Luhn, gateway, tier, fallback, exponential backoff, semantic cache, prompt caching, hash chain, constant time comparison, NetworkPolicy, PSI, KS statistic.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "Groundwork is a small RAG system I built to measure the parts of an LLM feature that usually get skipped. It has an evaluation that can fail a build, guardrails with published false alarm rates, and a gateway that meters every model call. It all runs on public, human labelled data, with no API key needed. BM25 gets the right passage into the top five 92% of the time. The system correctly declines 96% of unanswerable questions. Three of my design decisions were reversed by the measurements.",
+      "keypoints": [
+        "Names the four concerns",
+        "Public labelled data, no API key",
+        "Retrieval number",
+        "Abstention number",
+        "Measurements changed the design"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "Getting one good answer from an LLM is easy. Knowing whether answers are good, when to refuse, and whether your filters block real users is the hard part. Groundwork builds those around a small RAG system.\n\nThe data choice carries everything. SQuAD v2 has 11,873 questions, and about half were written by crowdworkers to look answerable when they aren't. That gives me real labels for refusing, and exact retrieval labels, because each question came from one paragraph.\n\nRetrieval is BM25 plus a hashed vector index, fused by reciprocal rank. I measured all three modes on every question. BM25 alone hit 0.921 recall at five. Hybrid was almost seven points worse, because my embedder has no semantics. So the default became sparse, and the config says when to flip it back.\n\nConfidence is a six feature logistic regression, fitted on one half and reported on the other. Held out ECE is 0.045, but AUC is only 0.654. I choose the threshold by a product rule: answer as much as possible while staying 60% precise. Maximising accuracy instead made it answer almost nothing.\n\nGuardrails pair hand written patterns with a small hashed classifier. On a thousand attacks it never saw, recall is 0.884. Two bugs here taught me the most. The classifier flagged every clean Wikipedia paragraph as an injection. And a scoring formula silently disabled single pattern detection.\n\nThe gateway does auth, budgets checked before the call, a tenant scoped cache, fallback to cheaper tiers, and an audit hash chain. CI runs 113 tests and the full evaluation in under a minute.\n\nNext, I'd swap in a real embedder and the real model reader, then recalibrate.",
+      "keypoints": [
+        "Problem framing",
+        "Why SQuAD v2: real abstention and retrieval labels",
+        "Ablation: BM25 0.921, hybrid removed",
+        "Confidence, ECE with AUC, precision floor",
+        "Guardrails with held out recall and two bugs",
+        "Gateway features and CI",
+        "Next steps"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as if I were a staff engineer.",
+      "script": "The design starts from the evaluation. SQuAD v2's dev set has 1,204 paragraphs and 11,873 questions, and 5,945 of those questions are unanswerable but written to look answerable. That gives me exact retrieval labels, gold answer spans, an abstention label, and a correctness label for calibration. All from people who weren't building my system.\n\nRetrieval. BM25 with k1 of 1.5 and b of 0.75, titles prepended, plus a 768 dimension signed hashing embedder. RRF with k of 60 fuses them. Every eval run scores sparse, dense and hybrid over the same questions. BM25 got 0.921 recall at five and 0.843 MRR. Hybrid got 0.853, because fusing a weak list adds noise to the head of a strong one. Lowering the dense weight helped monotonically until it was off, so sparse is the default.\n\nAnswering. Offline, the reader is extractive, so exact match against SQuAD's minimal spans is zero by construction. Containment is the main answer metric. It's 0.069 against a ceiling of 0.552, which tells me the policy is discarding good candidates rather than generation failing.\n\nConfidence. Six features in a logistic regression, chosen by single feature AUC on real labels. The obvious groundedness feature scored exactly 0.5, because an extractive reader always copies from context. And retrieval score gets a negative weight, because SQuAD's unanswerable questions retrieve their source paragraph strongly.\n\nThe evaluation had a circularity bug. The pipeline gated answers with the confidence model, and then I fitted that model on the gated results. Now the pipeline always keeps the candidate answer, the runner disables the decision, fits on a hash based split, rescores, picks the threshold on the fit half, and reports on the other half. Held out ECE is 0.045 and AUC 0.654, always quoted together. Temperature scaling moved held out ECE from 0.053 to 0.084 because the optimal temperature wasn't identifiable at that sample size. So it only applies above an ECE of 0.08.\n\nThe operating point maximises coverage subject to 60% precision, where answering an unanswerable question counts as wrong. Accuracy as the objective degenerated to answering nothing.\n\nGuardrails. Patterns plus a hashed n-gram logistic regression, combined by max. The context rail is patterns only, after the trained model flagged 100% of clean Wikipedia. The old pattern combiner mapped the strongest single pattern to 0.444, below the 0.5 cutoff, so single pattern attacks were invisible. Held out recall on Gandalf is 0.884.\n\nGateway. Pessimistic cost estimates before the cache lookup, so an exhausted tenant can't live on cache hits. The cache is scoped by tenant. Downgrades are recorded in fell back from, after a bug hid them. Batch evaluation has its own tenant, because the interactive rate limit refused 152 of 400 questions on the first run.\n\nWhat I'd flag myself. The 5% false positive rate on benign questions is measured on the same 600 questions that set the threshold. The live rail uses a fixed 0.5 cutoff rather than the tuned one. All state is in process. Next is a real embedder, the real reader, and a disjoint benign set.",
+      "keypoints": [
+        "Evaluation first: SQuAD v2 labels",
+        "Retrieval ablation and why hybrid lost",
+        "Containment vs ceiling reading",
+        "Feature selection surprises",
+        "Circular evaluation fix and hash split",
+        "ECE with AUC; temperature null result; precision floor",
+        "Guardrail bugs: distribution shift and 0.444 combiner",
+        "Gateway ordering, tenant cache, eval tenant; self flagged leak"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone without a technical background.",
+      "script": "I built an AI system that answers questions from a set of Wikipedia articles, with the safety and cost controls a real product would need. The hard part of these systems isn't getting a good answer once. It's knowing when the answer is right, when the system should say 'I don't know', and making sure its safety filters don't block normal users. I tested it on public data where half the questions were written to look answerable when they aren't. It correctly refuses 96% of those. It answers less often than I'd like, because I made it promise to be right at least 60% of the time when it does answer. Every result is measured, and some measurements made me change my design, like dropping a fancier search method that turned out worse.",
+      "keypoints": [
+        "What the system does",
+        "The hard part is knowing when to refuse",
+        "Tested on tricky public questions",
+        "96% correct refusals",
+        "Measurements changed the design"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the system on the whiteboard.",
+      "script": "First I draw the request path as a vertical stack of six boxes: input rail, retrieve, context rail, gateway, output rail, decision. Next to each I write what it stops: hostile input, nothing found, poisoned passage, auth or budget, ungrounded answer, low confidence. I say the last one is the interesting one, because an answer can be safe and still not confident.\n\nSecond, to the right, I draw the evaluation loop. SQuAD v2 at the top with its 5,945 unanswerable questions. An arrow into the pipeline with the decision turned off, then a split into fit and test halves. On the fit half, fit confidence and pick the threshold under a 60% precision floor. On the test half, report ECE next to AUC. Then an arrow into a gate box with its floors, and from the gate to CI with a red or green light.\n\nThird, I draw the retrieval ablation as a small table: sparse, hybrid, dense, with recall at five of 0.921, 0.853 and 0.601. I circle sparse and say why hybrid lost.\n\nFourth, I zoom into the gateway as a horizontal pipeline: authorise, estimate, check budget and rate limit, cache, route, retry, fall back, record, audit. I mark that estimation comes before the cache and that the cache is partitioned by tenant.\n\nLast, in a corner, I draw the two guardrail detectors feeding a max, with held out recall 0.884 next to it. I add a crossed out arrow from the trained classifier to the context rail, and say that classifier flagged every clean paragraph.",
+      "keypoints": [
+        "Six stage stack with stop reasons",
+        "Evaluation loop with fit and test split",
+        "Ablation table with numbers",
+        "Gateway ordering and tenant scoped cache",
+        "Guardrail max combination and the context rail lesson"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How do you know your evaluation isn't circular?",
+      "script": "It was circular once, which is how I know what to check. The pipeline used the confidence model to decide whether to answer, and then I fitted that model on the results it had filtered. Now every answer keeps its candidate text even when the decision is to abstain. The evaluation runs with the decision off, fits confidence on one half of the questions, rescores everything with the fitted model, chooses the threshold on that same half, and reports only on the other half. The split hashes each question ID, so a question never changes sides when the set grows.",
+      "keypoints": [
+        "Names the original circularity",
+        "candidate_text and decision off",
+        "Fit on one half, report on the other",
+        "Rescoring after fitting",
+        "Hash based split prevents leakage"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why did you choose a precision floor instead of maximising accuracy?",
+      "script": "Because accuracy degenerates on this data. Half the questions are unanswerable, so answering nothing already scores about 50%. With a weak confidence signal, the accuracy optimal threshold was 0.48, and it delivered correct answers to 7% of answerable questions. That's optimal for the metric and useless as a product. A precision floor is how a product is actually specified: answer as much as you can, but be right at least 60% of the time when you do. It's one number a stakeholder can sign off on, and the published curve shows what a different number would cost.",
+      "keypoints": [
+        "Accuracy degenerates on a half unanswerable set",
+        "Concrete failed attempt",
+        "Precision floor matches product specs",
+        "Curve published for other trade points"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Your guardrail flagged every document. How did that happen and how did you find it?",
+      "script": "The trained injection classifier learned from short user prompts. I was also running it over retrieved Wikipedia paragraphs, which are 800 characters of encyclopaedia prose. Every paragraph looked unusual to it, so it flagged all of them. Retrieval metrics looked fine, but the end to end run answered nothing, because every passage got dropped. That gap between stages is what exposed it. The fix was to scan documents with the pattern detector only, since an instruction override looks the same anywhere. The lesson I keep is that a classifier is only valid on the distribution it was trained on.",
+      "keypoints": [
+        "Training distribution was short prompts",
+        "Applied to long prose, flagged 100%",
+        "Found via gap between retrieval and end to end metrics",
+        "Patterns only for context",
+        "Distribution validity lesson"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How does the gateway stop a runaway agent from burning money?",
+      "script": "Budgets are checked before the call, not after. The gateway estimates the cost pessimistically, assuming the model writes its full output allowance, and refuses if that would cross the tenant's daily cap. If a cheaper tier is affordable, it downgrades instead and records what was originally asked for. The rate limit is a sliding sixty second window per tenant. The estimate happens before the cache lookup, so an exhausted tenant can't keep running on cache hits. Batch evaluation has its own tenant with its own quota, so it's metered like everything else instead of bypassing the checks.",
+      "keypoints": [
+        "Preflight, pessimistic estimate",
+        "Downgrade with fell_back_from",
+        "Sliding window rate limit",
+        "Estimate before cache",
+        "Evaluation tenant rather than bypass"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What would you change first with a real budget?",
+      "script": "I'd swap the hashing embedder for a real sentence embedding model and rerun the ablation, because hybrid may well win then, and the config says so. Then I'd run the real model reader on a fixed sample through the gateway, with spend tracked, and refit the confidence model. A generative reader makes features like answer support informative again. The confidence AUC of 0.654 is the real limit on coverage, so I'd add a stronger relevance or entailment feature. On guardrails, I'd report false positives on a benign set the threshold never saw, and compare a small fine tuned encoder on the same held out attacks.",
+      "keypoints": [
+        "Real embedder and rerun ablation",
+        "Real reader and recalibration",
+        "Raise confidence AUC",
+        "Fix guardrail FPR reporting",
+        "Encoder comparison on held out attacks"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your system answers 7.5% of answerable questions. That's useless.",
+      "script": "It's conservative, and I'd rather defend that than hide it. The candidate answers contain the right fact for over half of answerable questions, so generation isn't the bottleneck. The policy is holding a 60% precision promise with a confidence signal at AUC 0.654, and that trade costs coverage. When it does answer, it answers an unanswerable question only 3.8% of the time. I publish the full coverage curve, so a product owner can choose more coverage at lower precision. The honest way to raise coverage is a better confidence model, and that's the next thing I'd build.",
+      "keypoints": [
+        "Concedes low coverage",
+        "Ceiling shows generation is fine",
+        "Precision promise with weak signal",
+        "Low false answer rate",
+        "Curve is published; real fix is confidence"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your 5% false positive rate looks tuned to the test.",
+      "script": "You're partly right, and I found it rereading the code. The classifier's weights never saw those 600 benign questions. But the threshold was tuned with them in the pool, and the 5% is measured on the same 600. So it's in sample for the threshold, and it lands near the cap by construction. There's a second wrinkle. The live rail fires at a fixed 0.5 cutoff rather than the tuned threshold. The fix is cheap: a disjoint benign set for reporting, one threshold source, and an end to end false positive rate on held out questions.",
+      "keypoints": [
+        "Concedes in sample threshold",
+        "Weights did not see the data",
+        "Second issue: fixed 0.5 cutoff",
+        "Concrete fix"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "BM25 beat hybrid only because your embedder is a toy.",
+      "script": "It is a toy embedder, and I describe it as a floor that any real model has to beat. The decision wasn't that hybrid is bad. It was to ship what the numbers support, and keep measuring. All three modes run on every evaluation over the same questions. When I swap in a real embedder, the evidence for switching back will show up in the report automatically, and the config comment says exactly that. SQuAD questions also share vocabulary with their paragraphs, which favours BM25, so I'd expect the gap to shrink on paraphrased queries.",
+      "keypoints": [
+        "Concedes the embedder is weak",
+        "Ship what is measured",
+        "All modes measured every run",
+        "Dataset favours lexical matching"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "gw-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is Groundwork, in two sentences?",
+      "easy": "A small question answering system over Wikipedia, built so that four things usually skipped in LLM features are measured: whether answers are right, when the system should refuse, whether the safety filters block real users, and what each model call costs. Every number comes from public, human labelled data and runs on a laptop with no API key.",
+      "deep": "A retrieval augmented QA stack over the SQuAD v2.0 dev set (1,204 Wikipedia paragraphs, 11,873 questions, 5,945 unanswerable) with four concerns in one Python codebase: RAG evaluation (retrieval metrics, SQuAD answer metrics, abstention scored as a classifier, calibrated confidence, a three way retrieval ablation, and a release gate that exits nonzero), guardrails (input and output rails scored on published attack corpora and on an unseen one), an LLM gateway (auth, tier routing, a two layer cache, per tenant budgets and rate limits, retries, degradation, cost accounting), and secure deployment (hashed keys, a hash chained audit log, PII redaction, hardened container). Headline numbers from the offline run: BM25 recall@5 0.921, ECE 0.045 at AUC 0.654, injection recall 0.884 on the unseen Gandalf set, 96.2% of unanswerable questions correctly declined, 113 tests with CI green. The reader is a deterministic offline extractive one, so answer quality numbers describe that reader, not a frontier model.",
+      "say": "Groundwork is a small RAG system I built to measure the parts people usually skip. That means whether an answer is right, when to refuse, whether guardrails block real users, and what each call costs. Everything runs on public, human labelled data with no API key. BM25 gets the right passage into the top five 92% of the time, and the system declines 96% of unanswerable questions.",
+      "evidence": [
+        "portfolio: BADGE: recall@5 0.921 / ECE 0.045 / injection recall 0.884 unseen / 113 tests, CI green",
+        "portfolio: correctly declines 96.2% of unanswerable questions",
+        "repo:Groundwork/docs/06-results.md: | sparse | 0.7818 | 0.893 | 0.9209 | 0.9483 | 0.8426 | 0.8686 |",
+        "repo:Groundwork/README.md: **Calibration**: ECE 0.045, Brier 0.213, AUC 0.654 over 4,881 held-out questions."
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "rag",
+        "evals",
+        "guardrails",
+        "gateway"
+      ]
+    },
+    {
+      "id": "gw-02",
+      "type": "why",
+      "level": 1,
+      "q": "Why build this? What problem is it solving?",
+      "easy": "Getting one good answer from an LLM is easy. The hard parts are knowing whether answers are good in general, knowing when to refuse, proving the safety filters do not reject a tenth of real users, and being able to say what a change cost. Groundwork builds those four things around a small RAG system so there is something concrete to measure.",
+      "deep": "The failure that damages trust in RAG is a fluent, confident, cited answer to a question the corpus cannot answer, and most evaluations never test it because they only ask answerable questions. Guardrails are usually shipped with a recall number and no false positive rate on real traffic, so they get switched off when they block users. Model spend is metered after the fact, if at all, so a runaway loop is discovered on the invoice. Groundwork's stance is that every one of these needs a measured number on data someone else wrote, and that the measurement should be able to fail a build. The write up's claim is that in all four concerns the measurement changed the system: hybrid retrieval was removed, a context rail was redesigned, a scoring function was rewritten, and an evaluation tenant was added.",
+      "evidence": [
+        "portfolio: In all four, the measurement changed the system."
+      ],
+      "sources": [],
+      "tags": [
+        "motivation",
+        "evals"
+      ]
+    },
+    {
+      "id": "gw-03",
+      "type": "concept",
+      "level": 1,
+      "q": "What data does it run on, and how is provenance recorded?",
+      "easy": "Five public datasets written by other people: SQuAD v2.0 for the documents and questions, two prompt injection sets, a jailbreak set, and a PII set. A fetch script downloads them and records a SHA-256 fingerprint of each so anyone can check they have the same files.",
+      "deep": "SQuAD v2.0 dev: 35 articles, 1,204 paragraphs, 11,873 questions (5,928 answerable, 5,945 unanswerable), 4.2 MB, CC BY-SA 4.0; it is both the retrieval corpus and the QA set. deepset/prompt-injections (662, CC BY 4.0): injection rail precision and recall, largely German attacks. jackhhao/jailbreak-classification (1,306): jailbreak rail. Lakera/gandalf_ignore_instructions (1,000, MIT): attack only, held out, never trained on; real attempts by players trying to beat a live guarded system. ai4privacy/pii-masking-200k (1,000 sampled): PII recall per entity type. scripts/fetch_data.py writes data/manifest.json with source, sha256, bytes, licence, citation and stats per dataset. About 7 MB in all. No corpus, gold answer, or attack was written for the project, which is the point: self written test data flatters the system.",
+      "evidence": [
+        "portfolio: A fetch script downloads five datasets and records a SHA-256 for each in a manifest.",
+        "repo:Groundwork/data/manifest.json: \"answerable\": 5928,",
+        "repo:Groundwork/data/manifest.json: \"unanswerable\": 5945",
+        "repo:Groundwork/data/manifest.json: \"articles\": 35,"
+      ],
+      "sources": [],
+      "tags": [
+        "data",
+        "provenance",
+        "squad"
+      ]
+    },
+    {
+      "id": "gw-04",
+      "type": "why",
+      "level": 1,
+      "q": "Why is SQuAD v2.0 the load bearing dataset choice?",
+      "easy": "About half of its questions were written by crowdworkers to look answerable from a paragraph while having no answer in it. That gives real labels for the hardest RAG behaviour, declining to answer, which most projects fake by writing obviously unanswerable questions themselves.",
+      "deep": "SQuAD 2.0 (Rajpurkar, Jia and Liang 2018) added unanswerable questions written adversarially to resemble answerable ones about the same paragraph. In the dev set used here, 5,945 of 11,873 questions are unanswerable. It supplies four labels at once: retrieval (the gold passage is the paragraph the question was written from, so recall@k is exact), answers (human marked gold spans, several per question), abstention (the is_impossible flag), and calibration (whether answering would have been correct). Self written unanswerable questions tend to be obviously unanswerable, which makes declining look easy. Caveat: one gold passage per question makes retrieval metrics a lower bound when other paragraphs could also answer, and SQuAD's adversarial questions retrieve their source paragraph strongly, which shows up later as a negative weight on retrieval score.",
+      "evidence": [
+        "repo:Groundwork/docs/02-rag-evaluation.md: SQuAD v2.0 solves this. 5,945 of its 11,873 dev questions were written by"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1806.03822"
+      ],
+      "tags": [
+        "squad",
+        "unanswerable",
+        "dataset-choice"
+      ]
+    },
+    {
+      "id": "gw-05",
+      "type": "how",
+      "level": 1,
+      "q": "Walk me through the request path.",
+      "easy": "A question passes six checkpoints, and each can stop it for a different reason: a safety check on the question, retrieval, a safety check on the retrieved documents, the gateway that calls the model, a check on the answer, and a final confidence decision.",
+      "deep": "(1) Input rail: length, injection, jailbreak, PII; can BLOCK or REDACT. (2) Retrieve: BM25 by default (hybrid and dense measurable); ABSTAIN if nothing found. (3) Context rail: scan each retrieved passage for planted instructions and drop poisoned ones. (4) Gateway: authenticate, estimate cost, check entitlement, rate limit and budget, cache lookup, route a tier, retry, fall back; can return 401, 402, 403, 429 or 503. (5) Output rail: citation validity, groundedness, PII egress; can ABSTAIN. (6) Decision: a calibrated confidence against thresholds gives ANSWER, HEDGE or ABSTAIN. The answer carries text, decision, confidence, citations, passages, groundedness, features, rail notes, latency and gateway metadata. The design point: an answer can pass every safety check and still be one the system should not assert, so 'safe' and 'confident' are separate decisions, which lets the product hedge instead of choosing between bluffing and refusing.",
+      "evidence": [
+        "repo:Groundwork/README.md: last one is the interesting case: an answer can pass every safety check and"
+      ],
+      "sources": [],
+      "tags": [
+        "architecture",
+        "pipeline"
+      ]
+    },
+    {
+      "id": "gw-06",
+      "type": "how",
+      "level": 2,
+      "q": "How is the codebase organised, and what design rules keep it clean?",
+      "easy": "Seven packages (retrieval, guardrails, gateway, evaluation, security, telemetry, plus one config file). Every threshold, price, and quota lives in config.py, and the evaluation code consumes the system without being part of it.",
+      "deep": "src/groundwork: config.py (every threshold, quota, price and gate floor; model IDs appear once, so a model swap is a one line diff plus an eval run); rag/ (corpus, embed, index, retriever, prompts, confidence, pipeline); guardrails/ (classifier, detectors, rails); gateway/ (providers, cache, budget, router, server); evaluation/ (datasets, metrics, calibration, guardrail_eval, runner, report); security/ (authz, audit, redaction); telemetry/ (logging, drift). rag/pipeline.py is the composition root and is deliberately left out of rag/__init__.py's exports: guardrails imports prompt constants from rag while pipeline imports guardrails, so exporting pipeline from the package created a circular import, which was telling the truth that a low level package should not depend on its consumer. Nothing in rag, security or telemetry imports evaluation. rag/confidence.py carries a small ECE function rather than importing evaluation.calibration, so the request path does not pull in report machinery. Extension points: embedder (two methods), reader (set ANTHROPIC_API_KEY), index, cache and budgets (Redis shaped interfaces), detectors.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "architecture",
+        "modularity",
+        "config"
+      ]
+    },
+    {
+      "id": "gw-07",
+      "type": "how",
+      "level": 1,
+      "q": "How does retrieval work? Give the parameters.",
+      "easy": "Each paragraph is indexed two ways: keyword scoring with BM25, and a simple hashed vector. A question can be answered with either list or with both merged by rank. The default is BM25 alone, because measurement showed it was best here.",
+      "deep": "HybridIndex.build prepends the title to each paragraph ('Normans. ...') so questions naming the article subject get a lexical hit. Sparse: BM25 with k1 = 1.5, b = 0.75 and idf = ln(1 + (N - df + 0.5)/(df + 0.5)), floored at 1e-6. Dense: HashingEmbedder, 768 dimensions, unigrams plus bigrams hashed with blake2b into a slot and a sign bit (so collisions cancel in expectation), sublinear term frequency 1 + ln(count), L2 normalised, cosine as a dot product. Tokenizer: lowercase alphanumerics, a deliberately short stopword list (short queries like 'who wrote it' must keep their words), tokens longer than one character. Retriever: top 20 from each side via argpartition, fused with RRF (k = 60, weights 1.0 and 1.0), top 5 final, min_fused_score 0.0; component scores and ranks are kept on each Retrieved passage so a bad retrieval is debuggable. Context block: [S1] (title) text, capped at 6,000 characters. Index build takes about 0.3 s over 1,204 passages.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/config.py: rrf_k: int = 60           # constant from the original RRF paper",
+        "repo:Groundwork/src/groundwork/config.py: bm25_k1: float = 1.5",
+        "repo:Groundwork/src/groundwork/config.py: embed_dim: int = 768",
+        "repo:Groundwork/README.md: python3 scripts/build_index.py    # 0.3s over 1,204 passages"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Okapi_BM25"
+      ],
+      "tags": [
+        "retrieval",
+        "bm25",
+        "hashing-embedder"
+      ]
+    },
+    {
+      "id": "gw-08",
+      "type": "formula",
+      "level": 1,
+      "q": "Write the BM25 formula and explain k1 and b.",
+      "easy": "BM25 scores a document higher when it contains the query's rare words, with diminishing returns for repeating a word and a penalty for long documents.",
+      "deep": "$$\\mathrm{score}(D,Q)=\\sum_{q\\in Q}\\mathrm{IDF}(q)\\,\\frac{f(q,D)\\,(k_1+1)}{f(q,D)+k_1\\left(1-b+b\\,\\frac{|D|}{\\mathrm{avgdl}}\\right)}$$ with $\\mathrm{IDF}(q)=\\ln\\!\\left(1+\\frac{N-n(q)+0.5}{n(q)+0.5}\\right)$, the +1 form that keeps IDF positive for very common terms (the repo also floors it at 1e-6). $k_1$ controls term frequency saturation: as $f\\to\\infty$ the term contributes at most $(k_1+1)\\,\\mathrm{IDF}$; $k_1=0$ ignores frequency, large $k_1$ approaches raw tf. Typical range 1.2 to 2.0; here 1.5. $b$ controls length normalisation: $b=1$ fully normalises by document length, $b=0$ not at all; the default 0.75 is used. Assumptions: bag of words, term independence, no semantics, so 'car' and 'automobile' never match. Why it wins here: SQuAD questions were written while looking at the paragraph, so they share its vocabulary, which is the regime where lexical retrieval is strongest.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/config.py: bm25_b: float = 0.75"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Okapi_BM25"
+      ],
+      "tags": [
+        "bm25",
+        "formula",
+        "sparse-retrieval"
+      ]
+    },
+    {
+      "id": "gw-09",
+      "type": "formula",
+      "level": 2,
+      "q": "What is reciprocal rank fusion and why use it instead of blending scores?",
+      "easy": "RRF merges several ranked lists by giving each document points for how high it ranks in each list, ignoring the raw scores. That avoids comparing a keyword score with a similarity score, which live on different scales.",
+      "deep": "$\\mathrm{RRF}(d)=\\sum_r \\frac{w_r}{k+\\mathrm{rank}_r(d)}$ with $k=60$ and $w_r=1$ here; a document absent from a list contributes nothing from it. Rank 1 in one list gives 1/61, about 0.0164; rank 1 in both gives about 0.0328. The constant k flattens the head so a single list cannot dominate with one first place. Why not a weighted score blend: BM25 scores are unbounded and corpus dependent, cosine lies in [-1, 1], and any weight is really a hidden normalisation that rots when the corpus changes; RRF reads only ranks and needs no rescaling. Failure mode, which this project hit: fusion helps only when both retrievers are informative; fusing a weak list adds noise to the head of a strong one. The confidence features rescale the top fused score by 30 (bounded by sum of weights over k + 1) so it sits roughly in [0, 1].",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/rag/retriever.py: score(d) = sum over retrievers of 1 / (k + rank_r(d))"
+      ],
+      "sources": [],
+      "tags": [
+        "rrf",
+        "fusion",
+        "hybrid-retrieval"
+      ]
+    },
+    {
+      "id": "gw-10",
+      "type": "define",
+      "level": 1,
+      "q": "Define recall@k, MRR, and nDCG@10 as computed here, and state their blind spot.",
+      "easy": "Recall@k asks whether the right paragraph is in the top k. MRR rewards putting it first rather than fifth. nDCG@10 is a standard ranking score that discounts lower positions. All three assume each question has exactly one right paragraph.",
+      "deep": "With one gold passage g per question: recall@k = 1 if g in top k else 0, averaged. Reciprocal rank = 1/rank(g), 0 if absent; MRR is the mean. It separates rank 1 from rank 5, which recall@5 scores identically, and rank position is what a reranker changes. DCG@p = $\\sum_{i=1}^{p} rel_i/\\log_2(i+1)$ and nDCG = DCG/IDCG; with a single relevant document IDCG = 1, so nDCG@10 = 1/log2(rank + 1) if within 10. metrics.py writes these out rather than importing them, because two teams' recall@5 often differ in how they treat a missing gold document. Blind spot: one correct passage per question, so a question answerable from three passages counts as a miss on two of them; on a redundant corpus these are lower bounds. They are computed over ranked IDs to depth 20 with no model calls, so the retrieval stage of the eval runs in seconds.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Discounted_cumulative_gain"
+      ],
+      "tags": [
+        "metrics",
+        "retrieval",
+        "mrr",
+        "ndcg"
+      ]
+    },
+    {
+      "id": "gw-11",
+      "type": "number",
+      "level": 1,
+      "q": "Give me the retrieval ablation numbers.",
+      "easy": "Over all 11,873 questions, BM25 alone put the right paragraph in the top five 92.1% of the time. Merging it with the hashed vectors dropped that to 85.3%, and the vectors alone managed 60.1%.",
+      "deep": "Same index, same questions, exact labels. sparse (BM25): recall@1 0.7818, recall@3 0.893, recall@5 0.9209, recall@10 0.9483, MRR 0.8426, nDCG@10 0.8686. hybrid (RRF 1:1): 0.5988, 0.7686, 0.8532, 0.9244, MRR 0.7022, nDCG 0.7557. dense (hashing): 0.4188, 0.5459, 0.6012, 0.6714, MRR 0.4972, nDCG 0.5389. Because every mode runs every time over one question set, the comparison is an ablation rather than three separate claims. Caveat: the dense side is a hashing bag of words with no semantics, so this says 'fusion with this embedder hurts', not 'hybrid retrieval is bad'. Also note the docs differ on the gap: the README and config say 6.8 points of recall@5 (0.921 against 0.853), while the bug list in the RAG evaluation doc says 5.7, which is likely from an earlier sampled run; quote 6.8 from the full run.",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | sparse | 0.7818 | 0.893 | 0.9209 | 0.9483 | 0.8426 | 0.8686 |",
+        "repo:Groundwork/docs/06-results.md: | hybrid | 0.5988 | 0.7686 | 0.8532 | 0.9244 | 0.7022 | 0.7557 |",
+        "repo:Groundwork/docs/06-results.md: | dense | 0.4188 | 0.5459 | 0.6012 | 0.6714 | 0.4972 | 0.5389 |",
+        "repo:Groundwork/docs/06-results.md: | Questions evaluated | 11873 |",
+        "repo:Groundwork/docs/02-rag-evaluation.md: with a strong sparse one cost 5.7 points of recall@5."
+      ],
+      "sources": [],
+      "tags": [
+        "retrieval",
+        "ablation",
+        "results"
+      ]
+    },
+    {
+      "id": "gw-12",
+      "type": "why",
+      "level": 1,
+      "q": "Why did you remove hybrid retrieval, when it is the default recommendation?",
+      "easy": "Because measurement said so: merging in the hashed vectors made results worse, and every step of giving the vectors less weight made it better, right up to turning them off. The code records the numbers and the condition under which the decision should flip.",
+      "deep": "Hybrid is the standard advice because dense retrievers capture paraphrase that BM25 misses. Here the dense side is a hashing embedder with no semantic generalisation, so it adds noise to the head of a strong lexical ranking: recall@5 0.853 hybrid against 0.921 sparse, 6.8 points worse. Down weighting the dense side improved fusion monotonically until it was switched off. config.RetrievalConfig.default_mode = 'sparse', with a comment carrying the three numbers; all three modes are still measured every run, so swapping in a real sentence embedder and rerunning scripts/run_eval.py makes the flip a number in the report rather than a hunch. The broader lesson: a recommended architecture is a hypothesis about your components, and fusion only helps when both inputs carry signal.",
+      "evidence": [
+        "repo:Groundwork/README.md: default recommendation, and here it is 6.8 points of recall@5 *worse* than",
+        "repo:Groundwork/src/groundwork/config.py: default_mode: str = \"sparse\""
+      ],
+      "sources": [],
+      "tags": [
+        "retrieval",
+        "design-decision",
+        "ablation"
+      ]
+    },
+    {
+      "id": "gw-13",
+      "type": "how",
+      "level": 2,
+      "q": "What does the offline reader do, and how does the real model path differ?",
+      "easy": "With no API key, a built in reader picks the best supporting sentences from the retrieved paragraphs and cites them, deterministically. With a key set, the same code path calls Claude instead. Every guardrail, metric, and gate runs the same either way.",
+      "deep": "OfflineProvider performs extractive answering over the retrieved passages and emits [Sn] citations in the format the prompt specifies; it is not a mock returning a canned string, so the output rail, confidence features and gate exercise real logic with no network or spend. AnthropicProvider sends the system prompt as a cache controlled block with volatile context after it, sizes max_tokens to cover thinking plus visible text, and checks stop_reason before touching content (a policy refusal can arrive as HTTP 200 with empty content). Settings.provider is 'offline' unless GROUNDWORK_PROVIDER or ANTHROPIC_API_KEY is set. Consequence for interpretation: all answer quality numbers (containment, EM, F1, calibration) describe the extractive offline reader; retrieval, guardrail and gateway numbers do not depend on the reader. Design principle: an eval suite that needs a budget gets run once before launch and never again.",
+      "evidence": [
+        "repo:Groundwork/docs/04-llm-gateway.md: That is a deliberate constraint. **An eval suite you can only run with a"
+      ],
+      "sources": [],
+      "tags": [
+        "reader",
+        "offline",
+        "providers"
+      ]
+    },
+    {
+      "id": "gw-14",
+      "type": "number",
+      "level": 1,
+      "q": "What are the answer quality numbers, and why is exact match zero?",
+      "easy": "When the system answers, the correct fact appears in its answer for 6.9% of answerable questions overall, because it chooses to answer only 7.5% of them. Exact match is 0 by construction: the reader returns whole cited sentences while SQuAD's gold answers are short spans like 'France'.",
+      "deep": "Containment 0.0686 (answerable questions where a gold span appears in the delivered answer), EM 0.0, token F1 0.1305, answer rate on answerable 0.0746, gold passage present in final context 0.8027. The containment ceiling, ignoring the abstain decision, is 0.552: what a perfect decision policy would deliver from these candidates. So generation is not the bottleneck; the decision policy throws answers away to keep its precision promise. EM and F1 are reported for comparability and as a check: a correct sentence containing 'France' scores 0 EM and about 0.25 F1 because most of its tokens were never in the span, and containment alone could be gamed by long answers, so the two moving in opposite directions would expose that. Note a doc inconsistency: config.py's comment says a 0.58 ceiling while the evaluation doc reports 0.552; quote 0.552.",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | Containment | 0.0686 | answerable questions where a gold span appears in the answer |",
+        "repo:Groundwork/docs/06-results.md: | Exact match | 0.0 | official SQuAD EM; low by construction, see the note below |",
+        "repo:Groundwork/docs/06-results.md: | Token F1 | 0.1305 | official SQuAD token overlap |",
+        "repo:Groundwork/docs/06-results.md: | Answer rate | 0.0746 | answerable questions the system chose to answer |",
+        "repo:Groundwork/docs/06-results.md: | Gold retrieved | 0.8027 | gold passage present in the final context |",
+        "repo:Groundwork/docs/02-rag-evaluation.md: | Containment ceiling | 0.552 | The same, ignoring the abstain decision: what a perfect policy would get |",
+        "repo:Groundwork/src/groundwork/config.py: Measured 0.069 against a 0.58 ceiling."
+      ],
+      "sources": [],
+      "tags": [
+        "answer-quality",
+        "squad-metrics",
+        "results"
+      ]
+    },
+    {
+      "id": "gw-15",
+      "type": "define",
+      "level": 2,
+      "q": "Define SQuAD exact match and token F1, and the containment metric.",
+      "easy": "Exact match checks whether the answer equals a gold answer after cleanup. Token F1 measures word overlap with the gold answer. Containment, the project's main answer metric, checks whether a gold answer appears anywhere inside the delivered answer.",
+      "deep": "SQuAD normalisation: lowercase, strip punctuation, remove articles (a, an, the), collapse whitespace. EM = 1 if normalised prediction equals any normalised gold answer, max over golds. Token F1: with prediction tokens P and gold tokens G, precision = |P ∩ G| / |P|, recall = |P ∩ G| / |G| (multiset overlap), F1 = 2pr/(p + r), max over golds. Containment = 1 if any normalised gold span is a substring of the normalised answer, scored only over answerable questions and only for delivered answers. Tradeoffs: EM and F1 punish verbose but correct answers; containment rewards verbosity, which is why both are reported. For unanswerable questions the right output is an abstention, scored separately as a classifier rather than folded into F1 the way the official SQuAD v2 script does.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "metrics",
+        "squad",
+        "definitions"
+      ]
+    },
+    {
+      "id": "gw-16",
+      "type": "number",
+      "level": 1,
+      "q": "How well does it decline unanswerable questions, scored as a classifier?",
+      "easy": "It correctly declines 96.2% of questions that have no answer, and answers only 3.8% of them anyway. The price is that it also declines about 92.5% of answerable questions.",
+      "deep": "Positive class = 'should decline'. Precision 0.5085, recall 0.9617, F1 0.6653, FPR 0.9254. Correct abstention on unanswerable 0.9617, false answer rate 0.0383 (the failure that matters: a confident answer to a question with no answer), answer rate on answerable 0.0746. With a confidence signal at AUC 0.654, buying a 60% answer precision costs most of the coverage. Framing for an interview: this is a deliberately conservative operating point chosen by a product constraint, and the threshold sweep shows the full trade so a stakeholder can choose a different point (for example, at threshold 0.3 coverage is 0.6822 at precision 0.4081 on the test split).",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | 0.5085 | 0.9617 | 0.6653 | 0.9254 |",
+        "repo:Groundwork/docs/06-results.md: | Correct abstention | 0.9617 | unanswerable questions correctly declined |",
+        "repo:Groundwork/docs/06-results.md: | False answer rate | 0.0383 | unanswerable questions answered anyway (the failure that matters) |",
+        "repo:Groundwork/docs/06-results.md: | Answer rate | 0.0746 | answerable questions the system chose to answer |",
+        "repo:Groundwork/docs/06-results.md: | 0.3 | 0.6822 | 0.4081 | 0.8157 | 0.544 |"
+      ],
+      "sources": [],
+      "tags": [
+        "abstention",
+        "classification",
+        "results"
+      ]
+    },
+    {
+      "id": "gw-17",
+      "type": "how",
+      "level": 1,
+      "q": "How is confidence computed?",
+      "easy": "A small logistic regression reads six cheap signals, such as how many of the question's words appear in the answer and in the top paragraph, and outputs a probability that the answer is right. The features were chosen by testing each one's predictive power on real labels.",
+      "deep": "extract_features (no extra model call): top_score (top fused RRF score x 30, capped at 1), query_coverage_top (share of question terms in the top passage), query_coverage_context (in all passages), query_coverage_answer (in the answer body, citations stripped), answer_type_match (does the answer's shape fit the question word), answer_length (log1p of answer terms / 4, capped at 1). ConfidenceModel: $p=\\sigma(w\\cdot x+b)$, fitted by gradient descent on real correctness labels (answering an unanswerable question counts as wrong), with optional temperature. Selection: single feature AUC over 812 answered questions; kept query_coverage_answer 0.660, query_coverage_top 0.608, top_score 0.597, query_coverage_context 0.575, answer_length 0.540, answer_type_match 0.526; dropped score_margin 0.497, answer_support 0.500, n_passages 0.500. Fitted weights: +1.3754, +0.8835, -0.5977 (context coverage), -0.502 (top score), -0.2692 (length), +0.2019 (type match). Linear on purpose: readable coefficients and cheap enough to run on every request.",
+      "evidence": [
+        "repo:Groundwork/docs/02-rag-evaluation.md: | `query_coverage_answer` | 0.660 | yes |",
+        "repo:Groundwork/docs/02-rag-evaluation.md: | `answer_support` | 0.500 | dropped |",
+        "repo:Groundwork/docs/06-results.md: | query_coverage_answer | 1.3754 |",
+        "repo:Groundwork/docs/06-results.md: | top_score | -0.502 |"
+      ],
+      "sources": [],
+      "tags": [
+        "confidence",
+        "logistic-regression",
+        "features"
+      ]
+    },
+    {
+      "id": "gw-18",
+      "type": "why",
+      "level": 2,
+      "q": "Two surprises in the confidence model: a groundedness feature that scored 0.500, and a negative weight on retrieval score. Explain both.",
+      "easy": "The 'is the answer supported by the context' feature was useless because the reader copies its answers out of the context, so it is always true. And a high retrieval score turned out to be mildly bad news, because SQuAD's unanswerable questions were written against a specific paragraph and so retrieve it strongly.",
+      "deep": "answer_support, the fraction of answer terms found in retrieved context, reads like the obvious groundedness signal and scored exactly AUC 0.500: the extractive reader copies spans, so the feature is about 1.0 for every row, right or wrong. It would be informative for a generative reader, and the lesson is to measure a feature's discriminative power on real labels before trusting its name. The negative coefficient on top_score (-0.502) is conditional on the other features: unanswerable SQuAD v2 questions were authored while looking at a paragraph, share its vocabulary, and retrieve it confidently, so 'the retriever is sure' does not mean 'the answer is in there'. Retrieval confidence and answer confidence are different quantities. Also negative: query_coverage_context (-0.5977), plausibly because broad overlap across all passages signals a generic question rather than a pinpointed answer.",
+      "evidence": [
+        "repo:Groundwork/docs/02-rag-evaluation.md: | `answer_support` | 0.500 | dropped |",
+        "repo:Groundwork/docs/06-results.md: | top_score | -0.502 |",
+        "repo:Groundwork/docs/06-results.md: | query_coverage_context | -0.5977 |"
+      ],
+      "sources": [],
+      "tags": [
+        "confidence",
+        "feature-selection",
+        "surprises"
+      ]
+    },
+    {
+      "id": "gw-19",
+      "type": "define",
+      "level": 1,
+      "q": "Define calibration, ECE, MCE, Brier score, and AUC as implemented here.",
+      "easy": "A calibrated system that says '80% sure' is right about 80% of the time. ECE measures the average gap between stated confidence and actual accuracy; MCE is the worst gap; Brier is the mean squared error of the probabilities; AUC measures how well confidence ranks right answers above wrong ones.",
+      "deep": "ECE with 15 equal width bins: $\\mathrm{ECE}=\\sum_b \\frac{n_b}{N}\\,|\\mathrm{acc}_b-\\mathrm{conf}_b|$, left closed bins except the last, which includes 1.0 so fully confident predictions do not vanish. MCE $=\\max_b|\\mathrm{acc}_b-\\mathrm{conf}_b|$. Brier $=\\frac1N\\sum(p_i-y_i)^2$, which decomposes into calibration plus refinement and so is sensitive to both honesty and discrimination. AUC by the rank sum (Mann Whitney) identity with average ranks for ties, $\\mathrm{AUC}=\\frac{R_+-n_+(n_++1)/2}{n_+n_-}$, because a detector with many tied scores gets an inflated AUC under naive pairwise counting. Rule written into the code: ECE is never read alone, since a model that outputs 0.5 for everything and is right half the time has near zero ECE and no discriminative value. ECE depends on the bin count, so it is only comparable at the same binning. A terminal reliability diagram prints after every run.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "calibration",
+        "ece",
+        "brier",
+        "auc"
+      ]
+    },
+    {
+      "id": "gw-20",
+      "type": "number",
+      "level": 1,
+      "q": "What are the calibration numbers, and how should they be read?",
+      "easy": "On 4,881 questions held out from fitting, ECE is 0.045, meaning stated confidence is within a few points of actual accuracy on average, but AUC is 0.654, meaning confidence separates right from wrong answers only moderately. Both are quoted together on purpose.",
+      "deep": "Before and after scaling: ECE 0.0446, MCE 0.1962, Brier 0.2127, AUC 0.6544, temperature 1.0 (scaling declined by the guard). The weights and the temperature are fitted on one half of the questions (hash split) and reported on the other; fitting a temperature on the data you report ECE from produces a beautiful meaningless number. Reading: well calibrated and weakly discriminative. Calibration makes a threshold mean what it says; discrimination limits how much coverage a precision promise can keep, which is why the 60% precision floor costs most of the coverage. Sample size matters: an early 400 question run measured ECE 0.172 where the full corpus measures 0.045, purely from noise. AUC is near chance by design difficulty: telling SQuAD v2's answerable from unanswerable questions is hard, and a lexical system does it only somewhat better than chance.",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | Before scaling | 0.0446 | 0.1962 | 0.2127 | 0.6544 | 1.0 |",
+        "repo:Groundwork/README.md: **Calibration**: ECE 0.045, Brier 0.213, AUC 0.654 over 4,881 held-out questions.",
+        "repo:Groundwork/docs/02-rag-evaluation.md: an early 400-question run measured ECE at 0.172 where the"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "calibration",
+        "results"
+      ]
+    },
+    {
+      "id": "gw-21",
+      "type": "why",
+      "level": 2,
+      "q": "Temperature scaling is the textbook calibration fix. Why did it make things worse here, and what is temperature scaling?",
+      "easy": "Temperature scaling divides the model's raw scores by one fitted number to make probabilities more or less confident without changing their order. Here it moved held out ECE from 0.053 to 0.084, because with a few hundred fitting points and an already small error, the best temperature could not be pinned down. It now only runs when the model is clearly miscalibrated.",
+      "deep": "Definition: $p=\\sigma(z/T)$ with one scalar $T$ fitted on held out data, usually by minimising negative log likelihood (Guo et al. 2017, a one parameter Platt scaling). Monotone, so ranking, accuracy at a fixed threshold ordering, and AUC are unchanged; only the honesty of the probabilities moves. What happened: fitted on about 295 validation points with baseline ECE around 0.05, validation preferred T = 0.70 and the test split preferred T = 1.0 every time, so held out ECE rose from 0.053 to 0.084. Selecting T by NLL, by ECE, and by ECE with a relative improvement guard all failed the same way: the optimum was not identifiable at that sample size and that small an error. Fix: scale only when ECE exceeds 0.08 and scaling buys a large absolute improvement; identity is the default. It still fires for its real case (an early build scored ECE 0.94). Also, temperature is fitted on a held out slice of the fit split, never on the weights' own training rows or the test split.",
+      "evidence": [
+        "repo:Groundwork/docs/02-rag-evaluation.md: ~295 validation points and a baseline ECE around 0.05, **the optimal",
+        "repo:Groundwork/docs/02-rag-evaluation.md: temperature is not identifiable**. Validation confidently preferred T=0.70 and"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "temperature-scaling",
+        "calibration",
+        "null-result"
+      ]
+    },
+    {
+      "id": "gw-22",
+      "type": "how",
+      "level": 1,
+      "q": "How was the answer threshold chosen, and why not maximise accuracy?",
+      "easy": "The rule is a product promise: answer as many questions as possible, as long as answers are right at least 60% of the time. Maximising plain accuracy was tried first and produced a system that answered almost nothing, which is optimal for the metric and useless for users.",
+      "deep": "choose_threshold scans 101 thresholds on the fit split, computes coverage and precision (answering an unanswerable question counts as wrong, so the guarantee covers confabulation), keeps thresholds with precision of at least min_answer_precision = 0.60 and nonzero coverage, and picks the one with maximum coverage. If no threshold meets the floor it returns the best precision point and flags it rather than silently breaking the promise. The accuracy objective degenerates on SQuAD v2: half the questions are unanswerable, so answering nothing scores about 0.50, and with a confidence signal at AUC 0.61 at the time the accuracy optimal cutoff was 0.48, delivering correct answers to 7% of answerable questions. Default thresholds in config are answer 0.55 and hedge 0.35; the hedge band returns the answer flagged as uncertain. The floor is the one number a stakeholder should sign off on, and the sweep shows the whole curve so the trade is chosen deliberately. Result: 7.5% of answerable questions answered, 96.2% of unanswerable declined.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/config.py: min_answer_precision: float = 0.60",
+        "repo:Groundwork/src/groundwork/config.py: answer_threshold: float = 0.55",
+        "repo:Groundwork/docs/02-rag-evaluation.md: accuracy-optimal cutoff abstains on nearly everything: it chose 0.48 and",
+        "repo:Groundwork/README.md: **Answering**: at a 60% precision floor the system answers 7.5% of answerable"
+      ],
+      "sources": [],
+      "tags": [
+        "operating-point",
+        "threshold",
+        "product-decision"
+      ]
+    },
+    {
+      "id": "gw-23",
+      "type": "why",
+      "level": 2,
+      "q": "What was the circular evaluation bug, and how is the fit and test split made?",
+      "easy": "The pipeline used the confidence model to decide whether to answer, and the evaluation then fitted the confidence model on those results, so it learned only from answers the model had already let through. The fix keeps every candidate answer, fits confidence first, and chooses the threshold afterwards on a separate split.",
+      "deep": "Answer.candidate_text is always populated when generation happened, even when the decision was to abstain. The runner calls the pipeline with apply_decision=False, fits the confidence model on the fit split, rescores every item's confidence with the fitted model (otherwise the policy is scored against the prior it replaced), chooses the operating point on the fit split, and reports on the test split only. The split is deterministic by hashing each question ID: blake2b of 'seed:qid' (seed 20260811) mapped to [0, 1), below 0.5 goes to fit. Hashing rather than shuffling keeps each question's assignment stable when the eval set grows, preventing a quiet leak where items used to fit the temperature move into the test split. Sampled runs use a seeded stratified sample that keeps the answerable and unanswerable mix, and the regression check refuses to compare runs of different sizes.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/rag/corpus.py: seed: int = 20260811,"
+      ],
+      "sources": [],
+      "tags": [
+        "evaluation-bug",
+        "data-leakage",
+        "splits"
+      ]
+    },
+    {
+      "id": "gw-24",
+      "type": "how",
+      "level": 1,
+      "q": "How does the release gate work?",
+      "easy": "A script runs the full evaluation and fails the build if any metric drops below a floor or falls noticeably against the last recorded baseline. It runs in CI over all 11,873 questions in about 39 seconds.",
+      "deep": "check_gate compares against absolute floors in config.EvalGate: recall@5 at least 0.90 (measured 0.9209), MRR at least 0.80 (0.8426), containment at least 0.06 (0.0686), abstention recall at least 0.90 (0.9617), ECE at most 0.08 (0.0446), injection recall at least 0.65 (0.7333), injection FPR at most 0.15 (0.125). Then a regression check against artifacts/baseline.json fails any metric that moved more than max_regression = 0.03 in the wrong direction, skipped with a note if the sample size differs from the baseline's. scripts/run_eval.py exits nonzero on failure, so CI needs no wrapper; outputs go to artifacts/results.json, RESULTS.md and baseline.json. Two kinds of check because each misses something: floors stop a build that was always mediocre, and the regression check stops a slow slide of 2% per release that passes every floor. The gate reads whichever retrieval mode is configured as default (it once guarded hybrid while requests used sparse).",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | retrieval.recall@5 | 0.9209 | >= | 0.9000 | pass |",
+        "repo:Groundwork/docs/06-results.md: | calibration.ece | 0.0446 | <= | 0.0800 | pass |",
+        "repo:Groundwork/docs/06-results.md: | guardrail.injection_fpr | 0.1250 | <= | 0.1500 | pass |",
+        "repo:Groundwork/src/groundwork/config.py: max_regression: float = 0.03",
+        "repo:Groundwork/docs/06-results.md: | Duration | 38.76s |"
+      ],
+      "sources": [],
+      "tags": [
+        "release-gate",
+        "ci",
+        "regression"
+      ]
+    },
+    {
+      "id": "gw-25",
+      "type": "why",
+      "level": 2,
+      "q": "How were the gate floors set, and how do you stop people lowering them?",
+      "easy": "They were first written as round numbers before any measurement, and the first three runs failed on an answer target nothing could reach. They were reset to just below the first full measured run, and the rule since is that floors only move up.",
+      "deep": "Floors sit roughly one margin below what was achieved on the full corpus run (which CI executes). They were redefined once, when the canonical measurement moved from a 1,200 question sample to all 11,873 questions. Ratchet rule: floors rise when a change improves a metric and are never relaxed to turn a red build green; if a legitimate change makes a metric worse, the trade is argued in the pull request and the number changes in the same commit, in the open. A gate that the person whose change it failed can lower is not a gate. Related bug the runner caught: the gate read retrieval['hybrid'] after the default had moved to sparse, so it guarded a code path no request took; it now reads the configured default, and so does the baseline writer, otherwise the first run after a default change reports a phantom regression.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/config.py: # The rule otherwise: **floors only ever move up.** They are ratcheted when"
+      ],
+      "sources": [],
+      "tags": [
+        "release-gate",
+        "process",
+        "governance"
+      ]
+    },
+    {
+      "id": "gw-26",
+      "type": "concept",
+      "level": 1,
+      "q": "How are the guardrails structured?",
+      "easy": "Input rails decide whether to call the model; output rails decide whether to return what it said. They are kept separate because they fail differently: input filters will eventually be fooled by a clever attacker, while output checks verify the answer against the documents regardless of how the attack was phrased.",
+      "deep": "Input: length (6,000 characters), injection, jailbreak, PII redaction (replace by default, block for regulated tenants), plus a context rail that scans every retrieved passage for planted instructions. Output: citation validity (every [Sn] must reference a supplied passage; a fabricated citation abstains the answer), required citations for factual answers, groundedness bands, and PII egress redaction. Detectors return a Detection(fired, score, reasons, detector). Refusal messages are identical across reasons, because explaining which rail fired teaches an attacker how to route around it; the specific reason goes to the audit log. The layering is the design: no rail is trusted to be sufficient, and the gateway's budgets and the network egress policy cap the blast radius when a rail is beaten.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "guardrails",
+        "architecture",
+        "defense-in-depth"
+      ]
+    },
+    {
+      "id": "gw-27",
+      "type": "how",
+      "level": 1,
+      "q": "How do the injection and jailbreak detectors work?",
+      "easy": "Each threat has two detectors: hand written patterns, and a small trained classifier. The final score is the higher of the two, so either can trigger a block.",
+      "deep": "Heuristic: weighted regexes. Injection patterns: instruction override (ignore or disregard previous instructions, weight 0.75), role reassignment (0.55), prompt extraction (0.70), delimiter injection (0.65), authority spoof (0.60), exfiltration (0.70), encoding evasion (0.50). Jailbreak: persona (DAN, developer mode, 0.80), policy nullification (0.75), hypothetical framing (0.35), token pressure (0.55), dual response (0.50). Score $=1-e^{-\\sum w}$ over matched patterns. Trained: HashedTextClassifier, word unigrams, bigrams and character 4-grams hashed with signs into 2,048 dimensions, logistic regression by gradient descent for 300 epochs at learning rate 0.5 with L2 2e-4 and class reweighting for imbalance. Combination: max(heuristic, trained), fired if at least the configured threshold 0.50; taking the max trades false positives for recall on the input side, because a false positive costs a retry and a false negative costs a breach. Scoring a prompt takes microseconds on a CPU, so the rail is always on. If the trained artifact is missing the detector now logs a WARNING and falls back to patterns, with trained_available exposed for smoke tests.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/guardrails/classifier.py: dim: int = 2048",
+        "repo:Groundwork/src/groundwork/guardrails/classifier.py: epochs: int = 300,"
+      ],
+      "sources": [],
+      "tags": [
+        "guardrails",
+        "prompt-injection",
+        "classifier"
+      ]
+    },
+    {
+      "id": "gw-28",
+      "type": "formula",
+      "level": 2,
+      "q": "Explain the scoring bug that silently disabled the heuristic detector.",
+      "easy": "The formula that turned pattern weights into a score mapped the strongest single pattern to 0.444, just under the 0.5 cutoff, so any attack matching exactly one pattern was scored safe. The pattern detector caught 0 of 60 real attacks while the code looked reasonable.",
+      "deep": "Old combiner: $s=1-\\frac{1}{1+\\sum w}$. One pattern of weight 0.80 gives $1-1/1.8=0.444<0.50$. Most real attacks match one pattern, so the heuristic was dead on single pattern inputs, and earlier tests only exercised multi pattern attacks, which do clear 0.5. A unit test asserting on a single pattern attack exposed it. New combiner: $s=1-e^{-\\sum w}$. One strong pattern (0.75) gives 0.528 and fires; one weak pattern (0.35) gives 0.295 and does not; two weak ones together (0.70) give 0.503 and clear the bar; no amount of evidence exceeds 1. Lesson: a squashing function encodes a policy (how many weak signals equal one strong one), and the test suite must cover the boundary case the policy is about.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/guardrails/detectors.py: # 0.80) to 0.444, below the 0.50 decision threshold. Every attack matching",
+        "repo:Groundwork/src/groundwork/guardrails/detectors.py: # detector caught 0 of 60 real attacks in the deepset test split while"
+      ],
+      "sources": [],
+      "tags": [
+        "guardrails",
+        "bugs",
+        "scoring"
+      ]
+    },
+    {
+      "id": "gw-29",
+      "type": "number",
+      "level": 1,
+      "q": "Give me the guardrail results.",
+      "easy": "Injection, trained plus patterns, on the test split of the corpus it learned from: 73% of attacks caught, with 12.5% of benign prompts flagged. On 1,000 attacks it never saw, 88% caught. Jailbreak: 90% caught with 1.6% false alarms.",
+      "deep": "Injection, deepset test: heuristic only precision 1.0, recall 0.0833, FPR 0.0, AUC 0.5667; trained plus heuristic precision 0.8627, recall 0.7333, F1 0.7928, FPR 0.125, AUC 0.911. Injection, Gandalf held out (attack only, so FPR undefined and the 0.5 AUC is a placeholder): heuristic recall 0.553; trained plus heuristic recall 0.884, F1 0.9384. Jailbreak test: heuristic precision 1.0, recall 0.4892, AUC 0.8129; trained plus heuristic precision 0.9843, recall 0.8993, F1 0.9398, FPR 0.0163, AUC 0.9771. FPR on 600 real benign SQuAD questions: injection 5.0%, jailbreak 0.0%. The gap between test split and held out recall is the honest estimate of memorisation; here the held out recall is higher because Gandalf's attacks are English instruction overrides that the patterns target, while deepset's are largely German.",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | injection | heuristic | deepset/prompt-injections [test] | 1.0 | 0.0833 | 0.1538 | 0.0 | 0.5667 |",
+        "repo:Groundwork/docs/06-results.md: | injection | trained+heuristic | deepset/prompt-injections [test] | 0.8627 | 0.7333 | 0.7928 | 0.125 | 0.911 |",
+        "repo:Groundwork/docs/06-results.md: | injection | heuristic | Lakera/gandalf_ignore_instructions [held out] | 1.0 | 0.553 | 0.7122 | 0.0 | 0.5 |",
+        "repo:Groundwork/docs/06-results.md: | injection | trained+heuristic | Lakera/gandalf_ignore_instructions [held out] | 1.0 | 0.884 | 0.9384 | 0.0 | 0.5 |",
+        "repo:Groundwork/docs/06-results.md: | jailbreak | heuristic | jackhhao/jailbreak-classification [test] | 1.0 | 0.4892 | 0.657 | 0.0 | 0.8129 |",
+        "repo:Groundwork/docs/06-results.md: | jailbreak | trained+heuristic | jackhhao/jailbreak-classification [test] | 0.9843 | 0.8993 | 0.9398 | 0.0163 | 0.9771 |",
+        "repo:Groundwork/README.md: False-positive rate on 600 real benign user questions: **5.0%**."
+      ],
+      "sources": [],
+      "tags": [
+        "guardrails",
+        "results",
+        "prompt-injection"
+      ]
+    },
+    {
+      "id": "gw-30",
+      "type": "why",
+      "level": 1,
+      "q": "Why keep a hand written pattern detector when the trained one is far better on the test set?",
+      "easy": "Because the measurements reverse on unseen data. On the training corpus's test split the patterns catch only 8% of attacks, but on 1,000 attacks from a different source they catch 55% on their own. A single detector would have looked excellent until traffic changed.",
+      "deep": "deepset's attacks are largely German and the regexes are English, so the heuristic recall there is 0.083. Gandalf's 1,000 attempts are real players trying to make a guarded model reveal a password, mostly English instruction overrides, and the heuristic alone catches 0.553; combined with the classifier, 0.884. Patterns have no training distribution to drift from: they fire the same on an attack invented tomorrow as on one in a corpus. The trained classifier catches phrasings nobody wrote a pattern for but generalises poorly to paraphrase, since word n-grams are lexical. Their errors are different, so max() of the two dominates either. The same principle shows up in the context rail, which uses patterns only.",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | injection | heuristic | deepset/prompt-injections [test] | 1.0 | 0.0833 | 0.1538 | 0.0 | 0.5667 |",
+        "repo:Groundwork/docs/06-results.md: | injection | heuristic | Lakera/gandalf_ignore_instructions [held out] | 1.0 | 0.553 | 0.7122 | 0.0 | 0.5 |",
+        "repo:Groundwork/docs/06-results.md: | injection | trained+heuristic | Lakera/gandalf_ignore_instructions [held out] | 1.0 | 0.884 | 0.9384 | 0.0 | 0.5 |"
+      ],
+      "sources": [],
+      "tags": [
+        "guardrails",
+        "generalization",
+        "design-decision"
+      ]
+    },
+    {
+      "id": "gw-31",
+      "type": "how",
+      "level": 2,
+      "q": "How was the guardrail threshold chosen, and where did the 5% false positive rate come from?",
+      "easy": "The threshold maximises attack recall subject to a cap on false alarms. The cap is measured partly on 600 real questions from SQuAD, because the first version, tuned only on the attack corpus's benign examples, then blocked 6% of real questions in the full pipeline.",
+      "deep": "train_detectors: weights are fitted on the attack corpus train split only (the benign traffic sample deliberately stays out of training). tune_threshold scans unique scores and keeps the highest recall with FPR at most max_fpr = 0.05, measured over the union of the corpus's benign class and 600 SQuAD questions (stratified sample, seed 99). The attack corpus's benign class is mostly short topical fragments, unlike real questions, so tuning on it alone told nothing about production false positives; the first rail rejected 6% of real SQuAD questions end to end. Tightening the cap from 10% to 5% halved the rate with no loss of attack recall. Optimising F1 instead would buy a few points of recall at a 25% false positive rate, and a rail that rejects a quarter of legitimate users gets switched off within a week.",
+      "evidence": [
+        "repo:Groundwork/README.md: False-positive rate on 600 real benign user questions: **5.0%**.",
+        "repo:Groundwork/docs/03-guardrails.md: tuned against only its own corpus's benign class and then rejected 6% of real",
+        "repo:Groundwork/docs/03-guardrails.md: of threshold selection, and tightening the constraint from 10% to 5% halved"
+      ],
+      "sources": [],
+      "tags": [
+        "guardrails",
+        "threshold-tuning",
+        "false-positives"
+      ]
+    },
+    {
+      "id": "gw-32",
+      "type": "why",
+      "level": 1,
+      "q": "Tell me about the guardrail that flagged 100% of a clean corpus.",
+      "easy": "The injection classifier, trained on short user prompts, was also run over retrieved Wikipedia paragraphs, and it flagged every single one as an attack. The system retrieved the right paragraph and then threw it away, so every question got 'no relevant passages'.",
+      "deep": "The classifier is fitted on short queries; 800 character encyclopaedia prose is far outside that distribution, so every passage looked anomalous. Retrieval metrics looked fine while the end to end pipeline answered nothing, which is how the runner caught it. Fix: InputRail.check_context uses InjectionDetector(use_trained=False), patterns only, because an instruction override looks the same wherever it appears and patterns have no training distribution. It is documented at the line in rails.py and has a regression test. Two more design choices on that rail: a poisoned passage is dropped, not blocked, so one bad document degrades an answer rather than denying the whole query; and the system prompt fences retrieved text as data, which is necessary and not trusted to be sufficient. Lesson: a classifier is valid on the distribution it was fitted on, and 'user turn' and 'corpus document' are different distributions.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/guardrails/rails.py: # queries, so pointing it at 800-character prose flagged 100% of a"
+      ],
+      "sources": [],
+      "tags": [
+        "guardrails",
+        "distribution-shift",
+        "indirect-injection",
+        "bugs"
+      ]
+    },
+    {
+      "id": "gw-33",
+      "type": "how",
+      "level": 2,
+      "q": "What do the output rails check, and what is groundedness here?",
+      "easy": "Three things in order: every citation points to a passage that was actually supplied, enough of the answer's sentences share vocabulary with those passages, and no personal data leaks out. Groundedness here is a cheap word overlap check, not a truth check.",
+      "deep": "Citations: regex [Sn]; any tag not in the supplied set abstains the answer (a fabricated citation is a false claim of provenance); a factual answer with passages but no citations also abstains. Groundedness: split the answer into sentences, drop citation tags, tokenize; skip sentences with fewer than 3 content terms; a sentence is supported if at least 60% of its terms appear in the union of passage terms; score = supported / counted. Bands: at least min_groundedness 0.60 passes; between the hard floor 0.30 and 0.60 passes but is flagged weak-grounding (reduced confidence); below 0.30 abstains. Model sentinel INSUFFICIENT_CONTEXT or an empty answer becomes the standard abstention. Output is truncated at 8,000 characters. PII egress redacts personal data that came from documents. Limits: lexical overlap catches wholesale confabulation but not a wrong date; and groundedness is not relevance: the demo returned a correct Duisburg sentence plus a cited, grounded but irrelevant sentence about Fresno's population, which led to a separate relevance check in the reader.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/config.py: min_groundedness: float = 0.60",
+        "repo:Groundwork/src/groundwork/config.py: hard_groundedness_floor: float = 0.30"
+      ],
+      "sources": [],
+      "tags": [
+        "output-rail",
+        "groundedness",
+        "citations"
+      ]
+    },
+    {
+      "id": "gw-34",
+      "type": "why",
+      "level": 2,
+      "q": "Why a hashed n-gram logistic regression instead of a transformer classifier for the rails?",
+      "easy": "The input rail runs before every model call, so it has to be nearly free. A transformer adds hundreds of milliseconds of GPU time to every request; this classifier scores a prompt in microseconds on a CPU. The price is weaker handling of reworded attacks, which the layered design accepts.",
+      "deep": "Latency budget argument from the docs: a rail that adds 300 ms of GPU inference to save 900 ms of a refused generation is a bad trade at p50 and worse at p99, and a rail that is expensive gets turned off or sampled. Hashed features need no vocabulary and no tokenizer download; character 4-grams catch spacing and character obfuscations that word features miss; logistic regression is inspectable. Measured cost: word n-grams generalise poorly to paraphrase, visible as the gap between test split and held out recall, so a lexically novel attack can pass. Mitigations: patterns as a second detector, the context rail, output rails that do not depend on attack phrasing, gateway budgets that cap damage, and a NetworkPolicy that blocks exfiltration. With a GPU budget, a small fine tuned encoder evaluated on the same held out set would be the comparison to run.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "guardrails",
+        "latency",
+        "design-decision"
+      ]
+    },
+    {
+      "id": "gw-35",
+      "type": "number",
+      "level": 2,
+      "q": "How good is the PII redaction, and why is credit card recall only 17.5%?",
+      "easy": "Overall recall is 0.57 across 486 annotated spans of the types the detectors target. Emails and IBANs are caught every time; card numbers only 17.5%, but that is exactly the share of the dataset's card numbers that are valid card numbers.",
+      "deep": "Per entity recall on ai4privacy annotations: EMAIL 1.0 (84 spans), IBAN 1.0 (31), SSN 0.5758 (33), IP_ADDRESS 0.5616 (146), PHONE 0.3881 (67), DATE_OF_BIRTH 0.3871 (62), CREDIT_CARD 0.1746 (63). Card matches must pass the Luhn checksum (double every second digit from the right, subtract 9 from results above 9, sum, valid if the total is divisible by 10), because a 16 digit order reference is not a card and an unvalidated detector produces enough false positives to be switched off. Exactly 17.5% of the corpus's synthetic card numbers pass Luhn, which matches the measured recall: the labels are wrong, not the detector. Loosening the detector would have traded a real precision guarantee for a better number against bad labels. Scope: the corpus annotates 56 entity types; the regexes target nine and miss free text names and addresses entirely. Consequence: redaction is defence in depth, Redactor has replace, block and flag modes, and regulated tenants should use block, since the control that makes egress safe is not sending the text.",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: Overall recall over targeted types: **0.57** across 486 annotated spans.",
+        "repo:Groundwork/docs/06-results.md: | CREDIT_CARD | 0.1746 | 63 |",
+        "repo:Groundwork/docs/06-results.md: | EMAIL | 1.0 | 84 |",
+        "repo:Groundwork/docs/03-guardrails.md: enough false positives that people switch it off. Exactly **17.5% of the"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Luhn_algorithm"
+      ],
+      "tags": [
+        "pii",
+        "redaction",
+        "label-quality"
+      ]
+    },
+    {
+      "id": "gw-36",
+      "type": "case",
+      "level": 3,
+      "q": "If I reviewed the guardrail evaluation code closely, what would I question?",
+      "easy": "Two things, found when rereading the code for this deck and not yet confirmed by running it: the 5% false alarm figure is measured on the same 600 questions used to set the threshold, and the live detector fires at a fixed 0.50 cutoff rather than the tuned threshold. Neither changes the design, but both change how the 5% should be quoted.",
+      "deep": "(1) In train_detectors, tune_threshold receives the union of the corpus train split and the 600 benign SQuAD questions, and fpr_on_benign_traffic is then computed on those same 600 questions at the tuned threshold. The weights never saw them, but the threshold did, so 5.0% is in sample for threshold selection and close to the 0.05 cap by construction. A clean version draws a disjoint benign set for reporting. (2) InjectionDetector fires when max(heuristic, trained) is at least SETTINGS.guardrails.injection_threshold (0.50); the tuned threshold is stored on the model and used by its predict(), but the rail does not call predict(). So the deployed rail's benign FPR may differ from the reported 5.0%; the end to end pipeline FPR on held out questions is the number to report. (3) The 600 benign questions come from SQuAD, the same pool the RAG evaluation draws from, so the input rail threshold was tuned on part of the evaluation population. Each fix is small: a disjoint benign split, one threshold source of truth, and a test asserting the rail uses it.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/evaluation/guardrail_eval.py: threshold = model.tune_threshold(tune_texts, tune_labels, max_fpr=max_fpr)",
+        "repo:Groundwork/src/groundwork/guardrails/detectors.py: self.threshold = SETTINGS.guardrails.injection_threshold",
+        "repo:Groundwork/src/groundwork/config.py: injection_threshold: float = 0.50"
+      ],
+      "sources": [],
+      "tags": [
+        "code-review",
+        "data-leakage",
+        "guardrails",
+        "self-critique"
+      ]
+    },
+    {
+      "id": "gw-37",
+      "type": "how",
+      "level": 1,
+      "q": "Walk me through the LLM gateway's request path.",
+      "easy": "Every model call goes through one object that checks who is calling, estimates the cost, checks their budget and rate limit, looks in the cache, picks a model tier, calls it with retries, falls back to a cheaper tier if needed, records the actual spend, caches the result, and writes an audit record.",
+      "deep": "Gateway.complete: (1) look up the tier's ModelSpec; (2) count input tokens (fallback: characters / 4) and estimate cost pessimistically, assuming the full max output tokens are used; (3) BudgetManager.check: entitlement (403 TierNotAllowed), rate limit (429), budget (if over, try an affordable cheaper tier, else 402); (4) cache lookup, exact then semantic, scoped to the tenant; (5) call the chain [requested tier, then cheaper tiers], skipping tiers the tenant cannot afford, each with retries; (6) record actual spend including cached input tokens; (7) cache the result unless refused or truncated; (8) audit ok, refused, error, denied, downgraded or cache_hit. Order matters: estimation precedes the cache lookup so a budget exhausted tenant is refused consistently instead of being kept alive by cache hits; audit is last so it records what actually happened, including failures. Model IDs live only in config, and calling code names a tier.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "gateway",
+        "architecture",
+        "llmops"
+      ]
+    },
+    {
+      "id": "gw-38",
+      "type": "how",
+      "level": 2,
+      "q": "How do budgets and rate limits work?",
+      "easy": "Each tenant has a daily dollar cap, a requests per minute limit, and a list of allowed model tiers. The check happens before the call using a pessimistic estimate, so a runaway loop is stopped at the cap rather than discovered on the bill.",
+      "deep": "TenantQuota(name, daily_usd, requests_per_minute, allowed_tiers, scopes, max_context_chars). Shipped tenants: analytics $25 per day, 60 RPM, all tiers; support $10, 120 RPM, cheap and balanced; public-demo $1, 10 RPM, cheap only, 3,000 character context; evaluation $500, 100,000 RPM, all tiers. Rate limit: a per tenant deque of request timestamps; entries older than 60 seconds are popped, and the request is refused if the window is full (a sliding window log). can_afford does not consume a rate limit slot, so probing three fallback tiers does not burn three requests (tested). The evaluation tenant exists because the first full eval run had 152 of 400 questions refused by the interactive rate limit, which was the gateway working correctly: batch and interactive traffic have different shapes, and a skip_budget flag would have created a code path never exercised in production. Everything is in process, so two replicas would each enforce half the limit; the interfaces mirror Redis for that swap.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/config.py: \"analytics\": TenantQuota(\"analytics\", daily_usd=25.0, requests_per_minute=60),",
+        "repo:Groundwork/docs/04-llm-gateway.md: **The `evaluation` tenant is a design decision, not a bypass.** The first full",
+        "repo:Groundwork/docs/04-llm-gateway.md: eval run failed with 152 of 400 questions refused by the interactive rate"
+      ],
+      "sources": [],
+      "tags": [
+        "gateway",
+        "budgets",
+        "rate-limiting"
+      ]
+    },
+    {
+      "id": "gw-39",
+      "type": "formula",
+      "level": 2,
+      "q": "How is cost computed and estimated?",
+      "easy": "Cost is input tokens times the input price plus output tokens times the output price, with tokens read from the prompt cache charged at a tenth of the input price. Before a call, the estimate assumes the model will write its full output allowance.",
+      "deep": "ModelSpec.cost_usd: $c=\\frac{(t_{in}-t_{cache})\\,p_{in}+0.1\\,t_{cache}\\,p_{in}+t_{out}\\,p_{out}}{10^6}$ with prices in USD per million tokens. Tiers in config: frontier claude-opus-5 at $5 in and $25 out, max output 8,000; balanced claude-sonnet-5 at $3 and $15, max output 4,096 (the default tier); cheap claude-haiku-4-5 at $1 and $5, max output 1,024. Estimate = cost(input tokens, max output tokens, no cache): pessimistic on purpose, since underestimating lets a tenant slip past the cap while overestimating only makes the last call before the cap arrive slightly early. The ledger accumulates spend and cache_savings_usd (uncached cost minus actual) per tenant, so 'caching saved money' is a number rather than a claim. The 0.1x cache read multiplier matches the provider's published read price for most models.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/config.py: \"frontier\": ModelSpec(\"claude-opus-5\", 5.00, 25.00, max_output_tokens=8000, effort=\"high\", context_window=1_000_000),",
+        "repo:Groundwork/src/groundwork/config.py: \"cheap\": ModelSpec(\"claude-haiku-4-5\", 1.00, 5.00, max_output_tokens=1024, effort=\"low\", context_window=200_000),"
+      ],
+      "sources": [
+        "https://platform.claude.com/docs/en/docs/build-with-claude/prompt-caching"
+      ],
+      "tags": [
+        "gateway",
+        "cost-accounting",
+        "formula"
+      ]
+    },
+    {
+      "id": "gw-40",
+      "type": "how",
+      "level": 2,
+      "q": "How do routing, fallback, and retries behave, and what status codes come back?",
+      "easy": "Callers ask for a tier, not a model. If a tier fails or the tenant cannot afford it, the gateway steps down to a cheaper one and records what was originally asked for. Temporary errors are retried with growing waits; permanent ones are not.",
+      "deep": "fallback_chain = (frontier, balanced, cheap); the call chain is the requested tier followed by cheaper ones, skipping unaffordable tiers after the first. _affordable_tier only ever downgrades (input price strictly lower). Retries: max_retries 2 after the first attempt, exponential backoff 0.25 s x 2^(attempt - 1), only for retryable errors (429, connection failures, 5xx); a 400 fails identically on retry and retrying it burns latency and rate limit for nothing. Statuses: 401 with no detail (detail would make the endpoint a key validity oracle), 403 not entitled to the tier, 402 over budget with nothing cheaper affordable, 429 rate limited, 503 every tier failed. 402 and 429 carry detail because they concern the caller's own quota. A real bug caught by a test: the recursive budget downgrade reported a clean cheap request, hiding the degradation; GatewayResponse.fell_back_from now records the requested tier on both paths.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/config.py: max_retries: int = 2",
+        "repo:Groundwork/src/groundwork/config.py: retry_base_delay_s: float = 0.25"
+      ],
+      "sources": [],
+      "tags": [
+        "gateway",
+        "routing",
+        "retries",
+        "degradation"
+      ]
+    },
+    {
+      "id": "gw-41",
+      "type": "how",
+      "level": 2,
+      "q": "How does the response cache work, and what are its correctness and security rules?",
+      "easy": "Two layers: an exact match on the full prompt, then a near duplicate match on the question text. Entries never cross tenants, and refusals or truncated answers are never cached.",
+      "deep": "Exact key: SHA-256 fingerprint over model ID, effort, system prompt and every message; free and always correct. Semantic: the question is embedded with the hashing embedder and matched by cosine at a threshold of 0.93, counted separately in stats so a silent near miss rate is visible (a semantic cache that serves a near miss is a correctness bug that looks like a performance win). TTL 900 seconds, at most 4,096 entries with oldest first eviction (Redis semantics). Tenant scoping is a security boundary: a cache keyed on prompt text alone leaks one tenant's retrieved context to another when their questions rhyme, and there is a test for it. Refusals and truncations are transient states; caching one turns a one off into a permanent wrong answer. The semantic key is the question alone because retrieved context is a deterministic function of it. Caveat: with a lexical embedder, 0.93 cosine can still match questions that differ in one decisive word ('largest' and 'smallest'), so that hit rate deserves monitoring.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/config.py: semantic_cache_threshold: float = 0.93",
+        "repo:Groundwork/src/groundwork/config.py: cache_ttl_seconds: int = 900"
+      ],
+      "sources": [],
+      "tags": [
+        "gateway",
+        "caching",
+        "multi-tenancy"
+      ]
+    },
+    {
+      "id": "gw-42",
+      "type": "concept",
+      "level": 2,
+      "q": "Explain prompt caching and what usually breaks it.",
+      "easy": "Providers can reuse the processed beginning of a prompt if it is byte for byte identical to a recent one, which cuts cost and latency. Anything that changes early in the prompt, like a timestamp in the system prompt, breaks the reuse for everything after it.",
+      "deep": "Prompt caching is a prefix match in the order tools, then system, then messages; a cache entry covers everything up to a cache_control breakpoint, and any change at one level invalidates that level and all later ones. Cache reads bill at 0.1x the base input price on most models; writes cost more (1.25x for the 5 minute TTL). Groundwork keeps the system prompt byte stable (no timestamp, tenant name or retrieved text) and puts volatile context in the user turn after the breakpoint. Symptom to watch: usage.cache_read_input_tokens at zero across identical prefixes. Nuance worth raising in an interview: providers set a minimum cacheable prefix length (the docs list 4,096 tokens for Claude Haiku 4.5, the cheap tier's model), and this system prompt is only a few hundred tokens, so on its own it may never be cached; zero cache reads could be expected behaviour rather than a bug, and the fix would be caching a longer stable prefix.",
+      "evidence": [
+        "repo:Groundwork/docs/04-llm-gateway.md: The usual way teams lose their hit rate is a `datetime.now()` in a system"
+      ],
+      "sources": [
+        "https://platform.claude.com/docs/en/docs/build-with-claude/prompt-caching"
+      ],
+      "tags": [
+        "prompt-caching",
+        "gateway",
+        "cost"
+      ]
+    },
+    {
+      "id": "gw-43",
+      "type": "how",
+      "level": 2,
+      "q": "How are API keys and the audit log secured?",
+      "easy": "Keys are stored only as fingerprints and compared in a way that does not leak timing. Every model call, guardrail decision, and failed login is appended to a log where each line includes a fingerprint of the previous line, so any edit breaks the chain and can be detected.",
+      "deep": "KeyStore holds SHA-256 digests, never raw keys; authenticate compares against every stored digest with hmac.compare_digest, so neither the number of keys nor how early a match occurs shows in latency. Telemetry gets only a 12 character digest prefix (key_id). Placeholder dev keys from .env.example are refused unless GROUNDWORK_ALLOW_DEV_KEYS=1, so a copied config fails closed. Keys come from the X-API-Key header, never a query string (which lands in access logs and Referer headers). AuditLog: one JSON line per event with prev (previous record's hash) and hash = SHA-256 of the canonical record including prev; the first record chains from GENESIS, 64 zeros. On restart it reads the last record to resume the chain, because resetting to genesis would split the log into unverifiable segments. verify() returns (ok, records checked, first bad hash). Chaining makes tampering detectable, not impossible: an attacker with write access can rewrite the whole file, so production needs an append only store or external anchoring. Not logged: prompts, passages, outputs, keys, redacted content; telemetry.logging.scrub drops sensitive keys but keeps sizes.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/security/audit.py: GENESIS = \"0\" * 64",
+        "repo:Groundwork/src/groundwork/security/authz.py: return self.key_digest[:12]"
+      ],
+      "sources": [],
+      "tags": [
+        "security",
+        "audit-log",
+        "authentication"
+      ]
+    },
+    {
+      "id": "gw-44",
+      "type": "how",
+      "level": 2,
+      "q": "How is the deployment hardened?",
+      "easy": "The container runs as a non root user with a read only filesystem and no extra privileges, and the Kubernetes network policy only lets it talk to DNS and the model provider. That last rule turns a successful prompt injection that tries to send data out into a failed connection.",
+      "deep": "deploy/Dockerfile: multi stage build; runtime runs as a non root user with no shell, read only root filesystem with tmpfs scratch, all Linux capabilities dropped, no-new-privileges, base image pinned by digest, no compiler or package manager, HEALTHCHECK on /health. deploy/k8s: Deployment with resource limits (a large retrieved context should not OOM the node), Service, Secrets, and a NetworkPolicy denying all egress except DNS and HTTPS to the provider. HTTP surface (FastAPI, optional extra): GET /health (no version or tenant detail; it is the most scanned URL), GET /ready, POST /v1/ask and GET /v1/usage behind X-API-Key, a tenant seeing only its own ledger. Index and pipeline load once at startup. Preflight checklist highlights the one fail open item: a missing trained detector artifact drops injection recall from 0.733 to 0.083, now logged as a WARNING and assertable via trained_available. Trust boundaries: user, gateway to provider (a third party), and the retrieval corpus, which people forget is untrusted input.",
+      "evidence": [
+        "repo:Groundwork/docs/05-secure-deployment.md: patterns only, which drops injection recall from 0.733 to 0.083. It now"
+      ],
+      "sources": [],
+      "tags": [
+        "security",
+        "deployment",
+        "kubernetes"
+      ]
+    },
+    {
+      "id": "gw-45",
+      "type": "how",
+      "level": 2,
+      "q": "How would you monitor this in production without labels?",
+      "easy": "Watch whether inputs and internal signals drift, since accuracy cannot be measured without labels. The specific alarm is confidence rising while groundedness falls: a system that has started bluffing.",
+      "deep": "telemetry.drift computes the Population Stability Index and the two sample KS statistic per feature against a reference window, with 10 bins. $\\mathrm{PSI}=\\sum_b (c_b-r_b)\\ln(c_b/r_b)$ over binned proportions. Readings: PSI below 0.10 stable, 0.10 to 0.25 moderate shift, at least 0.25 significant (treat fitted thresholds as stale); alert if PSI at least 0.25 or KS at least 0.20. Both stay silent below 20 samples, because an alert nobody trusts trains people to ignore all of them. Features watched: top_score, score_margin, query coverage, confidence, groundedness. Also page on: abstention rate moving more than a few points in a day, guardrail fire rate spikes, per tenant spend near cap, and any audit chain verification failure, which is an incident on its own.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "monitoring",
+        "drift",
+        "psi"
+      ]
+    },
+    {
+      "id": "gw-46",
+      "type": "how",
+      "level": 1,
+      "q": "What is tested, and how does CI work?",
+      "easy": "113 automated tests across retrieval, the pipeline, guardrails, the gateway, evaluation, and security, plus a CI job that downloads the real data, runs the tests, builds the index, and runs the full evaluation with the release gate.",
+      "deep": "Test files: test_evaluation 25, test_security 22, test_guardrails 20, test_gateway 20, test_pipeline 14, test_retrieval 12. Examples of what they pin: a single pattern injection fires (the 0.444 regression), the context rail stays heuristic only, cache entries never cross tenants, can_afford does not consume rate limit, fell_back_from is set on downgrade, dev keys fail closed, audit chain verification detects an edited record, ECE bins include 1.0. CI (GitHub Actions, Python 3.12): pip install, fetch datasets with continue-on-error (an external fetch failure is infrastructure, and data dependent tests skip cleanly), pytest, build index, run_eval.py --full (the step that fails a pull request for making the system worse rather than for breaking it), upload artifacts always. The full evaluation over 11,873 questions took 38.76 s in the recorded run, so there is no reason to gate on a noisy sample.",
+      "evidence": [
+        "portfolio: BADGE: recall@5 0.921 / ECE 0.045 / injection recall 0.884 unseen / 113 tests, CI green",
+        "repo:Groundwork/docs/06-results.md: | Duration | 38.76s |",
+        "repo:Groundwork/.github/workflows/ci.yml: run: python3 scripts/run_eval.py --full"
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "ci"
+      ]
+    },
+    {
+      "id": "gw-47",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations?",
+      "easy": "The reader is a simple extractive one, the vectors have no meaning, confidence only weakly separates right from wrong, PII coverage is partial, and the gateway keeps its state on one machine.",
+      "deep": "From the README: (1) the offline reader is extractive, so EM against minimal spans is near zero by construction; (2) the embedder is a hashing bag of words, an honest floor rather than a semantic model; (3) confidence AUC is 0.654, so a 60% precision promise costs most of the coverage (7.5% answer rate); (4) PII recall 0.57 over targeted types, with 56 annotated types and free text names missed; (5) single node gateway: cache, budgets and rate limits in process. Additional, from reading the code and docs: the 5.0% benign FPR is in sample for threshold selection and the live rail uses a fixed 0.50 cutoff; numbers drift between docs (hybrid gap 6.8 against 5.7 points, containment ceiling 0.552 against 0.58); retrieval labels assume one gold passage; all answer quality numbers describe the offline reader, not a frontier model; and no latency percentiles for the full request path are published.",
+      "evidence": [
+        "repo:Groundwork/README.md: - **Confidence AUC is 0.654.** Distinguishing SQuAD v2's answerable from",
+        "repo:Groundwork/README.md: - **The single-node gateway** holds cache, budgets, and rate limits in"
+      ],
+      "sources": [],
+      "tags": [
+        "limitations"
+      ]
+    },
+    {
+      "id": "gw-48",
+      "type": "case",
+      "level": 3,
+      "q": "What breaks at 10x and 100x scale, and what would production need?",
+      "easy": "At ten times the traffic the in process cache, budgets, and rate limits stop working across replicas; at a hundred times the corpus, the brute force retrieval and the single file audit log need replacing. Production would also need a real embedding model, a real LLM reader, and labelled samples of live traffic.",
+      "deep": "10x traffic: move cache, budget ledgers and rate limit windows to Redis (interfaces already mirror it: TTL expiry, oldest first eviction, per tenant keys) with atomic increments for spend; audit log to an append only object store or log pipeline with external anchoring of chain heads. 100x corpus (about 120,000 passages): dense scoring is a full matrix product and BM25 iterates postings in Python, so move to an inverted index engine and an ANN vector index; argpartition is already used for top k. Swap the hashing embedder for a sentence embedder and rerun the ablation; hybrid may then win. Replace the extractive reader with the Anthropic path and recalibrate, since confidence features and AUC will change. Guardrails: evaluate a small fine tuned encoder against the same held out sets within a latency budget; add per tenant thresholds. Evaluation: the full run is 39 s at 11,873 questions, so at 100x run sampled gates per PR and full runs nightly. Monitoring: drift alerts, spend dashboards, and periodic human labelling of live samples to measure real precision.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "scale",
+        "production"
+      ]
+    },
+    {
+      "id": "gw-49",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next?",
+      "easy": "Replace the hashed vectors with a real embedding model and rerun the ablation, run the real LLM reader and recalibrate, fix the guardrail threshold leak, and move gateway state to Redis.",
+      "deep": "(1) Sentence embedder in place of HashingEmbedder (two method contract), then let run_eval decide whether hybrid returns. (2) Anthropic reader runs on a fixed sample with cost tracked by the gateway, then refit confidence, since features like answer_support become informative for a generative reader. (3) Improve the confidence signal (AUC 0.654), for example a cross encoder relevance score or an NLI entailment check as features, which is the honest way to raise containment. (4) Guardrails: disjoint benign set for reporting FPR, one source of truth for thresholds, a small encoder compared on Gandalf. (5) Redis backed cache, budgets and rate limits; external anchoring for the audit chain. (6) Reconcile doc numbers (6.8 against 5.7, 0.552 against 0.58) through the same kind of artifact check the gate does.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next-steps"
+      ]
+    },
+    {
+      "id": "gw-50",
+      "type": "pushback",
+      "level": 2,
+      "q": "Containment of 6.9% means your system barely answers anything. How is that useful?",
+      "easy": "Fair, it is very conservative. That is the cost of promising 60% precision with a weak confidence signal, and the report shows the full trade so a product owner can pick a different point. When it does answer, it rarely answers questions that have no answer.",
+      "deep": "Concede: 7.5% of answerable questions answered is low coverage, and with a better reader and confidence model it should be much higher. Defend: (1) the ceiling is 0.552, so retrieval and candidate generation are fine; the policy is discarding answers to keep a promise, which is the right failure direction for trust; (2) the false answer rate on unanswerable questions is 3.8%; (3) the threshold sweep is published, so a stakeholder can choose, say, 68% coverage at 41% precision; (4) the gate's containment floor is set so improving it requires a better confidence model, not a relaxed promise.",
+      "say": "It's conservative on purpose, and I'd say that first. Candidate answers contain the right fact more than half the time, so generation isn't the problem. The policy is holding a 60% precision promise with a weak confidence signal. I publish the whole coverage curve, so a product owner can trade some precision for a lot more coverage.",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | Containment | 0.0686 | answerable questions where a gold span appears in the answer |",
+        "repo:Groundwork/docs/02-rag-evaluation.md: | Containment ceiling | 0.552 | The same, ignoring the abstain decision: what a perfect policy would get |",
+        "repo:Groundwork/docs/06-results.md: | False answer rate | 0.0383 | unanswerable questions answered anyway (the failure that matters) |"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "abstention",
+        "product"
+      ]
+    },
+    {
+      "id": "gw-51",
+      "type": "pushback",
+      "level": 2,
+      "q": "ECE of 0.045 on a signal with AUC 0.654 isn't impressive. Isn't calibration of a weak signal meaningless?",
+      "easy": "Calibration does not make the signal stronger, agreed, and that is exactly why the two numbers are always quoted together. What calibration buys is that the threshold means what it says, so a 60% precision promise actually holds.",
+      "deep": "Concede: a constant 0.5 predictor can have near zero ECE with no discrimination, and AUC 0.654 is only moderately better than chance; better features are the real fix. Defend: (1) the report never quotes ECE alone; (2) calibration is what turns 'confidence 0.6' into an operational promise, which a product decision depends on; (3) it is measured on 4,881 held out questions with weights and temperature fitted elsewhere; (4) the temperature scaling null result shows the measurement was not tuned to look good.",
+      "say": "Agreed, calibration doesn't make the signal stronger. That's why I never quote ECE without AUC. What it buys me is that a threshold means what it says, so the precision promise holds. Raising AUC means better features, and that's next on my list.",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | Before scaling | 0.0446 | 0.1962 | 0.2127 | 0.6544 | 1.0 |",
+        "repo:Groundwork/README.md: **Calibration**: ECE 0.045, Brier 0.213, AUC 0.654 over 4,881 held-out questions."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "calibration"
+      ]
+    },
+    {
+      "id": "gw-52",
+      "type": "pushback",
+      "level": 2,
+      "q": "BM25 beating hybrid only proves your embedder is a toy.",
+      "easy": "Yes, and the write up says so. The point was not that hybrid is bad; it was that the system should ship whatever the measurement supports, and keep measuring all three modes so the decision flips automatically when a real embedder arrives.",
+      "deep": "Concede: a signed hashing bag of words has no semantics, and SQuAD questions share vocabulary with their paragraphs, which favours BM25. Defend: (1) the hashing embedder is described as an honest floor that any real model must beat to justify its latency; (2) the default changed because of a measured 6.8 point drop, with the flip condition written into config; (3) every run reports all modes on the same questions, so the evidence for switching back will be automatic; (4) the habit transfers: do not ship an architecture because it is the default recommendation.",
+      "say": "It is a toy embedder, and I describe it as a floor. The decision wasn't 'hybrid is bad'. It was 'ship what the numbers support'. All three modes run on every eval, so when I swap in a real embedder, the switch back will show up as a number.",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | sparse | 0.7818 | 0.893 | 0.9209 | 0.9483 | 0.8426 | 0.8686 |",
+        "repo:Groundwork/docs/06-results.md: | hybrid | 0.5988 | 0.7686 | 0.8532 | 0.9244 | 0.7022 | 0.7557 |"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "retrieval"
+      ]
+    },
+    {
+      "id": "gw-53",
+      "type": "pushback",
+      "level": 2,
+      "q": "N-gram logistic regression guardrails are trivially evaded.",
+      "easy": "A determined attacker who rewords an attack will get past them, and the docs say so. That is why they are one layer of several, and why the numbers that matter are on an attack set the classifier never saw, plus the false alarm rate on real users.",
+      "deep": "Concede: lexical features generalise poorly to paraphrase; no claim is made about novel attacks. Defend: (1) held out recall 0.884 on 1,000 real Gandalf attacks, with the pattern detector alone at 0.553; (2) output rails check citations and groundedness independently of attack phrasing; (3) the gateway caps spend and the NetworkPolicy blocks exfiltration; (4) the rail scores in microseconds, so it is always on, where a slower classifier tends to be sampled or disabled. A transformer comparison on the same held out set is the experiment Tanay would run next.",
+      "say": "A determined attacker will get past an input filter, and I say that in the docs. So it's one layer. The output rail checks citations no matter how the attack was worded, and the network policy blocks exfiltration. The number I trust is recall on a thousand attacks it never saw, and that's 88%.",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | injection | trained+heuristic | Lakera/gandalf_ignore_instructions [held out] | 1.0 | 0.884 | 0.9384 | 0.0 | 0.5 |",
+        "repo:Groundwork/docs/06-results.md: | injection | heuristic | Lakera/gandalf_ignore_instructions [held out] | 1.0 | 0.553 | 0.7122 | 0.0 | 0.5 |"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "guardrails"
+      ]
+    },
+    {
+      "id": "gw-54",
+      "type": "pushback",
+      "level": 3,
+      "q": "You set the gate floors after seeing the results. Isn't that circular?",
+      "easy": "The floors are regression guards, not proof of quality, so setting them from the first measured run is the normal way to start. The rule that matters is that they only move up, and any lowering has to be argued in the open.",
+      "deep": "Concede: a floor set just below a measured value cannot validate that value; it only catches regressions. The first floors were round numbers chosen before measurement and failed three runs on an unreachable containment target, which is why they were reset. Defend: (1) the regression check against a recorded baseline (0.03 tolerance) catches slow slides that floors miss; (2) floors only ratchet up; (3) the gate refuses to compare runs of different sizes, so it cannot be gamed by sampling; (4) quality claims rest on the held out evaluation itself, not on passing the gate.",
+      "say": "The gate isn't my evidence of quality. The held out evaluation is. The gate exists to stop regressions, so anchoring it to the first real measurement is standard. What keeps it honest is that floors only ratchet up, and lowering one has to happen in the pull request where everyone can see it.",
+      "evidence": [
+        "repo:Groundwork/src/groundwork/config.py: # The rule otherwise: **floors only ever move up.** They are ratcheted when"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "release-gate"
+      ]
+    },
+    {
+      "id": "gw-55",
+      "type": "pushback",
+      "level": 3,
+      "q": "These aren't LLM results. Your reader is an offline extractive heuristic.",
+      "easy": "Correct for the answer quality numbers, and they are labelled that way. Retrieval, guardrail, gateway, and security numbers do not depend on the reader, and the whole point of the offline path is that anyone can reproduce every figure for free.",
+      "deep": "Concede: containment, EM, F1, confidence and calibration describe the extractive offline reader; a frontier model would change them, likely raising coverage and making features like answer_support informative. Defend: (1) the same code path calls Claude when ANTHROPIC_API_KEY is set, so the pipeline, rails and gateway are exercised identically; (2) retrieval metrics, guardrail precision and recall, PII recall, and gateway behaviour are reader independent; (3) an eval that needs a budget gets run once and never again, while this one runs in CI on every pull request in under a minute. Next: a costed sample run with the real reader through the gateway, then recalibration.",
+      "say": "Right, the answer quality numbers come from the offline extractive reader, and I label them that way. Retrieval, guardrails and the gateway don't depend on the reader at all. The offline path is what lets the whole evaluation run in CI on every pull request. A costed run with the real model is the next experiment.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "offline-reader"
+      ]
+    },
+    {
+      "id": "gw-56",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain Groundwork to a hiring manager.",
+      "easy": "Lead with the four production concerns, one number each for retrieval and refusal, and the fact that measurements changed the design.",
+      "deep": "Structure: what it is (a RAG system with evaluation, guardrails, a metered gateway and security); why (the parts that usually get skipped); proof (public labelled data, release gate in CI, 113 tests); story (measurements reversed three design decisions); honesty (offline reader, weak confidence signal).",
+      "say": "Groundwork is a question answering system built around the parts teams usually skip. It has an evaluation that can fail a build, guardrails with published false alarm rates, and a gateway that meters every model call. It runs on public, human labelled data, and the right passage lands in the top five 92% of the time. The useful part is that the measurements changed the design. I removed hybrid retrieval and redesigned a guardrail because the numbers said so.",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | sparse | 0.7818 | 0.893 | 0.9209 | 0.9483 | 0.8426 | 0.8686 |"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "gw-57",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain it to a staff engineer.",
+      "easy": "Give the evaluation design, the reversed decisions with numbers, and the weak spots you would fix.",
+      "deep": "Hit: SQuAD v2 for exact retrieval and abstention labels; BM25 0.921 vs hybrid 0.853; confidence LR with held out ECE 0.045 and AUC 0.654; operating point by precision floor; temperature scaling null result; guardrail distribution shift (100% flagged); the 0.444 combiner bug; gateway ordering and tenant scoped cache; then the threshold leak in the benign FPR and the in process state.",
+      "say": "I used SQuAD v2 because its unanswerable questions give real abstention labels. BM25 beat my hybrid by about seven points of recall at five, so hybrid went. Confidence is a six feature logistic regression with held out ECE of 0.045, but AUC is only 0.654. I pick the threshold by a 60% precision floor, since maximising accuracy degenerates. Temperature scaling made calibration worse, so it's off by default. One thing I'd fix: the 5% benign false positive rate shares data with threshold tuning.",
+      "evidence": [
+        "repo:Groundwork/docs/06-results.md: | sparse | 0.7818 | 0.893 | 0.9209 | 0.9483 | 0.8426 | 0.8686 |",
+        "repo:Groundwork/docs/06-results.md: | hybrid | 0.5988 | 0.7686 | 0.8532 | 0.9244 | 0.7022 | 0.7557 |",
+        "repo:Groundwork/README.md: **Calibration**: ECE 0.045, Brier 0.213, AUC 0.654 over 4,881 held-out questions.",
+        "repo:Groundwork/README.md: False-positive rate on 600 real benign user questions: **5.0%**."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer"
+      ]
+    },
+    {
+      "id": "gw-58",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain it to a product manager.",
+      "easy": "Frame the precision floor as the product decision and the coverage curve as the menu of options.",
+      "deep": "Make it about choices: how often the assistant answers versus how often it is right; that the false alarm rate of safety filters on real users is measured; that every model call is budgeted per customer. One or two numbers at most.",
+      "say": "The system has a dial for how often it answers versus how often it's right. I set it so that when it answers, it's right at least 60% of the time. That makes it cautious, and it skips a lot of questions it could have answered. The report shows the whole range, so you can pick a different trade. Separately, every customer has a budget, so a runaway job can't run up a surprise bill.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "pm"
+      ]
+    },
+    {
+      "id": "gw-59",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain it to a recruiter.",
+      "easy": "One sentence on what it is, one on what makes it different, one on the skill it shows.",
+      "deep": "Recruiter version: no acronyms beyond AI; one number (96%); the skill is building AI features that are measured and safe, not just demos.",
+      "say": "I built an AI question answering system with the safety and cost controls a real product needs. It's tested on public data, and it correctly refuses 96% of questions it shouldn't answer. It shows I build AI features that are measured and safe, not just demos.",
+      "evidence": [
+        "portfolio: correctly declines 96.2% of unanswerable questions"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "Okapi BM25 (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Okapi_BM25",
+      "why": "The BM25 scoring formula, the IDF with +1 inside the log, and typical k1 and b values."
+    },
+    {
+      "title": "Know What You Don't Know: Unanswerable Questions for SQuAD",
+      "url": "https://arxiv.org/abs/1806.03822",
+      "why": "SQuAD 2.0: unanswerable questions written adversarially to look answerable, the basis of the abstention labels."
+    },
+    {
+      "title": "On Calibration of Modern Neural Networks",
+      "url": "https://arxiv.org/abs/1706.04599",
+      "why": "Miscalibration in modern networks and temperature scaling as one parameter Platt scaling."
+    },
+    {
+      "title": "Discounted cumulative gain (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Discounted_cumulative_gain",
+      "why": "DCG and nDCG formulas used for nDCG@10."
+    },
+    {
+      "title": "Luhn algorithm (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Luhn_algorithm",
+      "why": "The checksum the card detector requires, which explains the 17.5% card recall."
+    },
+    {
+      "title": "Claude prompt caching docs",
+      "url": "https://platform.claude.com/docs/en/docs/build-with-claude/prompt-caching",
+      "why": "Prefix order, breakpoints, 0.1x cache read pricing, cache_read_input_tokens, minimum cacheable lengths, and what invalidates the cache."
+    }
+  ]
+}
