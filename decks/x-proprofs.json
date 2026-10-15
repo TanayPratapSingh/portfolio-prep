@@ -1,0 +1,713 @@
+{
+  "deck_id": "x-proprofs",
+  "title": "ProProfs: Data and Product Analyst Intern",
+  "group": "Experience",
+  "repo": "",
+  "summary_easy": "Over two months in 2023 at ProProfs, a SaaS company in Noida, Tanay did product and customer analytics: benchmarking 100 to 150 features against Zoho and Salesforce, SWOT and ideal customer profile work, an analysis of 2,000 client records that helped the product team pick two features for the next release, and Tableau dashboards that found under used features.",
+  "summary_deep": "Product and customer analytics in Python for SaaS products serving 5,000+ users. Competitive work combined SWOT analyses with a benchmark of 100 to 150 features against Zoho and Salesforce, weighted by Ideal Customer Profile analyses that fed strategy and prioritization. Customer data for 2,000 clients was analyzed with Python and Excel pivot tables for behavior patterns, pain points, and conversion drivers, letting the product team prioritize two features for the next release that measurably lifted trial to paid conversion. Interactive Tableau dashboards on SQL and Excel sources identified under used features and are credited with a 5 percent churn reduction, and the profile also lists a rating lift from 4.2 to 4.6. The interview depth is metric definitions (churn, retention, conversion, adoption), cohort and survival methods, Tableau mechanics, and honest attribution: the profile gives no conversion figure, no churn definition or window, and no rating source.",
+  "sheet": {
+    "easy": "## The role\n- **Data and Product Analyst Intern, ProProfs** (SaaS), Noida, India. Jul 2023 to Aug 2023.\n- Product and customer analytics in Python for SaaS products serving **5,000+ users**.\n\n## Four workstreams\n| Work | Detail from the profile |\n|---|---|\n| Competitive benchmark | 100 to 150 features vs Zoho and Salesforce, plus SWOT |\n| Ideal Customer Profile | fed product strategy and prioritization |\n| Customer analysis | 2,000 clients, Python and Excel pivot tables: behavior, pain points, conversion drivers |\n| Tableau dashboards | on SQL and Excel sources; identified under used features |\n\n## Outcomes, with their caveats\n- Two features prioritized for the next release; trial to paid conversion **measurably** lifted (no figure given: do not invent one).\n- Dashboards credited with a **5 percent** churn reduction (know: relative or points, window, action, attribution).\n- Rating 4.2 to 4.6 (source and counts not stated).\n\n## Words to know\n- **Churn**: share of customers lost in a period. **Conversion**: share of trials that pay. **Adoption**: share of eligible customers using a feature.\n- **ICP**: the kind of account that gets the most value and stays. **SWOT**: strengths, weaknesses, opportunities, threats.\n\n## Say carefully\n- These are team outcomes after a two month internship; your part was the analysis that pointed the team.\n- Engaged customers use more features and stay longer anyway: adoption is not proof of cause.\n",
+    "deep": "## As stated in the profile\n- Role, company, dates: Data and Product Analyst Intern, ProProfs, Noida, India, Jul 2023 to Aug 2023.\n- Chips: SaaS users analyzed 5,000+; customer records 2,000 clients; features benchmarked 100 to 150; churn reduction 5%; rating lift 4.2 to 4.6.\n- Text: Python analytics; SWOT; benchmark vs Zoho and Salesforce; ICP feeding strategy and prioritization; 2,000 clients with Python and Excel pivots (behavior patterns, pain points, conversion drivers); two features prioritized, measurable trial to paid lift; Tableau on SQL and Excel sources identified under used features; churn reduced 5 percent.\n- Not stated: churn definition, window, relative vs points, attribution method, conversion figure, the two features, rating source. Never fill these in from guesswork.\n\n## Metric definitions\n- Logo churn $= \\frac{\\text{start customers who cancel in period}}{\\text{start customers}}$; annual $= 1-(1-m)^{12}$.\n- $GRR = \\frac{MRR_0 - churn - contraction}{MRR_0}$, $NRR = \\frac{MRR_0 - churn - contraction + expansion}{MRR_0}$.\n- Lifetime $\\approx 1/c$; $LTV \\approx ARPA \\times margin / c$; relative 5% churn cut gives about 5.3% more LTV; 10% to 5% doubles it.\n- Conversion $= \\frac{\\text{cohort trials paid within } W}{\\text{cohort trials}}$; opt in vs opt out trials.\n- Adoption $= \\frac{\\text{active eligible accounts using feature}}{\\text{active eligible accounts}}$; breadth, depth, frequency; DAU/MAU.\n- NPS $= \\%(9,10) - \\%(0..6)$; CSAT share of 4 or 5; mean rating SE $= s/\\sqrt n$.\n\n## Methods\n- Cohort retention: date_trunc signup, active months, divide by month 0 (window function).\n- Kaplan-Meier $S(t) = \\prod_{t_i\\le t}(1 - d_i/n_i)$ with right censoring; Cox model for covariates.\n- Driver analysis: early window features, later outcome; control plan and size; validate on a later cohort; beware multiple comparisons.\n- Benchmark: taxonomy, depth score, tier, ICP weights, gap classes (table stakes, differentiators, ignore).\n- SWOT internal vs external; ICP from outcomes; persona is a user, ICP is an account.\n- Prioritization: RICE $= R\\times I\\times C/E$; Kano basic, performance, delight; MoSCoW.\n\n## Tools\n- Excel pivots: values as count, sum, percent; calculated fields aggregate first; about 1M row limit.\n- Tableau: live vs extract; relationships vs joins vs blending; `{FIXED [Client] : MIN([Signup Date])}`; filter order: extract, data source, context, FIXED, dimension, INCLUDE/EXCLUDE, measure, table calc.\n\n## Measuring impact\n- A/B per account; $n \\approx 2(z_{1-\\alpha/2}+z_{1-\\beta})^2p(1-p)/\\delta^2$: about 3,500 per arm for 10% base, 2 point lift, 80% power.\n- Holdouts, staged rollout, DiD (parallel trends), interrupted time series.\n- Pitfalls: seasonality, concurrent changes, regression to the mean, novelty, churn lag to renewal.\n\n## Honest framing\n- Dashboards identified under used features; follow up actions associated with 5 percent churn reduction (definition needed).\n- Analysis put evidence behind two release features; conversion lift measurable, figure not recorded.\n- Rating chip only with source and counts.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: tell me about your ProProfs internship.",
+      "script": "I was a data and product analyst intern at ProProfs, a SaaS company, for two months in 2023. I benchmarked 100 to 150 features against Zoho and Salesforce, ran SWOT and ideal customer profile analyses, and analyzed 2,000 client records in Python and Excel to find what drove conversion. That analysis helped the product team prioritize two features for the next release. I also built Tableau dashboards that surfaced under used features.",
+      "keypoints": [
+        "Two month SaaS product analytics internship, 2023",
+        "100 to 150 features benchmarked vs Zoho and Salesforce",
+        "SWOT and ICP analyses",
+        "2,000 client records, conversion drivers",
+        "Two features prioritized; Tableau found under used features"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through what you did there.",
+      "script": "ProProfs builds SaaS products, and the ones I worked on served more than 5,000 users. My role was product and customer analytics in Python, and the work fell into four pieces. First, competitive analysis. I benchmarked 100 to 150 features against Zoho and Salesforce and wrote SWOT analyses. The useful output wasn't the count of gaps but which gaps mattered to the customers we wanted. Second, ideal customer profiles: which kinds of accounts get the most value and stay. That gave the benchmark a weighting and fed product strategy and prioritization. Third, customer analysis. I worked through data for 2,000 client accounts with Python and Excel pivot tables, looking at behavior patterns, pain points, and what separated trials that converted from those that didn't. The product team used those findings to prioritize two features for the next release, and trial to paid conversion went up measurably after it shipped. Fourth, Tableau dashboards on SQL and Excel sources. They showed feature adoption by segment and identified under used features, and the follow up on those is credited with a 5 percent churn reduction. I'm careful how I present the outcomes. They're team results, the dashboards found the problem and people acted on it, and churn takes months to show at renewal. If I did it again, I'd write the churn and conversion definitions down first and measure the release against a comparison group, so the lift could be attributed cleanly.",
+      "keypoints": [
+        "SaaS products, 5,000+ users",
+        "Benchmark: 100 to 150 features, Zoho and Salesforce, SWOT",
+        "ICP weighted what mattered",
+        "2,000 clients: patterns, pain points, conversion drivers",
+        "Two features prioritized; conversion lifted measurably",
+        "Tableau found under used features; 5 percent churn credited",
+        "Caveats: team outcomes, attribution, definitions first"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Go deeper on the analytics: definitions, methods, and what you'd defend.",
+      "script": "I'll go through the four workstreams, then the measurement questions, because that's where an analyst should be pushed. Units first. The products served more than 5,000 users, and the customer analysis covered 2,000 client accounts. In B2B SaaS, conversion and churn are account level outcomes while adoption is user level, so mixing them is the first mistake to avoid. Competitive benchmarking. I benchmarked 100 to 150 features against Zoho and Salesforce. The way to make a benchmark like that useful is to score depth, not just presence, note which pricing tier includes each feature, and weight features by what the target customer needs. Salesforce is an enterprise suite, so it shows what bigger customers expect rather than a bar to match; Zoho is the closer comparison. The SWOT turned that into strategy: strengths and weaknesses we control, opportunities and threats we don't. Ideal customer profile. An ICP is defined by outcomes: which accounts convert, retain, and grow. You profile the best accounts against the rest on size, industry, and early behavior, and that profile decides which competitor gaps are worth closing. Customer analysis. With Python and Excel pivot tables, I looked at behavior patterns, pain points, and conversion drivers across the 2,000 clients. Pivots are fast and readable for product managers; the joins, cleaning, and cohort logic belong in pandas. The pitfalls I watch for are leakage, measuring usage near the outcome when usage is already collapsing; confounding by plan or size; and testing a hundred features at once, which produces false positives. The findings let the product team prioritize two features for the next release, and conversion rose measurably afterwards. I don't have a precise figure I'd quote. Dashboards. Tableau on SQL and Excel sources. The concepts that matter there are live versus extract connections, relationships rather than physical joins when sources have different grains, and level of detail expressions for cohort metrics, like a fixed first signup date per client. The dashboard compared adoption by segment and identified under used features. The analytic trick is plotting adoption against the retention gap among adopters: low adoption and high gap means a discoverability problem, which is cheaper to fix than building something new. Measurement, honestly. The profile credits the dashboards with a 5 percent churn reduction. I'd want three things stated with it: whether that's relative or percentage points, the window and baseline, and the action taken. A dashboard doesn't change churn; outreach and product changes do, and churn shows up at renewal, so two months is early. For conversion, the right test is trial cohorts with a fixed window before and after the release, or a staged rollout. A clean A/B test on B2B trial volumes is hard: detecting a two point lift on a 10% base needs about 3,500 trials per arm. Engagement confounding is the deepest problem. Accounts that plan to stay use more features, so adoption looks causal when it may be a symptom. Measuring adoption in the first two weeks, comparing within plan and size, and then nudging a random half of new accounts toward a feature separates the two. What I'd defend: the analysis put evidence behind a release decision and found features customers weren't using. What I'd change: definitions written first, comparison groups for every claimed effect, and the pivots moved into reproducible SQL.",
+      "keypoints": [
+        "Units: users vs client accounts",
+        "Benchmark: depth, tier, ICP weighting; Salesforce vs Zoho",
+        "ICP defined by outcomes",
+        "Pivots for reading, pandas for logic; leakage and confounding",
+        "Tableau: extracts, relationships, LOD cohorts",
+        "Adoption vs retention gap finds under used features",
+        "Churn credit needs definition, window, action",
+        "Experiment sizing and engagement confounding"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone who isn't technical.",
+      "script": "ProProfs sells online software to businesses. As an intern, my job was helping the product team decide what to build and fix, using data instead of hunches. I compared our features with big competitors like Zoho and Salesforce to see where we were behind. I studied records for 2,000 customer accounts to understand what made people who tried the software decide to pay, and where they got stuck. That helped the team choose two features for the next release, and more trial users became paying customers afterwards. I also built interactive dashboards that showed which features people weren't using, which helped the team keep more customers. Those were team results; my part was pointing them to where the problems were.",
+      "keypoints": [
+        "Software for businesses",
+        "Data instead of hunches",
+        "Compared with Zoho and Salesforce",
+        "2,000 accounts: why trials pay or stall",
+        "Two features chosen; dashboards showed unused features"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Sketch how the analysis fed product decisions.",
+      "script": "First I draw four boxes across the top as inputs: competitor benchmark with 100 to 150 features against Zoho and Salesforce; SWOT; ideal customer profile; and customer data for 2,000 clients. Under the customer data box I write Python and Excel pivots. Second, I draw arrows from all four into a box in the middle labelled prioritization, and next to it I write reach, impact, confidence, effort, saying that the ICP weights which competitor gaps matter and the customer analysis supplies impact and confidence. Third, out of prioritization, an arrow to a box labelled next release: two features, and an arrow to a metric box: trial to paid conversion, with a small note: measure with cohorts and a fixed window. Fourth, along the bottom, a separate path: SQL and Excel sources into a Tableau box. Inside it I sketch a small scatter with adoption on the x axis and retention among adopters on the y axis, and circle the low adoption, high retention corner as under used but valuable. Fifth, from Tableau an arrow to a box labelled actions: onboarding prompts and outreach, and only then an arrow to churn. I write 5 percent next to churn with three question marks underneath: definition, window, attribution. Last, in the corner, the confounding warning: engaged accounts use more features, so the causal test is an experiment.",
+      "keypoints": [
+        "Four inputs: benchmark, SWOT, ICP, 2,000 clients",
+        "Prioritization box with RICE terms",
+        "Release: two features, conversion metric",
+        "Tableau adoption vs retention scatter",
+        "Dashboard to actions to churn, with caveats",
+        "Confounding warning in the corner"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you structure the benchmark of 100 to 150 features?",
+      "script": "A benchmark at that size is a matrix: features grouped into capability areas as rows, products as columns, and a score for each cell. Presence alone misleads, so the useful version scores depth, partial or full, and notes which pricing tier includes the feature, because parity on an enterprise tier isn't parity for a small customer. Then you weight rows by what the ideal customer needs, which is where the ICP work came in. The output is a short list: table stakes gaps to close, differentiators to invest in, and competitor features our customers don't need.",
+      "keypoints": [
+        "Matrix: capability areas by products",
+        "Score depth, not just presence",
+        "Note pricing tier",
+        "Weight by ICP needs",
+        "Output: gaps, differentiators, ignore list"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How do you know the dashboards reduced churn?",
+      "script": "Strictly, I don't know that the dashboards did. They identified under used features, and the team's follow up is what's credited with the 5 percent. To claim it properly you need the churn definition, whether it's relative or percentage points, the window, and a comparison. Churn shows up at renewal, so a two month window is early. The clean version compares accounts the team acted on with similar accounts it didn't, or rolls the change out in stages. That's how I'd measure it now.",
+      "keypoints": [
+        "Dashboards found the problem; actions moved churn",
+        "Need definition, relative vs points, window",
+        "Churn appears at renewal; two months is early",
+        "Compare acted on vs similar accounts",
+        "Or staged rollout"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What's an Ideal Customer Profile, and how did it change priorities?",
+      "script": "It's a description of the accounts that get the most value and are most valuable to keep: likely to convert, stay, and grow. You build it from outcomes, ranking accounts by retention or revenue and comparing the best group with the rest on size, industry, and early behavior. Its job in prioritization is weighting. A competitor might have fifty features we lack, but only the ones the ideal customer needs are worth building. That's how the ICP analyses fed product strategy alongside the benchmark.",
+      "keypoints": [
+        "Accounts that convert, stay, grow",
+        "Built from outcomes, not clusters alone",
+        "Compare best accounts with the rest",
+        "Weights which gaps matter",
+        "Fed strategy alongside the benchmark"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you compute churn in SQL?",
+      "script": "First I'd pin the definition: say logo churn per month, an account counted as churned if it was active at the start of the month and cancelled during it. Then a query takes accounts active at each month start as the denominator, counts those with a cancellation date inside the month as the numerator, and divides. New accounts that signed up mid month stay out of both. For cohorts, I'd truncate signup dates to months, join activity by month, and divide each month's active count by the cohort's month zero count with a window function.",
+      "keypoints": [
+        "Pin the definition first",
+        "Denominator: active at period start",
+        "Numerator: cancelled during period",
+        "Exclude mid period signups",
+        "Cohorts: date_trunc plus window over month zero"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Five percent churn reduction in two months sounds inflated.",
+      "script": "I understand the skepticism, and I'd frame it carefully. The dashboards identified under used features, and the follow up actions are what's credited with the 5 percent. Churn shows up at renewal, so a short window is early, and without a comparison group a before and after number can include seasonality or other changes. What I can stand behind is the analytical part: finding the features customers weren't using. If I were measuring it now, I'd compare acted on accounts against similar ones, with the definition written down first.",
+      "keypoints": [
+        "Concede: short window, attribution limits",
+        "Dashboards found; actions moved churn",
+        "Before and after can include seasonality",
+        "Defend: identifying under used features",
+        "Fix: comparison group, definition first"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Feature use and retention are both just engagement. Your analysis can't tell cause from symptom.",
+      "script": "That's right for the descriptive analysis, and it's the main caveat I'd attach. Engaged accounts use more features and stay longer for the same reason, and usage collapses before cancellation, so late usage is a symptom. The way to get closer is measuring adoption in the first two weeks, comparing within the same plan and company size, and treating the gap as an upper bound. The causal answer is an experiment that nudges a random half of new accounts toward a feature and checks whether retention follows.",
+      "keypoints": [
+        "Concede: descriptive, confounded by engagement",
+        "Late usage is a symptom",
+        "Early window and within segment comparison",
+        "Gap is an upper bound",
+        "Experiment nudging random new accounts"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "pp-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What was the ProProfs internship, and what did you do?",
+      "easy": "A two month data and product analyst internship (Jul 2023 to Aug 2023) at ProProfs, a SaaS company in Noida, India. Tanay did product and customer analytics in Python: competitor feature benchmarking, SWOT and ideal customer profile analyses, a study of 2,000 client records that shaped what the next release prioritized, and Tableau dashboards that found under used features.",
+      "deep": "Four workstreams, all stated in the profile: (1) competitive analysis: SWOT analyses and benchmarking 100 to 150 features against Zoho and Salesforce; (2) Ideal Customer Profile analyses that fed product strategy and prioritization; (3) customer analysis of 2,000 clients with Python and Excel pivot tables, looking for behavior patterns, pain points, and conversion drivers, which let the product team prioritize two features for the next release that measurably lifted trial to paid conversion; (4) interactive Tableau dashboards on SQL and Excel sources that identified under used features and are credited with a 5 percent churn reduction. Scope: SaaS products serving 5,000+ users. The stat chips also list a rating lift from 4.2 to 4.6 without saying which rating. Details not in the profile (churn definition, measurement window, the two features, the rating source) should come from Tanay's own memory or notes, never from a guess.",
+      "say": "It was a two month product analytics internship at ProProfs, a SaaS company. I benchmarked 100 to 150 features against Zoho and Salesforce, built ideal customer profiles, and analyzed 2,000 client records in Python and Excel to find what drove conversion. That analysis helped the product team pick two features for the next release. I also built Tableau dashboards that surfaced under used features.",
+      "evidence": [
+        "portfolio: Data and Product Analyst Intern",
+        "portfolio: ProProfs , Noida, India",
+        "portfolio: Jul 2023 to Aug 2023",
+        "portfolio: I did product and customer analytics in Python for SaaS products serving 5,000+ users.",
+        "portfolio: meant SWOT analyses, benchmarking 100 to 150 features against Zoho and Salesforce, and Ideal",
+        "portfolio: Customer Profile analyses that fed product strategy and prioritization.",
+        "portfolio: I analyzed customer data for 2,000 clients with Python and Excel pivot tables",
+        "portfolio: prioritize two features for the next release that measurably lifted trial to paid conversion.",
+        "portfolio: built interactive Tableau dashboards on SQL and Excel sources that identified under used"
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "product-analytics",
+        "saas"
+      ]
+    },
+    {
+      "id": "pp-02",
+      "type": "number",
+      "level": 1,
+      "q": "What was the scope of the data and the benchmark?",
+      "easy": "SaaS products serving 5,000+ users; customer data for 2,000 clients; 100 to 150 features benchmarked against Zoho and Salesforce.",
+      "deep": "How to keep these straight: 5,000+ is the user base of the SaaS products the analytics covered; 2,000 is the number of client (customer account) records analyzed with Python and Excel pivot tables; 100 to 150 is the number of features in the competitive benchmark, a range because the count varied by product or by how features were grouped. Users and clients are different units in B2B SaaS: a client is an account that can contain many users, so churn and conversion are usually measured per client while adoption is measured per user. If asked, give the counts exactly as stated and the unit for each.",
+      "evidence": [
+        "portfolio: SaaS users analyzed 5,000+",
+        "portfolio: Customer records 2,000 clients",
+        "portfolio: Features benchmarked 100 to 150",
+        "portfolio: I did product and customer analytics in Python for SaaS products serving 5,000+ users.",
+        "portfolio: I analyzed customer data for 2,000 clients with Python and Excel pivot tables",
+        "portfolio: benchmarking 100 to 150 features against Zoho and Salesforce"
+      ],
+      "sources": [],
+      "tags": [
+        "scope",
+        "numbers",
+        "units"
+      ]
+    },
+    {
+      "id": "pp-03",
+      "type": "number",
+      "level": 1,
+      "q": "What outcomes are attributed to the work, and how should you state them?",
+      "easy": "Two features prioritized for the next release that measurably lifted trial to paid conversion; Tableau dashboards that identified under used features and are credited with reducing churn by 5 percent; and a rating lift from 4.2 to 4.6. The profile gives no conversion number and does not say which rating, so neither should be filled in.",
+      "deep": "State each with its caveat in the same sentence: (1) conversion: 'measurably lifted trial to paid conversion' with no figure in the profile; do not supply one unless you have the release report; (2) churn: '5 percent', which could mean relative (for example 10% monthly churn falling to 9.5%) or percentage points (10% to 5%); know which, over what window, against what baseline, and which action followed the dashboard; (3) rating: 4.2 to 4.6 appears only as a stat chip; know the source (app store, review site, in product survey), the number of ratings behind each average, and the time period. All three are team outcomes after a two month internship, so the honest framing is that Tanay's analysis informed the decisions that produced them.",
+      "evidence": [
+        "portfolio: prioritize two features for the next release that measurably lifted trial to paid conversion.",
+        "portfolio: features and reduced churn by 5 percent.",
+        "portfolio: Churn reduction 5%",
+        "portfolio: Rating lift 4.2 to 4.6"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "attribution",
+        "honesty"
+      ]
+    },
+    {
+      "id": "pp-04",
+      "type": "define",
+      "level": 1,
+      "q": "Define churn in SaaS. What are logo churn, revenue churn, and how do monthly and annual rates relate?",
+      "easy": "Churn is the share of customers (or revenue) lost over a period. Logo churn counts customers who leave; revenue churn counts the money lost, including downgrades. A small monthly churn rate compounds into a large annual one.",
+      "deep": "Logo (customer) churn for a period: $\\frac{\\text{customers at start who cancelled during the period}}{\\text{customers at start}}$; new customers acquired during the period are excluded from both numerator and denominator. Revenue churn: lost recurring revenue from cancellations and downgrades over starting recurring revenue. Gross revenue retention $GRR = \\frac{MRR_{start} - churned - contraction}{MRR_{start}}$, capped at 100%; net revenue retention $NRR = \\frac{MRR_{start} - churned - contraction + expansion}{MRR_{start}}$, which can exceed 100%. Compounding: annual churn $= 1-(1-m)^{12}$, so 3% monthly is about 31% a year. Definitions that change the number: what counts as churned (cancelled, not renewed, or inactive for N days), trials excluded or included, the period (monthly, quarterly), and whether customers are weighted by revenue. The profile's 5 percent churn reduction does not state any of these.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "churn",
+        "retention",
+        "saas-metrics"
+      ]
+    },
+    {
+      "id": "pp-05",
+      "type": "formula",
+      "level": 2,
+      "q": "How do churn, customer lifetime, and lifetime value connect?",
+      "easy": "If a fixed share of customers leaves each month, the average customer stays about one divided by that share. Lifetime value is roughly monthly profit per customer times that lifetime, so even a small churn improvement raises value noticeably.",
+      "deep": "With constant monthly churn $c$, lifetime in months is geometric with mean $1/c$ (5% monthly gives 20 months). $LTV \\approx \\frac{ARPA \\times \\text{gross margin}}{c}$, where ARPA is average recurring revenue per account. Sensitivity: $\\partial LTV/\\partial c = -LTV/c$, so a relative 5% cut in churn raises LTV by about 5.3%, and a cut of 5 percentage points from 10% to 5% doubles it, which is why the relative versus points distinction matters for the profile's 5 percent. Caveats: churn is rarely constant (early tenure churn is highest, so cohort curves flatten), expansion revenue is ignored by this formula, and a discount rate should be applied for long lifetimes. Common pairing: LTV to CAC ratio (customer acquisition cost) of about 3 is a frequently quoted SaaS health benchmark.",
+      "evidence": [
+        "portfolio: features and reduced churn by 5 percent."
+      ],
+      "sources": [],
+      "tags": [
+        "ltv",
+        "churn",
+        "unit-economics"
+      ]
+    },
+    {
+      "id": "pp-06",
+      "type": "how",
+      "level": 2,
+      "q": "How do you build a cohort retention analysis, in SQL, and when would you use survival analysis instead?",
+      "easy": "Group customers by the month they signed up, then for each later month count how many are still active. Each row is a cohort and each column is months since signup, so you can see whether newer cohorts retain better. Survival analysis does the same while properly handling customers who are still active today.",
+      "deep": "Illustrative SQL (PostgreSQL syntax):\n\n```sql\nWITH firsts AS (\n  SELECT client_id, DATE_TRUNC('month', MIN(signup_at)) AS cohort\n  FROM clients GROUP BY client_id),\nactivity AS (\n  SELECT DISTINCT client_id, DATE_TRUNC('month', event_at) AS active_month\n  FROM usage_events)\nSELECT f.cohort,\n       (EXTRACT(YEAR FROM AGE(a.active_month, f.cohort)) * 12\n        + EXTRACT(MONTH FROM AGE(a.active_month, f.cohort))) AS month_n,\n       COUNT(DISTINCT a.client_id) * 1.0\n         / MAX(COUNT(DISTINCT a.client_id)) OVER (PARTITION BY f.cohort) AS retained\nFROM firsts f JOIN activity a USING (client_id)\nGROUP BY f.cohort, month_n ORDER BY f.cohort, month_n;\n```\n\nThe window MAX over the cohort uses month 0 as the denominator. Survival analysis: Kaplan-Meier estimates $S(t) = \\prod_{t_i \\le t}(1 - d_i/n_i)$, where $d_i$ churned at $t_i$ out of $n_i$ still at risk; customers still active are right censored rather than dropped, which a naive 'percent churned' ignores. A Cox proportional hazards model then relates churn hazard to covariates such as plan, size, and feature adoption. The profile does not say which method was used; offer these as the tools for the job.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "cohort-analysis",
+        "sql",
+        "survival-analysis",
+        "kaplan-meier"
+      ]
+    },
+    {
+      "id": "pp-07",
+      "type": "behavioral",
+      "level": 1,
+      "q": "Tell me about a time your analysis changed what a product team built.",
+      "easy": "At ProProfs, Tanay analyzed 2,000 client records for behavior patterns, pain points, and conversion drivers, and the findings let the product team prioritize two features for the next release that measurably lifted trial to paid conversion.",
+      "deep": "STAR, kept to what the profile supports. Situation: SaaS products serving 5,000+ users, a product team choosing what goes into the next release. Task: find what separates trials that convert from those that do not, and where customers struggle. Action: Python and Excel pivot tables over 2,000 client records, looking at behavior patterns, pain points, and conversion; combined with competitive benchmarking (100 to 150 features against Zoho and Salesforce) and ideal customer profile work that fed prioritization. Result: two features prioritized for the next release that measurably lifted trial to paid conversion. Do not invent the size of the lift; if asked, say the profile does not record it and give it only from the release report or your own notes. Reflection worth adding: what you would measure differently, such as a holdout or a before and after cohort comparison for the release.",
+      "say": "At ProProfs I analyzed 2,000 client records in Python and Excel to see what separated trials that converted from those that didn't, and where customers got stuck. I paired that with the competitor benchmark against Zoho and Salesforce. The product team used it to prioritize two features for the next release, and trial to paid conversion went up measurably afterwards. What I'd add now is a holdout so the lift can be attributed cleanly.",
+      "evidence": [
+        "portfolio: I analyzed customer data for 2,000 clients with Python and Excel pivot tables",
+        "portfolio: behavior patterns, pain points, and what drove conversion.",
+        "portfolio: prioritize two features for the next release that measurably lifted trial to paid conversion.",
+        "portfolio: benchmarking 100 to 150 features against Zoho and Salesforce"
+      ],
+      "sources": [],
+      "tags": [
+        "behavioral",
+        "star",
+        "impact"
+      ]
+    },
+    {
+      "id": "pp-08",
+      "type": "concept",
+      "level": 2,
+      "q": "How do you find what drives churn or conversion in customer data, and what are the traps?",
+      "easy": "Compare customers who stayed or converted with those who left, on how they used the product, their plan, size, and support history. The trap is that engaged customers do everything more, so features they use look like they cause retention when they may just be signs of engagement.",
+      "deep": "Approach: build one row per client with outcome (converted, churned) and candidate drivers (feature usage counts, time to first key action, seats, plan, industry, support tickets, onboarding completion); compare rates across segments with pivot tables, then fit a logistic regression or tree model and read effects with care. Traps: (1) reverse causality and selection: users who intend to stay explore more features; (2) confounding by plan or company size; (3) survivorship: analyzing only current customers hides those who left early; (4) leakage: features measured after the outcome (usage in the cancellation month falls because they are leaving); (5) many comparisons across 100+ features produce false positives; (6) small segments give unstable rates. Mitigations: measure drivers in a fixed early window (first 14 or 30 days) and the outcome later, control for plan and size, validate on a later cohort, and treat findings as hypotheses for experiments. The profile describes the questions (behavior patterns, pain points, conversion drivers), not the method.",
+      "evidence": [
+        "portfolio: behavior patterns, pain points, and what drove conversion.",
+        "portfolio: I analyzed customer data for 2,000 clients with Python and Excel pivot tables"
+      ],
+      "sources": [],
+      "tags": [
+        "churn-drivers",
+        "causal-pitfalls",
+        "segmentation"
+      ]
+    },
+    {
+      "id": "pp-09",
+      "type": "define",
+      "level": 1,
+      "q": "Define trial to paid conversion and activation.",
+      "easy": "Trial to paid conversion is the share of free trials that become paying customers. Activation is the early moment when a new user first gets real value, and it usually predicts whether a trial converts.",
+      "deep": "Conversion rate $= \\frac{\\text{trials started in cohort that paid within } W \\text{ days}}{\\text{trials started in cohort}}$; fix the cohort by trial start date and the window $W$ (often the trial length plus a grace period), or late converters bias recent cohorts downward. Variants: opt in trials (no card) convert at lower rates than opt out trials (card required), so compare like with like. Activation: a specific early action correlated with conversion (for a quiz or survey product, plausibly publishing a first quiz and getting responses); define it from data by finding early actions with the largest conversion gap, then confirm with an experiment. Funnel: signup, activation, engaged use, paywall or sales touch, payment; analyze drop off between steps. The profile states that two prioritized features measurably lifted trial to paid conversion; it gives no rate or window.",
+      "evidence": [
+        "portfolio: prioritize two features for the next release that measurably lifted trial to paid conversion."
+      ],
+      "sources": [],
+      "tags": [
+        "conversion",
+        "activation",
+        "funnel"
+      ]
+    },
+    {
+      "id": "pp-10",
+      "type": "define",
+      "level": 2,
+      "q": "How do you measure feature adoption, and what makes a feature 'under used'?",
+      "easy": "Adoption is how many active customers use a feature at all; depth is how much; frequency is how often. A feature is under used when few of the customers who could benefit from it actually use it, which can mean it is hard to find, hard to use, or not valuable.",
+      "deep": "Metrics: adoption rate $= \\frac{\\text{active accounts using feature in period}}{\\text{active accounts eligible for it}}$ (eligible matters: a paid tier feature should not count free users in the denominator); breadth (number of distinct features used per account); depth (uses per active account); frequency and recency; stickiness DAU/MAU for the product or a feature. Under used diagnosis: compare adoption with how valuable the feature is to those who use it (retention or conversion among adopters versus similar non adopters). Low adoption and high value suggests a discoverability or onboarding problem (fix: in app prompts, onboarding steps); low adoption and low value suggests a candidate for redesign or removal. The profile says the Tableau dashboards identified under used features; the follow on actions are not described.",
+      "evidence": [
+        "portfolio: built interactive Tableau dashboards on SQL and Excel sources that identified under used",
+        "portfolio: features and reduced churn by 5 percent."
+      ],
+      "sources": [],
+      "tags": [
+        "feature-adoption",
+        "product-metrics",
+        "dau-mau"
+      ]
+    },
+    {
+      "id": "pp-11",
+      "type": "how",
+      "level": 1,
+      "q": "How do you run a competitive feature benchmark across 100 to 150 features?",
+      "easy": "List every feature that matters to customers, mark for each product whether it has it fully, partly, or not at all, and weight features by how much customers care. The result shows where the product is behind, at parity, or ahead, and where a gap is worth closing.",
+      "deep": "Method: (1) build the feature taxonomy from competitor documentation, pricing pages, and review sites, grouped into capability areas; (2) score each product per feature (full, partial, absent; or 0 to 2) and note the pricing tier that includes it, since parity on a top tier is not parity for small customers; (3) weight features by importance from customer data (requests, support tickets, win and loss notes) or the ideal customer profile; (4) compute weighted coverage per capability area and list gaps; (5) separate table stakes gaps (must close) from differentiators (invest) and features competitors have that the ICP does not need (ignore). Limits: feature counts reward bloat, documentation overstates depth, and enterprise suites like Salesforce serve a different buyer than SMB tools. The profile states the scale (100 to 150 features) and competitors (Zoho and Salesforce); the scoring scheme is not described.",
+      "evidence": [
+        "portfolio: benchmarking 100 to 150 features against Zoho and Salesforce",
+        "portfolio: Features benchmarked 100 to 150"
+      ],
+      "sources": [],
+      "tags": [
+        "competitive-analysis",
+        "benchmarking",
+        "feature-matrix"
+      ]
+    },
+    {
+      "id": "pp-12",
+      "type": "define",
+      "level": 1,
+      "q": "What is a SWOT analysis, and how is it different from the feature benchmark?",
+      "easy": "SWOT lists a product's internal Strengths and Weaknesses and its external Opportunities and Threats. The feature benchmark is a detailed, feature by feature comparison; SWOT is the strategic summary that uses it as one input.",
+      "deep": "Strengths and weaknesses are internal and controllable (feature coverage, ease of use, price, support); opportunities and threats are external (market segments competitors ignore, a competitor's bundling, platform changes). A good SWOT is specific and evidence backed: 'weakness: no native CRM integration, which 30% of churned accounts mentioned' is useful, 'weakness: integrations' is not (the 30% is an illustration, not a ProProfs figure). It feeds TOWS style choices: use strengths to capture opportunities, fix weaknesses that expose the product to threats. Limits: static, prone to listing rather than prioritizing, and easily filled with opinions. The profile lists SWOT analyses alongside the benchmark and ICP work as inputs to product strategy and prioritization.",
+      "evidence": [
+        "portfolio: meant SWOT analyses, benchmarking 100 to 150 features against Zoho and Salesforce, and Ideal",
+        "portfolio: Customer Profile analyses that fed product strategy and prioritization."
+      ],
+      "sources": [],
+      "tags": [
+        "swot",
+        "strategy",
+        "competitive-analysis"
+      ]
+    },
+    {
+      "id": "pp-13",
+      "type": "define",
+      "level": 1,
+      "q": "What is an Ideal Customer Profile, and how do you derive one from data?",
+      "easy": "An ICP describes the kind of company that gets the most value from the product and is most valuable to the business: likely to buy, stay, and grow. It is about accounts, while a persona describes an individual user.",
+      "deep": "Inputs: firmographics (industry, company size, region), technographics (tools they already use, such as a CRM), behavior (time to activation, features adopted), and outcomes (conversion, retention, expansion, support cost). Derivation: rank existing clients by an outcome such as retention or revenue, then profile the top group against the rest with pivot tables or a classifier to find the traits that separate them; clustering can reveal segments, but the ICP is defined by outcomes, not by clusters alone. Uses: focus marketing and sales on high fit leads, prioritize features the ICP needs, and choose which competitor gaps matter. Pitfalls: building the ICP from current customers only (survivorship), small samples per segment, and confusing 'most numerous' with 'most valuable'. The profile says the ICP analyses fed product strategy and prioritization.",
+      "evidence": [
+        "portfolio: meant SWOT analyses, benchmarking 100 to 150 features against Zoho and Salesforce, and Ideal",
+        "portfolio: Customer Profile analyses that fed product strategy and prioritization."
+      ],
+      "sources": [],
+      "tags": [
+        "icp",
+        "segmentation",
+        "strategy"
+      ]
+    },
+    {
+      "id": "pp-14",
+      "type": "compare",
+      "level": 2,
+      "q": "How does analysis turn into prioritization? Compare RICE, Kano, and MoSCoW.",
+      "easy": "Prioritization frameworks turn evidence into a ranked list. RICE scores reach, impact, confidence, and effort. Kano sorts features by how customers react to having or lacking them. MoSCoW sorts into must, should, could, and won't for a release.",
+      "deep": "RICE $= \\frac{Reach \\times Impact \\times Confidence}{Effort}$: reach (accounts affected per period), impact (a scale such as 0.25 to 3), confidence (percent, discounts guesses), effort (person months). Analytics feeds reach (how many trials hit the pain point), impact (conversion gap between users who do and do not have the capability), and confidence (strength of the evidence). Kano: basic needs (absence angers, presence unnoticed; table stakes from the benchmark), performance needs (more is better), delighters (unexpected; differentiators); categorized with paired functional and dysfunctional survey questions. MoSCoW: scope negotiation for a fixed release. In Tanay's case, the customer analysis of 2,000 clients and the competitive and ICP work let the product team prioritize two features for the next release; which framework the team used is not stated.",
+      "evidence": [
+        "portfolio: prioritize two features for the next release that measurably lifted trial to paid conversion.",
+        "portfolio: Customer Profile analyses that fed product strategy and prioritization."
+      ],
+      "sources": [],
+      "tags": [
+        "prioritization",
+        "rice",
+        "kano",
+        "moscow"
+      ]
+    },
+    {
+      "id": "pp-15",
+      "type": "how",
+      "level": 1,
+      "q": "What can Excel pivot tables do for 2,000 client records, and when do you switch to Python?",
+      "easy": "A pivot table groups rows by one or more fields and summarizes them, for example conversion rate by plan and company size, in seconds and in a form product managers can read. Python takes over when the data needs joining, cleaning, repeatable steps, or statistics.",
+      "deep": "Pivot table mechanics: rows and columns from categorical fields, values as count, sum, average, or percent of row or column; filters and slicers; calculated fields (careful: they aggregate before computing, so a rate should be built from summed numerators and denominators); grouping dates into months or quarters; GETPIVOTDATA to reference cells. Strengths: fast exploration, shareable with nontechnical teams. Weaknesses: manual and hard to reproduce, error prone joins with VLOOKUP, limits around one million rows, no statistical testing. Python (pandas) for joins across usage, billing, and support tables, cleaning, cohort logic, groupby with multiple aggregations, and tests or models; then export summaries back to Excel or Tableau for stakeholders. The profile names Python and Excel pivot tables for the 2,000 client analysis.",
+      "evidence": [
+        "portfolio: I analyzed customer data for 2,000 clients with Python and Excel pivot tables"
+      ],
+      "sources": [],
+      "tags": [
+        "excel",
+        "pivot-tables",
+        "pandas"
+      ]
+    },
+    {
+      "id": "pp-16",
+      "type": "how",
+      "level": 2,
+      "q": "How do Tableau dashboards on SQL and Excel sources work, and what Tableau concepts should you know?",
+      "easy": "Tableau connects to databases and spreadsheets, combines them, and lets you build interactive charts that filter each other. Key ideas: live connection versus extract, how sources are combined, calculated fields, and level of detail expressions for metrics at a different grain than the chart.",
+      "deep": "Connections: live (queries the SQL database each interaction; always fresh, depends on database speed) versus extract (.hyper snapshot; fast, scheduled refresh). Combining SQL and Excel sources: relationships (logical layer, joins resolved per view at the right level, the default since 2020.2), physical joins (can duplicate rows when grains differ), and data blending (aggregate then link on a common field, one primary source). Calculations: row level calculated fields, aggregate calculations, table calculations (running totals, percent of total, computed on the view), and LOD expressions: {FIXED [Client] : MIN([Signup Date])} computes a value per client regardless of the view, the standard way to build cohorts. Filter order of operations: extract, data source, context, FIXED LOD, dimension, INCLUDE and EXCLUDE LOD, measure, table calc filters. Dashboard actions: filter, highlight, and URL actions for drill down. The profile names interactive Tableau dashboards on SQL and Excel sources that identified under used features.",
+      "evidence": [
+        "portfolio: built interactive Tableau dashboards on SQL and Excel sources that identified under used"
+      ],
+      "sources": [],
+      "tags": [
+        "tableau",
+        "lod",
+        "dashboards",
+        "data-sources"
+      ]
+    },
+    {
+      "id": "pp-17",
+      "type": "how",
+      "level": 2,
+      "q": "Design a dashboard that surfaces under used features and churn risk. What goes on it?",
+      "easy": "Top row: the few numbers leaders track (active clients, churn this period, trial conversion). Middle: feature adoption by feature and segment, with adoption plotted against retention among adopters. Bottom: a list of at risk accounts that a success team can act on.",
+      "deep": "Layout: KPI tiles with period over period change and a definition tooltip (churn definition stated on the dashboard); adoption heatmap of features by customer segment or plan; a scatter of adoption rate (x) against retention or conversion lift among adopters (y), where the low adoption, high lift quadrant is the under used but valuable list; cohort retention curves; and an account table with health signals (declining logins, no use of key features, open tickets) sorted by revenue at risk. Interactions: segment and date filters, click a feature to filter the account list. Design rules: one question per view, consistent definitions with the SQL source, refresh cadence visible, and an owner for each metric. Impact path: a dashboard changes churn only through actions it triggers (onboarding prompts, customer success outreach, feature fixes), which is the honest way to describe the profile's churn result.",
+      "evidence": [
+        "portfolio: built interactive Tableau dashboards on SQL and Excel sources that identified under used",
+        "portfolio: features and reduced churn by 5 percent."
+      ],
+      "sources": [],
+      "tags": [
+        "dashboard-design",
+        "customer-health",
+        "tableau"
+      ]
+    },
+    {
+      "id": "pp-18",
+      "type": "concept",
+      "level": 2,
+      "q": "How should a product change's effect on churn or conversion be measured?",
+      "easy": "Best is a randomized experiment: give the change to some customers and not others and compare. When that is impossible, compare with a similar group that did not get the change over the same period, rather than simply comparing before and after.",
+      "deep": "A/B test: randomize at the account level (users in one account share outcomes), set the primary metric and sample size in advance; required sample per arm for a proportion is about $n \\approx \\frac{2(z_{1-\\alpha/2}+z_{1-\\beta})^2 p(1-p)}{\\delta^2}$, which for a 10% conversion rate and a 2 point lift at 80% power is roughly 3,500 per arm, often more than a B2B trial flow sees in a month. Alternatives: holdout groups, staggered rollout, difference in differences against an untreated segment (needs parallel trends), interrupted time series with seasonality controls. Pre and post pitfalls: seasonality (summer months in B2B), concurrent changes (pricing, marketing campaigns), regression to the mean (acting on the worst month), and novelty effects. Churn needs long windows because it is measured at renewal; a two month internship can rarely observe a churn effect fully, which is why the profile's 5 percent needs its measurement context.",
+      "evidence": [
+        "portfolio: features and reduced churn by 5 percent.",
+        "portfolio: Jul 2023 to Aug 2023"
+      ],
+      "sources": [],
+      "tags": [
+        "experimentation",
+        "ab-testing",
+        "attribution",
+        "did"
+      ]
+    },
+    {
+      "id": "pp-19",
+      "type": "define",
+      "level": 2,
+      "q": "What do ratings, NPS, and CSAT measure, and how would you check whether a rating rise from 4.2 to 4.6 is real?",
+      "easy": "A rating is the average stars customers give; NPS asks how likely they are to recommend; CSAT asks how satisfied they were with an interaction. A move from 4.2 to 4.6 is meaningful only if enough people rated in both periods and the same kind of customers were asked.",
+      "deep": "NPS $= \\%\\text{promoters (9 to 10)} - \\%\\text{detractors (0 to 6)}$, from -100 to 100. CSAT: share of satisfied responses (4 or 5 on a 5 point scale). Star rating: mean on 1 to 5; check the count, the distribution (J shaped review distributions are common), and the source (public review site, app store, in product prompt). Significance check: standard error of a mean rating is $s/\\sqrt n$; with $s \\approx 1$, a 0.4 rise needs only a few dozen ratings per period to be clearly beyond noise, but selection effects dominate: prompting happy users to review, a campaign asking for reviews, or a change in who is asked can move the average without any product change. The profile lists 'Rating lift 4.2 to 4.6' without the rating source, counts, or period, so present it with those caveats or not at all.",
+      "evidence": [
+        "portfolio: Rating lift 4.2 to 4.6"
+      ],
+      "sources": [],
+      "tags": [
+        "ratings",
+        "nps",
+        "csat",
+        "measurement"
+      ]
+    },
+    {
+      "id": "pp-20",
+      "type": "pushback",
+      "level": 1,
+      "q": "A 5% churn reduction in a two month internship? How was that measured?",
+      "easy": "A fair challenge. The profile credits the Tableau dashboards that identified under used features with a 5 percent churn reduction, but does not say whether that is relative or in percentage points, over what window, or how it was attributed. Tanay should answer with those specifics from memory or say they are not known.",
+      "deep": "What a strong answer contains: the churn definition (logo or revenue, monthly or quarterly); whether 5 percent is relative or points; the baseline period and comparison period; the action taken because of the dashboard (onboarding prompts, outreach to accounts not using a key feature); and the attribution method (comparison group, before and after with caveats). What to concede: churn effects take months to show at renewal, so a number observed within or right after a two month internship is early, and the dashboard alone did not reduce churn; the actions it triggered did. What to defend: the dashboards found under used features, which is a concrete analytical contribution regardless of attribution.",
+      "say": "Fair question. The dashboards identified under used features, and the team's follow up on those is what's credited with the 5 percent. I'd be careful about attribution: churn shows up at renewal, so a two month window is early, and the dashboard didn't change churn by itself, the actions did. What I can own is finding the features customers weren't using.",
+      "evidence": [
+        "portfolio: features and reduced churn by 5 percent.",
+        "portfolio: Jul 2023 to Aug 2023",
+        "portfolio: built interactive Tableau dashboards on SQL and Excel sources that identified under used"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "attribution",
+        "churn",
+        "honesty"
+      ]
+    },
+    {
+      "id": "pp-21",
+      "type": "pushback",
+      "level": 2,
+      "q": "Dashboards don't reduce churn. People do. Isn't crediting a dashboard with churn reduction overclaiming?",
+      "easy": "Mostly agreed. A dashboard can only find the problem; churn moves when someone acts on it. The accurate statement is that the dashboards identified under used features and the resulting actions were associated with lower churn.",
+      "deep": "The causal chain: dashboard surfaces under used, valuable features and at risk accounts; the product or success team acts (in app prompts, onboarding changes, outreach, fixes); behavior changes; churn changes at renewal. Each link has its own evidence: did adoption of the targeted features rise, did at risk accounts contacted renew at a higher rate than similar ones not contacted. Rewording for a resume or interview: 'built Tableau dashboards that identified under used features; follow up actions were associated with a 5 percent churn reduction', with the definition ready. This matches the honesty standard Tanay applies elsewhere: caveats travel with the number.",
+      "say": "I agree with the premise. My dashboards found under used features; the reduction came from what the team did with that. The accurate version is that the follow up actions were associated with a 5 percent churn reduction. If I were measuring it now, I'd compare contacted accounts with similar ones that weren't.",
+      "evidence": [
+        "portfolio: built interactive Tableau dashboards on SQL and Excel sources that identified under used",
+        "portfolio: features and reduced churn by 5 percent."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "attribution",
+        "dashboards"
+      ]
+    },
+    {
+      "id": "pp-22",
+      "type": "pushback",
+      "level": 2,
+      "q": "Customers who use more features retain better because they were engaged to begin with. How do you know the features matter?",
+      "easy": "You do not, from correlation alone. Engagement drives both feature use and retention. Measuring feature use in a fixed early window, controlling for plan and size, and then testing a nudge toward the feature in an experiment is how to separate the two.",
+      "deep": "Confounding by intent: accounts planning to stay explore more. Reverse timing: usage collapses in the months before cancellation, so usage measured near the outcome is a symptom. Approach: (1) define feature adoption in the first 14 or 30 days and churn later; (2) compare adopters and non adopters within the same plan, size, and acquisition channel, or with propensity score matching; (3) treat the gap as an upper bound on the causal effect; (4) run an experiment that promotes the feature to a random half of new accounts and measure adoption (first stage) and retention (outcome), which also gives an instrumental variable estimate of the feature's effect. The profile frames the work as identifying under used features, which is the descriptive step; the causal step is the experiment.",
+      "say": "From correlation alone, I don't. Engaged accounts use more features and stay longer for the same reason. I'd measure adoption early, compare within the same plan and company size, and treat the gap as an upper bound. The real answer is an experiment that nudges a random half of new accounts toward the feature.",
+      "evidence": [
+        "portfolio: built interactive Tableau dashboards on SQL and Excel sources that identified under used"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "causal-inference",
+        "confounding"
+      ]
+    },
+    {
+      "id": "pp-23",
+      "type": "pushback",
+      "level": 2,
+      "q": "Why benchmark against Salesforce? It's an enterprise giant in a different market. And isn't feature counting a race to bloat?",
+      "easy": "Partly fair. Salesforce serves a different buyer, so parity with it is not a goal; it shows what larger customers will expect. Zoho is closer to an SMB suite. Feature counts alone do reward bloat, which is why a benchmark should weight features by what the target customer needs.",
+      "deep": "Why include an enterprise player: upmarket customers compare against it, it defines vocabulary for capability areas, and its gaps for small customers (price, complexity) are opportunities in a SWOT. Why it misleads: different price points, tiers, and buyers; counting features treats a checkbox like a mature capability. Fixes: weight features by ICP importance, compare at matched price tiers, score depth (partial versus full), and pair the matrix with customer evidence (requests, win and loss reasons). The profile names both competitors and the scale (100 to 150 features) and says the analyses fed strategy and prioritization alongside ICP work, which is the weighting step.",
+      "say": "Partly fair. Salesforce isn't the competitor to match; it shows what bigger customers expect and where small customers feel overcharged. Zoho is the closer comparison. And raw feature counts do reward bloat, so the useful version weights each feature by what the ideal customer actually needs, which is why the ICP work mattered.",
+      "evidence": [
+        "portfolio: benchmarking 100 to 150 features against Zoho and Salesforce",
+        "portfolio: Customer Profile analyses that fed product strategy and prioritization."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "competitive-analysis",
+        "benchmarking"
+      ]
+    },
+    {
+      "id": "pp-24",
+      "type": "pushback",
+      "level": 1,
+      "q": "You say conversion 'measurably' lifted. By how much?",
+      "easy": "The profile does not give a number, and Tanay should not invent one. The honest answer gives the figure only if they have it from the release report, and otherwise says the team measured the lift after release and explains how they would quantify it.",
+      "deep": "What to say if the number is unknown: the two features were prioritized from the analysis, the product team reported a measurable lift in trial to paid conversion after the release, and the exact figure is not something you can quote reliably. Then show you know how it should be measured: trial cohorts before and after the release with a fixed conversion window, adjusting for seasonality and marketing changes, or a staged rollout. Interviewers respect a precise 'I don't have that number' more than a confident guess, and a fabricated number is the fastest way to lose credibility in a later reference check.",
+      "say": "I don't have a reliable figure, so I won't quote one. The team measured a lift after the release, and my part was the analysis that put those two features at the top of the list. Measured properly, I'd compare trial cohorts before and after with a fixed conversion window, or stage the rollout.",
+      "evidence": [
+        "portfolio: prioritize two features for the next release that measurably lifted trial to paid conversion."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "honesty",
+        "conversion"
+      ]
+    },
+    {
+      "id": "pp-25",
+      "type": "pushback",
+      "level": 2,
+      "q": "A rating going from 4.2 to 4.6 could be noise or a review campaign. What does it show?",
+      "easy": "On its own, not much. The profile lists the lift without saying which rating, how many ratings, or over what period. Without those, it could reflect who was asked rather than a better product.",
+      "deep": "Checks before claiming it: the source (public review site, app store, in product prompt), counts behind each average, the period, whether a review request campaign ran, and whether the distribution shifted (fewer 1 star reviews matters more than more 5 star ones). Statistical noise is unlikely to explain 0.4 with a few dozen ratings per period, but selection effects can easily explain it. Honest framing: list it as a stat chip only with its source, or leave it out of interviews unless you can answer those questions.",
+      "say": "On its own it doesn't show much, and I'd only quote it with the source and the number of ratings behind it. A 0.4 rise isn't noise with a few dozen ratings, but who gets asked to rate can move it just as easily as the product can.",
+      "evidence": [
+        "portfolio: Rating lift 4.2 to 4.6"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "ratings",
+        "selection-bias"
+      ]
+    },
+    {
+      "id": "pp-26",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do differently, and what would a mature version of this analytics work look like?",
+      "easy": "Write down metric definitions before measuring, measure impact with comparison groups, keep the analysis in reproducible SQL and Python instead of manual pivots, and put churn and adoption in one maintained dashboard with owners.",
+      "deep": "Limitations visible in the profile: outcome numbers without definitions (churn), without figures (conversion), or without sources (rating); team outcomes after a short internship; descriptive analysis that cannot establish which features cause retention. Mature version: (1) a metrics layer with versioned definitions for churn, conversion, activation, and adoption; (2) cohort and survival analysis run on a schedule in SQL; (3) a customer health score validated against later churn (AUC, calibration) before success teams act on it; (4) experiments or staged rollouts for feature nudges, with sample sizes planned for B2B volumes; (5) dashboards with owners, refresh cadence, and definitions on the page; (6) the competitive matrix weighted by ICP and refreshed each quarter. At 10x the customers, manual Excel pivots stop being viable and the same questions move to SQL models and scheduled jobs.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "next-steps",
+        "metrics-layer"
+      ]
+    },
+    {
+      "id": "pp-27",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this internship to a hiring manager for a product analyst role.",
+      "easy": "Lead with the four workstreams, one outcome with its caveat, and what it shows about how Tanay works with product teams.",
+      "deep": "Hiring manager version: competitor benchmark (100 to 150 features against Zoho and Salesforce), SWOT, ICP, analysis of 2,000 client records that shaped a release, Tableau dashboards that surfaced under used features; outcomes stated with attribution caveats.",
+      "say": "At ProProfs I worked on the product side for two months. I benchmarked 100 to 150 features against Zoho and Salesforce, built ideal customer profiles, and analyzed 2,000 client records to find what drove conversion, which shaped two features in the next release. I also built Tableau dashboards that found under used features. I'm careful with the outcomes: the team's actions moved churn and conversion, and my analysis pointed them where to act.",
+      "evidence": [
+        "portfolio: benchmarking 100 to 150 features against Zoho and Salesforce",
+        "portfolio: I analyzed customer data for 2,000 clients with Python and Excel pivot tables",
+        "portfolio: prioritize two features for the next release that measurably lifted trial to paid conversion.",
+        "portfolio: built interactive Tableau dashboards on SQL and Excel sources that identified under used"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "pp-28",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the analytical methods to a senior data scientist.",
+      "easy": "Definitions, units, and the causal caveats: client versus user, churn definition, early window features, and what an experiment would add.",
+      "deep": "Senior version: per client modelling table, conversion and churn by segment, adoption metrics with eligible denominators, Tableau LOD cohorts; caveats: engagement confounding, leakage near the outcome, attribution of churn after a short window; next: experiments, survival models, health score validation.",
+      "say": "The unit was the client account, not the user, which matters because 5,000 users sat inside 2,000 clients. I looked at conversion and pain points by segment in Python and pivots, and built adoption metrics in Tableau. The caveat I'd raise first is engagement confounding: accounts that stay use more features anyway. So the dashboards are descriptive, and the causal step would be an experiment nudging new accounts toward a feature.",
+      "evidence": [
+        "portfolio: SaaS users analyzed 5,000+",
+        "portfolio: Customer records 2,000 clients"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer",
+        "methods"
+      ]
+    },
+    {
+      "id": "pp-29",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain this work to a product manager.",
+      "easy": "Speak in decisions: which competitor gaps matter, who the ideal customer is, which two features went into the release, and which features customers were not finding.",
+      "deep": "PM version: evidence for prioritization (benchmark, ICP, customer analysis), the release decision, the dashboard that found under used features, and how to measure the next change.",
+      "say": "My job was giving the product team evidence for what to build next. The benchmark showed where we were behind Zoho and Salesforce, the ideal customer profile said which of those gaps mattered, and the client analysis showed where trials got stuck. That led to two features in the next release. The dashboards showed which existing features customers weren't finding, which is often a cheaper fix than building something new.",
+      "evidence": [
+        "portfolio: meant SWOT analyses, benchmarking 100 to 150 features against Zoho and Salesforce, and Ideal",
+        "portfolio: prioritize two features for the next release that measurably lifted trial to paid conversion.",
+        "portfolio: built interactive Tableau dashboards on SQL and Excel sources that identified under used"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "pm"
+      ]
+    },
+    {
+      "id": "pp-30",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this internship to a recruiter.",
+      "easy": "Plain words: company type, role, tools, and one outcome.",
+      "deep": "Recruiter version: data and product analyst intern at a SaaS company; Python, Excel, SQL, Tableau; competitor benchmarking, customer analysis, dashboards; analysis fed a release decision.",
+      "say": "I was a data and product analyst intern at ProProfs, a software company in Noida, in summer 2023. I used Python, Excel, SQL, and Tableau to compare our features with competitors like Zoho and Salesforce, study 2,000 client accounts, and build dashboards. My analysis helped the product team choose two features for their next release.",
+      "evidence": [
+        "portfolio: Data and Product Analyst Intern",
+        "portfolio: ProProfs , Noida, India",
+        "portfolio: prioritize two features for the next release that measurably lifted trial to paid conversion."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": []
+}
