@@ -1,0 +1,1054 @@
+{
+  "deck_id": "p-tool-dependency-graph",
+  "title": "Tool Dependency Graph",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/tool-dependency-graph",
+  "summary_easy": "AI agents often fail because a tool needs an ID that only another tool can provide, like the thread ID needed to reply to an email. Tanay built a system that reads the schemas of 1,391 tools and maps which tools must run first and which inputs must come from the user. About two thirds of required inputs turn out to be handles another tool can supply, and almost all of those have a producer.",
+  "summary_deep": "A TypeScript and Bun static analyser over a production catalog of 1,391 tools (896 GitHub, the rest a Google suite). JSON Schemas are flattened into leaf slots with paths and compounding requiredness; Google tools get a service by weighted regex markers with a confidence floor. Input slots resolve to one of 46 namespaced, service scoped entities or fall into user supplied, control, enum, or reported unresolved buckets; outputs resolve in three tiers (leaf, nearest meaningful ancestor, owning slug) so threads[].id becomes gmail.thread_id. Producers are primary when the head noun of the slug's object phrase names the entity, incidental ones are suppressed, and a hand weighted score ranks the rest within the toolkit. The graph is bipartite (tools and entities both nodes, 3,278 edges) with one hop plans per tool. Of 2,728 required inputs, 1,770 resolve to an entity and 1,768 of those have a producer; the slug fallback fired zero times. Validation is eight hand written assertions; no labelled precision or recall and no transitive planner exist yet.",
+  "sheet": {
+    "easy": "## What it is\nA map, built only from tool schemas, of which agent tools must run before which, and which inputs must come from the user.\n\n## Why\nA reply tool needs a thread ID. Nobody knows it by heart; an earlier call has to return it. Without the map, agents invent IDs or ask users for things users cannot know.\n\n## Headline numbers\n| | |\n|---|---|\n| Tools | 1,391 (GitHub and a Google suite) |\n| Typed entities | 46 |\n| Edges | 3,278 |\n| Required inputs | 2,728 |\n| Resolved to an entity | 1,770 (65%) |\n| Of those, with a producer | 1,768 (99.9%) |\n| Handle shaped, not yet covered | 568 |\n| Slug guessing fallback used | 0 times |\n\nRead 99.9% carefully: it covers only the inputs that resolved to an entity.\n\n## Three ideas\n1. **Namespaced entities.** `id` on a mail tool can only mean a mail thing, so mail never gets wired to GitHub.\n2. **Read the path.** `threads[].id` is a thread ID; the meaning is in the parent.\n3. **Head noun.** CREATE_A_REPOSITORY_VARIABLE makes a variable, not a repo.\n\n## Why bipartite\nTools and entities are both nodes. One entity, the repo owner, would otherwise create tens of thousands of tool to tool arrows.\n\n## Checks\nEight hand written assertions; all started failing; four caught real bugs. A spot check, not an evaluation.\n\n## Not built yet\nMulti step plans (topological order), a labelled precision and recall set, automatic registry growth.\n",
+    "deep": "## Pipeline\n1. `normalizeTool` (src/extract.ts): probe field spellings, flatten input and output schemas into slots.\n2. `inferService` (src/entities.ts): GitHub by toolkit; Google suite by weighted markers, floor 3, else `google_other`.\n3. `classifySlot`: entity, enum, control, user supplied, handle shaped unresolved, default user supplied.\n4. `resolveEntityFromContext` for outputs: leaf, nearest non envelope ancestor, owning slug.\n5. Produces with depth and `primary`; slug fallback only when outputs are empty (fired 0 times).\n6. Bipartite edges: tool to entity (produces), entity to tool (requires, with `required` flag).\n7. Plans: candidates minus self, primary filter, local toolkit filter, `producerScore`, sort, cap 12; `askUser`.\n8. `viz.ts`: slim and inline into graph.html (Cytoscape, cose layout, 260 node cap per service).\n\n## Flattening rules\n- Paths: `a.b`, arrays of objects add `[]` and set `repeated`; arrays of scalars are slots.\n- `required(child) = required(parent) AND key in parent.required` (compounding).\n- `$ref` local only (`#/...`), `activeRefs` guard per branch; combinators collapse to first structural branch.\n- `MAX_DEPTH = 7`. Envelope keys stripped for `coreFieldPath`: data, response_data, result, items, records.\n\n## Service score\n$$\\text{score}(s)=\\sum_{m\\in M_s} w_m\\,(3[\\text{params}]+3[\\text{defs}]+2[\\text{slug}]+1[\\text{desc}])$$\nAssign argmax if score at least 3. Breakdown: github 896, google_other 112, googledrive 96, googlesheets 62, gmail 54, googledocs 39, googlecalendar 36, googleads 28, googleanalytics 26, googletasks 18, googlephotos 11, googlemaps 9, googlecontacts 4.\n\n## Slot buckets\n| bucket | rule |\n|---|---|\n| tool_derived | alias hit for an in scope entity (service scoped beats `*`) |\n| enum_or_constant | schema has `enum` |\n| control | page, per_page, cursor, limit, sort, format, fields, filter, state, user_id, auth tokens, ... |\n| user_supplied | subject, body, text, title, query, name, dates, url, ... or default |\n| unresolved | `(^|_)(id|ids|number|sha|token|slug|key|uri|resource_name)$` with no entity |\n\n## Three tier output resolution\n1. leaf alias; 2. if leaf in {id, ids, number, key, slug, value}: walk ancestors, skip envelope segments, first entity whose object nouns match (singular or plural); 3. first entity implied by the owner slug.\n\n## Primary producer (head noun)\nObject phrase = tokens after first verb in {LIST, SEARCH, GET, FETCH, FIND, CREATE} up to first preposition, minus articles. Primary iff last token (or joined phrase, or last two joined) is an object noun of the entity.\n\n## Producer score\n$$50[\\text{schema}]+70[\\text{same service}]+30[\\text{same toolkit}]+100[\\text{primary}]+30[\\text{read}]+40[\\text{head hit}]-12\\max(0,d-1)-\\min(24,2\\,n_{tok})+8[\\_LIST\\_]+6[\\_SEARCH\\_]$$\nSort descending, tie by slug, keep 12.\n\n## Edge counts\nDirect: $\\sum_e p_e c_e$ (repo_owner alone: $146\\times637$, about 93,000). Bipartite: $\\sum_e (p_e+c_e)=3{,}278$.\n\n## Results (data/graph.json stats, README)\n| metric | value |\n|---|---|\n| tools | 1,391 |\n| entities | 46 |\n| edges | 3,278 |\n| input slots | 7,101 (2,728 required) |\n| required resolved to entity | 1,770 of 2,728 (65%) |\n| with at least one producer | 1,768 of 1,770 (99.9%) |\n| tools with real output schema | 1,238 of 1,391 (89%) |\n| slug inference used | 0 |\n| unresolved handle slots | 568 |\n\nUncovered required entity slots: GET_ATTACHMENT attachment_id (gmail.attachment_id), ADD_SUB_ISSUE issue_id (github.issue_id).\n\n## check.py (8 assertions)\nReply needs thread id; LIST_THREADS supplies it; send mail resolves email; a contacts tool supplies it; no GitHub tool in a Gmail plan; optional attachment fields not required; issue comment needs issue number; an issue LIST, GET or SEARCH tool supplies it. Bugs found: bare id under threads[], cross service leak, requiredness not compounding, head noun.\n\n## Planning (not built)\nAND/OR graph: tool needs all required entities; entity needs any producer or the user. Forward chaining fixpoint with unmet counters, $O(V+E)$, cycle safe. Kahn's algorithm for plain DAGs: in degree queue, $O(V+E)$, leftover nodes mean a cycle.\n\n## Evaluation (not built)\nStratified hand labelled consumers; precision@1, @3; recall of producers; slot recall; per service; two labellers; end to end agent success with and without hints.\n\n## Known errors to fix\nrepo_name precursors are incidental (listings call it `name`); tier 2 first match maps issues[].id to issue_number; 153 tools with no informative output schema; first branch combinator collapse; depth 7.\n\n## Glossary\nJSON Schema, `$ref`, `$defs`, anyOf, oneOf, allOf, slot, entity, alias, object noun, opaque handle, semi opaque, service scoping, envelope, primary and incidental producer, head final compound, bipartite graph, hub, degree, two hop path, precursor, askUser, topological sort, Kahn's algorithm, AND/OR graph, forward chaining, Cytoscape, cose layout.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "Agents fail tool calls when they need an argument they can't produce, like a thread ID that only exists because an earlier call returned it. I built a static analyser that reads 1,391 tool schemas and works out which tools must run first and which arguments have to come from the user. It resolves handles to namespaced entities, so a bare id never wires a mail tool to GitHub. Of the required inputs that resolve to an entity, all but two have a producer. Eight hand written checks pass.",
+      "keypoints": [
+        "Names the failure: an unproducible handle",
+        "Built from schemas alone, 1,391 tools",
+        "Namespaced entities stop collisions",
+        "Coverage stated with its denominator",
+        "Mentions the checks"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "The problem is boring and common. A reply tool needs a thread ID, and nobody has one memorised. It only exists because some earlier call returned it. An agent that doesn't know that either invents an ID or asks the user for something the user can't know.\n\nSo I built a map from nothing but JSON Schemas. The catalog has 1,391 tools across GitHub and a Google suite. I flatten every input and output schema into leaf fields with paths, and I make requiredness compound down the tree, so a field inside an optional attachment isn't required.\n\nThe obvious version matches input names to output names. It fails three ways. Generic names like id collide everywhere, so I resolve handles to namespaced entities scoped to the owning service. A bare id means nothing, so for a field like threads[].id I read the parent segment, then the tool's own object. And almost every response embeds other objects, so I mark a producer primary only when the head noun of its slug names the entity. CREATE_A_REPOSITORY_VARIABLE makes a variable, not a repo.\n\nTools and entities are both nodes, so the graph stays readable. The repo owner entity alone would otherwise generate tens of thousands of edges.\n\nResults: 65% of required inputs are typed handles, and of those, 1,768 out of 1,770 have a producer. A slug guessing fallback fired zero times, so every edge cites a declared output field. Eight hand written assertions pass, and four of them caught real bugs.\n\nWhat's missing: a labelled set for precision and recall, and a planner that chains the one hop answers into a full call order. Those are next.",
+      "keypoints": [
+        "Thread ID example and the agent failure",
+        "Schema flattening with compounding requiredness",
+        "Three failures of name matching, three fixes",
+        "Bipartite design and why",
+        "65% typed, 1,768 of 1,770 satisfiable, zero fallback",
+        "Assertions found four bugs",
+        "Honest next steps: eval set and planner"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as if I were a staff engineer.",
+      "script": "The input is a catalog of 1,391 tools, each with an input and output JSON Schema. 896 are GitHub. The rest are a Google suite that flattens Gmail, Drive, Calendar, Sheets and others under one prefix.\n\nStep one is flattening. A recursive walker resolves local refs with a guard against recursive schemas, collapses anyOf and oneOf onto the first branch with structure, and emits leaves with dotted paths, array markers, and a repeated flag. Requiredness compounds: a field is required only if every ancestor is. That was a real bug, because fields inside an optional attachment were showing up as required user input.\n\nStep two is service inference for the Google suite. Slugs alone can't tell Gmail labels from Drive labels from Ads labels. So each service has weighted regex markers, matched against parameter names and output type names at triple weight, the slug at double, and the description once. Below a floor of 3 the tool is parked in google_other instead of guessed.\n\nStep three is the entity registry: 46 namespaced entities with aliases, object nouns, scope, and an opaque flag. Input slots resolve to an entity inside the owning service, then fall into enum, control, user supplied, or an unresolved bucket for handle shaped names nothing covers. That bucket is reported, and it's where several entities came from.\n\nStep four is output resolution, in three tiers. First the leaf name. If the leaf is generic, like id, walk up to the nearest non envelope ancestor, so threads[].id becomes a Gmail thread. Failing that, use the tool's own object from its slug.\n\nStep five is deciding which producers matter. A workflow run response embeds a whole repository, so literally it produces a repo name. I parse the slug: first verb, then the object phrase up to the first preposition, articles dropped. English compounds are head final, so the last noun is the object. A tool is a primary producer only if that head noun names the entity. In plans, incidental producers are dropped whenever a primary exists. Then I keep producers in the same toolkit if any exist, score them, and keep twelve. The score adds points for schema evidence, locality, purpose, read verbs, and the head match, and subtracts for depth and long slugs.\n\nThe graph is bipartite. Repo owner has 146 producers and 637 consumers, so a direct encoding would put roughly 93,000 edges on that one entity. With entities as nodes the total is 3,278.\n\nResults with denominators. 7,101 input slots, 2,728 required. 65% of the required ones resolve to an entity, and 1,768 of those 1,770 have a producer. The two misses are a Gmail attachment ID and a GitHub issue's global ID. The slug fallback fired zero times.\n\nNow the weak spots, before you find them. There's no labelled set, so no precision or recall. Eight assertions are a spot check. Looking at the plans, the repo name precursors for commenting on an issue are incidental tools, because repository listings call the field name, which no alias catches. And I think tier two's first match rule maps an issue's global id to issue number, which would explain why issue_id has no producer. Finally, it only answers one hop. A real planner is an AND/OR problem: a tool needs all its inputs, an input needs any producer. Forward chaining to a fixpoint handles that in linear time and is cycle safe. That's the next thing I'd build, along with a labelled sample.",
+      "keypoints": [
+        "Catalog shape and the Google suite problem",
+        "Flattening details and the requiredness bug",
+        "Weighted service inference with a floor",
+        "Registry, slot buckets, unresolved as backlog",
+        "Three tier output resolution",
+        "Head noun primary producers, locality, score",
+        "Bipartite arithmetic: 146 x 637 against 3,278",
+        "Volunteers gaps: no eval, repo_name noise, issue_id, one hop only"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone without a technical background.",
+      "script": "AI assistants can use hundreds of tools, like reading email or updating a code project. Many tools need a piece of information that only another tool can give them. To reply to an email thread, you first need the thread's ID, which only a 'list my threads' tool returns. If the assistant doesn't know that, it either makes something up or asks you for something you couldn't possibly know. I built a system that reads the technical descriptions of 1,391 tools and produces a map: what has to happen before each tool, and what the assistant should actually ask you for. About two thirds of the required inputs turn out to be things another tool can supply. I also wrote down the cases I cared about in advance and checked the map against them, which caught four real mistakes.",
+      "keypoints": [
+        "Tools need information from other tools",
+        "Thread ID example in plain words",
+        "A map of what comes first and what to ask",
+        "Two thirds of required inputs can come from tools",
+        "Checks written in advance caught mistakes"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the system on the whiteboard.",
+      "script": "First I draw the failing case on the left: a box for REPLY_TO_THREAD with an input labelled thread_id, and a question mark. I say the agent has no way to invent this value.\n\nSecond, I draw the bipartite structure. A circle for the entity gmail.thread_id in the middle. An arrow into it from LIST_THREADS, labelled produces, and an arrow out of it to REPLY_TO_THREAD, labelled requires. Then I add a second circle, person.email_address, with GET_CONTACTS producing it and SEND_EMAIL requiring it, and I note that the user can also supply it directly. While drawing, I say edges are producers plus consumers, not producers times consumers, and I write 146 times 637 next to a repo owner circle to show why.\n\nThird, I draw the resolution pipeline as three stacked boxes beside a sample output path, data.threads[].id. Tier one, the leaf name, fails because it's just id. Tier two, the parent segment, says threads. Tier three, the tool's own object, is the fallback. Next to it I write the head noun table: REPOSITORY_VARIABLE gives variable, ORGANIZATION_REPOSITORY gives repository.\n\nFourth, I draw the slot buckets as five bins: tool derived, user supplied, control, enum, unresolved. I write 2,728 required above them and 1,770 over the tool derived bin.\n\nLast, in the corner, I sketch what's not built. An AND node for a tool needing all inputs, an OR node for an entity with several producers, and the words forward chaining to a fixpoint. I close by saying the eval set and that planner are the next two things.",
+      "keypoints": [
+        "Starts from the failing call",
+        "Bipartite tool, entity, tool with produces and requires",
+        "Semi opaque email example",
+        "Edge arithmetic with repo_owner",
+        "Three tier resolution and head noun table",
+        "Slot bins with the 2,728 and 1,770 figures",
+        "AND/OR planner sketch as next step"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How exactly do you resolve a bare id in an output?",
+      "script": "In three tiers, widest context last. First I try the leaf name against the registry, scoped to the tool's service. If the leaf is generic, like id or number, I walk up the path, skip envelope segments like data and items, and take the first meaningful ancestor. So threads[].id becomes a Gmail thread ID. If every ancestor is envelope, I use the tool's own object from its slug, so LIST_REPOSITORY_ISSUES with items[].number yields an issue. If none of that works, I return nothing rather than guess. One weakness: tier two takes the first registry match, which can pick issue number where issue global id was meant.",
+      "keypoints": [
+        "Leaf, then ancestor, then slug object",
+        "Envelope segments skipped",
+        "threads[].id example",
+        "Returns nothing instead of guessing",
+        "Admits the first match weakness"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How do you choose which producer to suggest?",
+      "script": "Two filters, then a score. If any producer is primary, meaning the head noun of its slug names the entity, I drop the incidental ones. If any producer is in the same toolkit, I drop the rest. Then I score what's left: points for coming from a real schema, same service, same toolkit, being primary, being a read tool, and the head noun match. I subtract for how deep the field sits in the response and for long, narrow slugs. Ties break alphabetically, and I keep twelve. The weights are hand set, so I'd fit them on labelled data once I have it.",
+      "keypoints": [
+        "Primary filter first",
+        "Local toolkit filter second",
+        "Score components named",
+        "Depth and slug length penalties",
+        "Weights are hand set, would fit with labels"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you turn this into a full call order? Is it a topological sort?",
+      "script": "Not quite. A topological sort assumes every predecessor must run. Here a tool needs all of its required inputs, but each input can come from any one of several producers, or from the user. That's an AND/OR graph. I'd start from what the user already knows, keep a counter of unmet inputs per tool, and fire a tool when its counter hits zero, marking its outputs available. That runs to a fixpoint in linear time and can't loop, because each node flips once. Then I'd walk back from the goal, picking the best scored producer for each missing input.",
+      "keypoints": [
+        "Plain topological sort is the wrong model",
+        "AND for inputs, OR for producers",
+        "Forward chaining with counters",
+        "Linear time and cycle safe",
+        "Backward extraction of a concrete plan"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you measure precision and recall?",
+      "script": "I'd build a labelled sample, because right now there isn't one. I'd pick about a hundred consuming tools, stratified by service and by how busy their entities are. For each required handle, a person writes down the acceptable producers. Precision at one and at three tells me whether the first suggestions are usable, since an agent tries the first one. Recall tells me whether the true producers appear at all. I'd report it per service, have a second labeller do a subset for agreement, and turn every error into an assertion in the check script.",
+      "keypoints": [
+        "Admits no labelled set exists",
+        "Stratified sample of about 100 tools",
+        "Precision at 1 and 3, recall",
+        "Per service reporting and agreement",
+        "Errors become assertions"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Where did the schemas come from, and what's in them?",
+      "script": "From a production catalog of agent tools in two toolkits. 896 are GitHub tools, and the rest are a Google suite that bundles Gmail, Drive, Calendar, Sheets and more under one prefix. Each record has a slug, a description, a toolkit, and two JSON Schemas, one for inputs and one for outputs, with references into shared definitions. The loader accepts several spellings of each field, so other catalogs work unchanged. I don't redistribute the raw catalog. The repo ships the derived graph and an eight tool fixture that exercises every resolution path.",
+      "keypoints": [
+        "Two toolkits, GitHub and a Google suite",
+        "Input and output JSON Schemas per tool",
+        "Loader tolerates spelling differences",
+        "Raw catalog not redistributed; fixture included"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "99.9% coverage sounds like a vanity number.",
+      "script": "It's easy to misread, so I put the denominator next to it. It's coverage of the 1,770 required inputs that resolved to an entity, out of 2,728 required in total. The honest figure is that 65% of required inputs are typed handles, and almost all of those have a producer. It also doesn't say the top suggestion is correct. I can show you a precursor list for repo name that's mostly incidental tools. Precision needs a labelled sample, which is my next step. What I can stand behind is that every edge cites a declared output field.",
+      "keypoints": [
+        "Concedes the denominator issue",
+        "Gives the 65% framing",
+        "Admits coverage is not correctness",
+        "Offers a concrete bad example",
+        "Defends provenance of every edge"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Models can figure out tool order themselves. Why build a static graph?",
+      "script": "On a small toolset, a strong model usually gets it right, and I won't argue otherwise. At 1,391 tools the output schemas don't fit in context, and output schemas are what tell you who produces a handle. A guessed ID fails late and confusingly, often after the agent has already acted. The graph is deterministic, costs nothing at runtime, and every edge is auditable. It's meant to work alongside the model. The graph proposes a short list of precursors and what to ask the user, and the model decides with the runtime context the graph doesn't have.",
+      "keypoints": [
+        "Concedes small toolsets",
+        "Output schemas do not fit in context at scale",
+        "Fabricated IDs fail late",
+        "Deterministic and auditable",
+        "Graph proposes, model decides"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Eight assertions isn't an evaluation.",
+      "script": "Agreed, and the script calls itself a spot check, not an eval set. It exists so the README's claims are reproducible. What it did well was find bugs. Every assertion started out failing, and four of them exposed real problems I hadn't seen reading the code: the bare id under threads, a cross service leak, requiredness not compounding, and the head noun error. The next step is a stratified labelled sample with precision at k and recall, plus one regression assertion for every error that sample turns up.",
+      "keypoints": [
+        "Concedes it is not an eval",
+        "Purpose: reproducible claims",
+        "Found four real bugs",
+        "Plan for a labelled sample"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "tdg-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is this project, in two sentences?",
+      "easy": "Tanay built a tool that reads the JSON Schemas of 1,391 agent tools and works out which tools must run before which, and which arguments have to be asked of the user instead. It maps every handle to one of 46 typed entities and produces a graph with 3,278 edges, checked by eight hand written assertions that all pass.",
+      "deep": "Static analysis over a production tool catalog (two toolkits: GitHub and a Google suite) written in TypeScript on Bun. Every input and output schema is flattened into slots; each slot is resolved to a namespaced entity (gmail.thread_id, github.issue_number) scoped to the service that owns the tool, or classified as user supplied, control, enum, or unresolved. Producers are ranked, with incidental producers suppressed when a primary one exists, and the result is a bipartite graph in which tools and entities are both nodes, plus a per tool plan of precursors and things to ask the user. Of 2,728 required inputs, 1,770 resolve to an entity and 1,768 of those have at least one producer; every edge traces to a declared output field because the slug inference fallback never fired. Validation is eight hand written assertions in check.py, which Tanay describes as a spot check, not an eval set.",
+      "say": "Agents fail tool calls when they need a handle they can't produce, like a thread ID. I built a static analyser that reads 1,391 tool schemas and says which tools must run first and what to ask the user. Every handle maps to one of 46 namespaced entities. Of the required inputs that map to an entity, all but two have a producer.",
+      "evidence": [
+        "portfolio: BADGE: 1,391 tools / 46 typed entities / 3,278 edges / 8 of 8 assertions passing",
+        "portfolio: Of 2,728 required inputs across the catalog, 1,770 resolve to a typed entity, and 1,768 of those have at least one tool that can supply them."
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "agents",
+        "static-analysis"
+      ]
+    },
+    {
+      "id": "tdg-02",
+      "type": "why",
+      "level": 1,
+      "q": "Why does this matter for agents?",
+      "easy": "Agents often fail a tool call because it needs an argument they cannot produce. A reply tool needs a thread ID, which nobody knows by heart; it only exists because an earlier call returned it. Without a map of that ordering, the agent either makes up the ID or asks the user for something the user cannot know either.",
+      "deep": "The failure mode is an unsatisfiable argument, not a reasoning error. Opaque handles (thread ids, issue numbers, commit shas, spreadsheet ids) must come from a prior call; semi opaque values such as an email address may come from the user or from a lookup; freeform content (subject, body) must come from the user. A model given only tool descriptions has to infer that structure every time, and tends to hallucinate plausible looking ids. A precomputed dependency map turns that into a lookup: for REPLY_TO_THREAD, the precursor for gmail.thread_id is LIST_THREADS (or a message listing), and the only thing to ask the user for is the body. It also feeds tool retrieval and planning: if a tool is selected, its precursors can be pulled into context too.",
+      "evidence": [
+        "portfolio: A reply tool wants a thread_id, and nobody has one memorised: it is an opaque handle that only exists because some earlier call returned it."
+      ],
+      "sources": [],
+      "tags": [
+        "motivation",
+        "agents",
+        "tool-calling"
+      ]
+    },
+    {
+      "id": "tdg-03",
+      "type": "concept",
+      "level": 1,
+      "q": "Where did the 1,391 tool schemas come from, and what does one look like?",
+      "easy": "They come from a production catalog of agent tools in two large toolkits: GitHub, and a Google suite that bundles Gmail, Calendar, Drive, Docs, Sheets and more under one prefix. Each tool is a record with a name, description, toolkit, and two JSON Schemas, one for inputs and one for outputs.",
+      "deep": "graph.ts documents two sources: an SDK cache when present, otherwise per slug files from a keyless docs endpoint; both are JSON Schema and differ only in casing and in whether name and description came along. The committed graph has 896 GitHub tools and 495 in the Google suite (GOOGLESUPER_ prefix). A tool record: slug (LIST_THREADS), name, description, toolkit {slug}, inputParameters {type: object, properties, required}, outputParameters with $defs and properties. normalizeTool probes several spellings for each field (input_parameters, inputParameters, parameters, input_schema; output_parameters, response, output_schema, and so on), so other catalogs work unchanged. The raw catalog is not redistributed; only the derived data/graph.json and an 8 tool fixture (data/sample/catalog.json, chosen to exercise every resolution path) are committed. 1,238 of the 1,391 tools carry a real output schema.",
+      "evidence": [
+        "repo:tool-dependency-graph/README.md: Measured on a production catalog of 1,391 tools across two large toolkits.",
+        "repo:tool-dependency-graph/data/graph.json: \"github\": 896,",
+        "repo:tool-dependency-graph/README.md: | Tools with a real output schema | 1,238 of 1,391 (89%) |",
+        "repo:tool-dependency-graph/src/graph.ts: * per slug files from the keyless docs endpoint are used. Both are JSON Schema,"
+      ],
+      "sources": [],
+      "tags": [
+        "data",
+        "catalog",
+        "json-schema"
+      ]
+    },
+    {
+      "id": "tdg-04",
+      "type": "define",
+      "level": 2,
+      "q": "Define the JSON Schema features this parser has to handle.",
+      "easy": "JSON Schema describes the shape of a JSON document: which fields an object has, which are required, what type each is, and what an array contains. Larger schemas reuse definitions by reference and combine alternatives.",
+      "deep": "type (string, or a list such as [\"string\", \"null\"]; typeOf drops null and joins the rest); properties (map of field name to subschema); required (list of field names required at that level only, which is why requiredness must compound down the tree); items (subschema for array elements; an array of objects becomes a path segment with [], an array of scalars is itself the slot); enum (fixed vocabulary, classified enum_or_constant); default (recorded as hasDefault); $ref with $defs or definitions (local references like #/$defs/Thread, resolved against the document root); anyOf, oneOf, allOf (combinators; the parser collapses them onto the first branch that carries structure); description and title (kept as slot description). Things the parser does not model: external $ref URLs, patternProperties, additionalProperties, if/then/else, and the full semantics of allOf merging.",
+      "evidence": [],
+      "sources": [
+        "https://json-schema.org/understanding-json-schema/structuring"
+      ],
+      "tags": [
+        "json-schema",
+        "definitions"
+      ]
+    },
+    {
+      "id": "tdg-05",
+      "type": "how",
+      "level": 1,
+      "q": "How does the schema flattener work?",
+      "easy": "It walks each schema recursively and emits one record per leaf field, with a dotted path, a type, whether it is required, and whether it sits inside an array. Containers are not slots; only their leaves are.",
+      "deep": "extract.flattenSchema(root) calls visit(node, path, name, required, repeated, depth). If depth exceeds MAX_DEPTH = 7 it stops. A $ref is resolved against the root (local #/ refs only) and added to activeRefs for the current branch, so a recursive schema visits each ref at most once per branch. anyOf, oneOf or allOf collapse onto the first branch with properties, items or a $ref. An object recurses into each property with path parent.key and required = parent_required AND key in required. An array of objects recurses with path + '[]' and repeated = true; an array of scalars is itself a slot. Leaves produce a Slot {path, name, type, required, description, enumValues, hasDefault, repeated}. coreFieldPath strips envelope keys (data, response_data, result, items, records) and [] markers so data.items[].id compares like id. normalizeTool decides hasOutputSchema by ignoring status leaves such as successful, error and log_id; an envelope with nothing else is not a real output shape. Cost is linear in schema nodes, bounded by depth 7.",
+      "evidence": [
+        "repo:tool-dependency-graph/src/extract.ts: const MAX_DEPTH = 7;"
+      ],
+      "sources": [],
+      "tags": [
+        "json-schema",
+        "parsing",
+        "recursion"
+      ]
+    },
+    {
+      "id": "tdg-06",
+      "type": "why",
+      "level": 2,
+      "q": "What was the requiredness bug?",
+      "easy": "Fields inside an optional attachment object were reported as required input, so the reply tool appeared to demand an attachment file key from the user. The fix was to treat a field as required only if every level above it is also required.",
+      "deep": "JSON Schema's required list is local to its object: attachment.s3key may be required within attachment while attachment itself is optional, in which case the caller owes nothing. The first version took requiredness from the leaf's own parent only. The fix in visit() passes required && requiredKeys.has(key) down the recursion, so requiredness compounds along the path. The check.py assertion 'fields inside the optional attachment are not required input' verifies that no askUser entry for GOOGLESUPER_REPLY_TO_THREAD starts with s3key or mimetype; in the committed graph attachment.s3key and attachment.mimetype are both required: false. It is one of the four bugs found only because an assertion was written for a case decided in advance.",
+      "evidence": [
+        "portfolio: requiredness not compounding through an optional parent, so fields inside an optional attachment object were reported as required user input",
+        "repo:tool-dependency-graph/src/extract.ts: // Requiredness has to compound down the tree. attachment.s3key is"
+      ],
+      "sources": [],
+      "tags": [
+        "bugs",
+        "json-schema",
+        "requiredness"
+      ]
+    },
+    {
+      "id": "tdg-07",
+      "type": "how",
+      "level": 2,
+      "q": "What are the failure modes of the flattener, and how would you harden it?",
+      "easy": "It takes shortcuts: it follows only the first meaningful branch of an either/or schema, it stops at seven levels deep, and it only follows references inside the same document. Each shortcut can hide a field a tool really returns.",
+      "deep": "(1) Combinator collapse: anyOf and oneOf are unions, so taking the first structural branch drops fields that exist only in other branches; allOf should merge all branches, not pick one. Fix: visit every branch and union the slots, marking branch provenance. (2) MAX_DEPTH = 7 can truncate deep payloads (for example nested message parts), producing false negatives for handles that sit deep. (3) Only local refs (#/...) are resolved; a remote $ref leaves the node unresolved. (4) The activeRefs guard visits each recursive ref once per branch, which is correct for termination but means a self similar structure contributes one level only. (5) Arrays of tuples use items[0] only. (6) additionalProperties and patternProperties are ignored, so map shaped outputs keyed by id are invisible. Hardening: union over branches, configurable depth with a warning counter, a resolver for remote refs, and a test fixture per construct.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "parsing",
+        "limitations",
+        "json-schema"
+      ]
+    },
+    {
+      "id": "tdg-08",
+      "type": "why",
+      "level": 1,
+      "q": "Why doesn't simple name matching between inputs and outputs work?",
+      "easy": "Matching input names to output names and drawing an edge takes twenty lines and fails at catalog scale for three reasons: common names like id, name and query collide across unrelated tools; a bare id means nothing without its parent field; and almost every response embeds other objects, so nearly every tool looks like it produces everything.",
+      "deep": "(1) Collisions: id, name, query, type, path and state appear on hundreds of unrelated tools, so name matching wires a mail client to a source control API. Fix: resolve every handle to a namespaced entity, scoped to the owning service. (2) Bare ids: the most common real shape is data.threads[].id; the leaf is id and the meaning is in the parent segment, so discarding the path hides the thread listing, the most important producer in the catalog. Fix: three tier resolution (leaf, nearest meaningful ancestor, the tool's own object). (3) Embedded objects: a workflow run response contains a full repository, so CANCEL_WORKFLOW_RUN literally 'produces' a repository name. Fix: split producers into primary and incidental by the head noun of the tool's object phrase and suppress incidental ones when a primary exists.",
+      "evidence": [
+        "portfolio: The twenty line version matches input parameter names against output field names and draws an edge. It does not work, for three reasons that only appear at catalog scale."
+      ],
+      "sources": [],
+      "tags": [
+        "design",
+        "name-matching",
+        "why"
+      ]
+    },
+    {
+      "id": "tdg-09",
+      "type": "concept",
+      "level": 1,
+      "q": "What is the entity registry?",
+      "easy": "A hand written list of 46 kinds of handle, such as a Gmail thread ID, a GitHub issue number, or a spreadsheet ID. Each entry says which service it belongs to, which field names refer to it, which nouns in a tool's name suggest the tool returns it, and whether a user could plausibly know it.",
+      "deep": "entities.ts defines Entity {id, label, services, aliases, objectNouns, opaque, notes}. id is namespaced (gmail.thread_id, github.repo_owner, googlesheets.spreadsheet_id, person.email_address). services scopes resolution; ['*'] marks a cross service entity (only person.email_address). aliases are lowercased leaf names (thread_id, threadid, thread). objectNouns are slug tokens implying production (THREAD, THREADS, MESSAGE). opaque says whether a user cannot reasonably invent the value (thread ids yes; repo_owner, repo_name, branch_ref, user_login and email no). The registry covers Gmail (5), Calendar (2), Drive (2), Docs, Sheets (2), Tasks (2), Contacts, the cross service email, and the GitHub handles (repo owner and name, issue and PR numbers, comment, review, commit sha, branch, user, gist, release, workflow and run, team, path, numeric repository id, issue global id, project, item, field, runner, invitation, migration, deployment, installation, milestone, discussion, alert, asset, check suite). resolveEntity returns a service scoped match first, else a cross service match, else null; nothing ambiguous is guessed.",
+      "evidence": [
+        "repo:tool-dependency-graph/README.md: | Canonical entities | 46 |"
+      ],
+      "sources": [],
+      "tags": [
+        "entity-registry",
+        "design"
+      ]
+    },
+    {
+      "id": "tdg-10",
+      "type": "how",
+      "level": 2,
+      "q": "The Google toolkit puts Gmail, Drive, Calendar and others under one prefix. How do you know which service a tool belongs to?",
+      "easy": "Each tool is scored against every Google service using telltale words in its parameter names, output type names, name, and description, with parameter and type names counting most. If no service scores high enough, the tool is parked in a catch all bucket rather than guessed.",
+      "deep": "inferService: GitHub tools are trivially github. For the Google suite, SERVICE_MARKERS gives each service weighted regexes (gmail: thread_?id 3, label_?ids 3, draft_?id 3, bcc 2, email 1; googlecalendar: calendar_?id 3, time_?(min|max) 3; googlesheets: spreadsheet_?id 3, a1_?notation 3; and so on). Score = sum over markers of weight x (3 if it matches the parameter names + 3 if it matches $defs type names + 2 if it matches the slug + 1 if it matches the description). The best service wins if its score reaches SERVICE_CONFIDENCE_FLOOR = 3; otherwise the tool goes to google_other. The motivating example: LIST_LABELS is Gmail, LIST_FILE_LABELS is Drive and MUTATE_LABELS is Ads, and slug parsing alone would collapse them. Committed breakdown: github 896, google_other 112, googledrive 96, googlesheets 62, gmail 54, googledocs 39, googlecalendar 36, googleads 28, googleanalytics 26, googletasks 18, googlephotos 11, googlemaps 9, googlecontacts 4. Parking 112 tools trades coverage for keeping wrong edges out.",
+      "evidence": [
+        "repo:tool-dependency-graph/src/entities.ts: const SERVICE_CONFIDENCE_FLOOR = 3;",
+        "repo:tool-dependency-graph/data/graph.json: \"github\": 896,",
+        "repo:tool-dependency-graph/data/graph.json: \"google_other\": 112,",
+        "repo:tool-dependency-graph/data/graph.json: \"googledrive\": 96,",
+        "repo:tool-dependency-graph/data/graph.json: \"gmail\": 54,"
+      ],
+      "sources": [],
+      "tags": [
+        "service-inference",
+        "scoring",
+        "heuristics"
+      ]
+    },
+    {
+      "id": "tdg-11",
+      "type": "how",
+      "level": 1,
+      "q": "How is each input slot classified?",
+      "easy": "Every input lands in one of five buckets: can be supplied by another tool, written by the user, a paging or formatting knob, a fixed list of options, or looks like a handle but no entity covers it yet. The last bucket is reported, not hidden.",
+      "deep": "classifySlot(service, leafName, hasEnum) checks in order: (1) resolveEntity hits, giving tool_derived with reason 'opaque handle' or 'user may also supply it directly'; (2) an enum, giving enum_or_constant; (3) CONTROL_PARAMS (page, per_page, page_token, cursor, limit, offset, sort, format, fields, filter, state, user_id, access_token, client_mutation_id, and others), giving control; (4) USER_SUPPLIED (subject, body, text, title, description, query, name, filename, commit_message, dates, url, and others), giving user_supplied; (5) a handle shaped regex, (^|_)(id|ids|number|sha|token|slug|key|uri|resource_name)$, giving unresolved; (6) otherwise user_supplied by default. Names are normalised first: camelCase split to snake_case, lowercased, non alphanumerics to underscores, and plural variants added (label_ids matches label_id). Order matters: an entity match beats the user supplied list, so 'to' and 'cc' resolve to person.email_address. Committed totals: 7,101 input slots, 2,728 required, 568 unresolved.",
+      "evidence": [
+        "repo:tool-dependency-graph/README.md: | Input slots | 7,101, of which 2,728 are required |",
+        "repo:tool-dependency-graph/README.md: | Handle shaped slots with no entity yet | 568 |"
+      ],
+      "sources": [],
+      "tags": [
+        "slot-classification",
+        "heuristics"
+      ]
+    },
+    {
+      "id": "tdg-12",
+      "type": "number",
+      "level": 1,
+      "q": "What are the headline coverage numbers, and how should they be read?",
+      "easy": "Of 2,728 required inputs, 1,770 (65%) resolve to a typed entity, and 1,768 of those (99.9%) have at least one tool that can supply them. The 99.9% only covers inputs that resolved to an entity, not all required inputs.",
+      "deep": "Denominators: 7,101 input slots in total, 2,728 required. Required slots resolved to an entity: 1,770 of 2,728 (65%). Of those, with at least one producer: 1,768 of 1,770 (99.9%). The remaining 35% of required inputs are user written content, paging knobs, enums, and handle shaped slots no entity covers yet. The two required entity slots with no producer are gmail.attachment_id and github.issue_id, whose entities show zero producers in graph.json. 'Has a producer' means some tool's declared output resolves to that entity; it does not mean the producer is the right one, which is a precision question no labelled set answers yet. Tanay's framing, in the write up itself: the headline is 99.9 percent, and leaving it there would be dishonest.",
+      "evidence": [
+        "portfolio: Of 2,728 required inputs across the catalog, 1,770 resolve to a typed entity, and 1,768 of those have at least one tool that can supply them.",
+        "portfolio: The honest version is that 65 percent of required inputs are typed handles and almost all of those are satisfiable.",
+        "portfolio: The headline is 99.9 percent, and it would be dishonest to leave it there: that is coverage of the inputs that resolved to an entity, not of all required inputs.",
+        "repo:tool-dependency-graph/README.md: | Required slots resolved to an entity | 1,770 of 2,728 (65%) |",
+        "repo:tool-dependency-graph/README.md: | Of those, with at least one producer | 1,768 of 1,770 (99.9%) |",
+        "repo:tool-dependency-graph/README.md: | Input slots | 7,101, of which 2,728 are required |"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "coverage",
+        "honesty"
+      ]
+    },
+    {
+      "id": "tdg-13",
+      "type": "how",
+      "level": 1,
+      "q": "How do you resolve an output field like data.threads[].id to an entity?",
+      "easy": "In three steps, widest context last: first try the field's own name; if it is a generic name like id, look at the nearest parent segment that means something (threads); if every parent is just packaging, use the tool's own name (LIST_REPOSITORY_ISSUES yields an issue).",
+      "deep": "resolveEntityFromContext(service, path, leafName, ownerSlug): tier 1 is resolveEntity(service, leaf), so thread_id resolves directly. If the leaf is not in GENERIC_LEAVES (id, ids, number, key, slug, value), it stops and returns null rather than guessing. Tier 2 walks path segments from the leaf's parent upward, skipping ENVELOPE_SEGMENTS (data, response, response_data, result, results, items, records, entries, list), and returns the first in scope entity whose objectNouns match the segment in singular or plural; threads matches THREADS, so threads[].id is gmail.thread_id. Tier 3 returns the first in scope entity the owning slug implies through its verb and head noun, so LIST_REPOSITORY_ISSUES.items[].number becomes an issue. In the committed graph GOOGLESUPER_LIST_THREADS produces gmail.thread_id with evidence threads.id, depth 2, primary. graph.ts keeps the shallowest sighting per entity per tool, since that is closest to the point of the call.",
+      "evidence": [
+        "repo:tool-dependency-graph/data/graph.json: \"evidence\": \"threads.id\","
+      ],
+      "sources": [],
+      "tags": [
+        "entity-resolution",
+        "paths",
+        "three-tier"
+      ]
+    },
+    {
+      "id": "tdg-14",
+      "type": "why",
+      "level": 1,
+      "q": "What was the bare id bug?",
+      "easy": "The thread listing returns its thread IDs in a field called just id, inside a list called threads. Looking only at the leaf name id, the code could not tell what it was, so the most important producer in the whole catalog, the thread listing, was invisible.",
+      "deep": "The first resolver matched only leaf names. data.threads[].id has leaf id, which matches nothing safely, so LIST_THREADS produced no gmail.thread_id and REPLY_TO_THREAD had no precursor. The assertions 'replying to a thread needs a thread id' and 'and LIST_THREADS is named as a producer' failed, which surfaced it. The fix is tier 2 of resolution: for generic leaves, walk up to the nearest non envelope parent and match it against entity object nouns. The lesson Tanay draws: none of the four bugs were visible from reading the code; they appeared the moment output was compared against a case written down in advance.",
+      "evidence": [
+        "portfolio: the bare id under threads[], which hid the most important producer in the catalog",
+        "portfolio: None of the four were visible from reading the code."
+      ],
+      "sources": [],
+      "tags": [
+        "bugs",
+        "entity-resolution"
+      ]
+    },
+    {
+      "id": "tdg-15",
+      "type": "concept",
+      "level": 1,
+      "q": "What are primary and incidental producers, and why does the head noun matter?",
+      "easy": "A primary producer is a tool whose purpose is to give you that thing, like a repository listing giving repository names. An incidental producer happens to include it, like a workflow run response that embeds a whole repository. The tool's name decides which: the last noun of its object phrase says what it is about.",
+      "deep": "graph.ts marks a produced entity primary when slugImpliesProduction(slug, entity) holds. verbAndObject tokenises the slug on underscores, finds the first verb in LIST, SEARCH, GET, FETCH, FIND (read) or CREATE, and takes the object phrase: tokens after the verb up to the first preposition (FOR, TO, IN, OF, FROM, BY, WITH, ON, AS, AT, INTO, USING), dropping articles (A, AN, THE, ALL, MY). headMatches checks the last token of the phrase against the entity's object nouns, then the whole phrase joined, then the last two tokens joined (PULL_REQUEST). English compounds are head final: CREATE_A_REPOSITORY_VARIABLE has head VARIABLE and yields no repo; CREATE_AN_ORGANIZATION_REPOSITORY has head REPOSITORY and yields one; CREATE_AN_ISSUE_COMMENT has head COMMENT and yields a comment, not an issue. Matching any token in the phrase gets all three wrong. In plans, incidental producers are dropped whenever a primary one exists.",
+      "evidence": [
+        "portfolio: English compounds are head final, which is what makes this work:",
+        "portfolio: All three are wrong under token matching, and the first two point in opposite directions despite both containing the word repository."
+      ],
+      "sources": [],
+      "tags": [
+        "producer-ranking",
+        "head-noun",
+        "linguistics"
+      ]
+    },
+    {
+      "id": "tdg-16",
+      "type": "why",
+      "level": 2,
+      "q": "What was the cross service leak, and how is locality enforced?",
+      "easy": "Email addresses are shared across services, so the first version told a Gmail tool to call a GitHub user lookup to find an address. The fix keeps candidate producers inside the same toolkit and service whenever any local producer exists.",
+      "deep": "person.email_address has services ['*'], so producers from every toolkit qualified, including GITHUB_GET_A_USER, whose output contains an email field. Two fixes. In the plan builder, after the primary filter, the pool is restricted to producers in the consuming tool's toolkit if any exist (local.length > 0 ? local : byPurpose). In producerScore, a same service producer gets +70 and a same toolkit producer +30, so locality dominates when the pool is mixed. The check.py assertion 'no GitHub tool leaks into a Gmail plan' verifies that no precursor of GOOGLESUPER_SEND_EMAIL starts with GITHUB_. In the committed graph SEND_EMAIL's only precursor for the address is GOOGLESUPER_GET_CONTACTS.",
+      "evidence": [
+        "portfolio: cross service producers leaking into a plan, so a mail tool was told to call a source control tool to find an email address",
+        "repo:tool-dependency-graph/data/graph.json: \"GOOGLESUPER_GET_CONTACTS\""
+      ],
+      "sources": [],
+      "tags": [
+        "bugs",
+        "locality",
+        "producer-ranking"
+      ]
+    },
+    {
+      "id": "tdg-17",
+      "type": "formula",
+      "level": 2,
+      "q": "Write down the producer score.",
+      "easy": "Each candidate producer gets points for coming from a real output schema, being in the same service and toolkit, being a primary producer, being a read tool, and having the entity as its head noun; it loses points for burying the field deep in the response and for having a long, specific name.",
+      "deep": "producerScore(slug, entity, via, depth, primary, sameService, sameToolkit) = 50[via = schema] + 70[sameService] + 30[sameToolkit] + 100[primary] + 30[read verb] + 40[head noun hit] - 12 max(0, depth - 1) - min(24, 2 x tokens(slug)) + 8[slug contains _LIST_] + 6[slug contains _SEARCH_]. Depth counts segments of the envelope stripped path, so a repo name at data.items[].name (depth 2) beats one at data.repository.owner.login (depth 3). The token penalty prefers general tools (LIST_REPOSITORIES) over narrow ones. Candidates are sorted by score descending, ties broken alphabetically by slug for determinism, and capped at PRECURSOR_CAP = 12. Weights were set by hand to make the fixture cases and the assertions come out right; there is no fitted model and no labelled ranking data, so the weights are a heuristic.",
+      "evidence": [
+        "repo:tool-dependency-graph/src/graph.ts: const PRECURSOR_CAP = 12;"
+      ],
+      "sources": [],
+      "tags": [
+        "producer-ranking",
+        "heuristics",
+        "scoring"
+      ]
+    },
+    {
+      "id": "tdg-18",
+      "type": "how",
+      "level": 2,
+      "q": "How is the per tool plan built?",
+      "easy": "For each input the tool needs, the code finds every tool that can produce it, keeps the purpose built ones, prefers ones in the same toolkit, ranks them, and keeps the top 12. Required inputs that nothing can produce, or that the user must write, go on an 'ask the user' list.",
+      "deep": "For each slot with an entityId: candidates = producersOf(entity) excluding the tool itself (which removes self loops); if any candidate is primary, keep only primaries; if any is in the same toolkit, keep only those; score, sort and cap at 12. If a required entity slot has no candidates, push 'name (entity, no producer found)' to askUser. Required slots classified user_supplied or unresolved are pushed to askUser too; control and enum slots never are. Example from the committed graph: GOOGLESUPER_REPLY_TO_THREAD has precursors gmail.thread_id (LIST_MESSAGES, LIST_THREADS, two fetch tools, FETCH_EMAILS) and person.email_address (GET_CONTACTS) with an empty askUser; GITHUB_CREATE_AN_ISSUE_COMMENT has precursors for repo_owner, repo_name and issue_number, and asks the user for the body. Output: plans[] in data/graph.json, consumed by check.py and the viewer.",
+      "evidence": [
+        "repo:tool-dependency-graph/data/graph.json: \"body (user_supplied)\""
+      ],
+      "sources": [],
+      "tags": [
+        "planning",
+        "precursors",
+        "algorithm"
+      ]
+    },
+    {
+      "id": "tdg-19",
+      "type": "concept",
+      "level": 1,
+      "q": "Why is the graph bipartite?",
+      "easy": "If you drew an arrow from every tool that produces a repository owner to every tool that needs one, that one entity alone would create tens of thousands of arrows. Making the entities themselves nodes means each tool connects once to each entity, and the path tool, entity, tool reads as 'run this before that'.",
+      "deep": "Direct encoding: edges = sum over entities of producers x consumers. github.repo_owner has 146 producers and 637 consumers in the committed graph, so it alone would contribute about 93,000 tool to tool edges. Bipartite encoding: tools and entities are both nodes; produces edges go tool to entity, requires edges go entity to tool, so edges = sum of producers + consumers, 3,278 in total. The hub structure becomes legible (repo_owner, repo_name, user_login and email are the hubs), and a two hop path LIST_THREADS to gmail.thread_id to REPLY_TO_THREAD is exactly the ordering answer. It is the same idea as factoring a dense bipartite projection, or as a Petri net with places (entities) and transitions (tools). The requires edges also carry required true or false, so the viewer can filter to hard dependencies.",
+      "evidence": [
+        "repo:tool-dependency-graph/data/graph.json: \"producerCount\": 146,",
+        "repo:tool-dependency-graph/data/graph.json: \"consumerCount\": 637",
+        "repo:tool-dependency-graph/README.md: | Edges | 3,278 |",
+        "portfolio: Edge count drops from producers times consumers to producers plus consumers, the hub structure becomes legible, and the two hop path is exactly the answer to \"what do I run first\"."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Bipartite_graph"
+      ],
+      "tags": [
+        "graph-design",
+        "bipartite"
+      ]
+    },
+    {
+      "id": "tdg-20",
+      "type": "define",
+      "level": 2,
+      "q": "Define bipartite graph, hub, degree, two hop path, and opaque handle as used here.",
+      "easy": "A bipartite graph has two kinds of nodes, and edges only connect one kind to the other. A hub is a node with many connections; degree is the number of connections. A two hop path goes tool, then entity, then tool. An opaque handle is a value a person cannot reasonably make up.",
+      "deep": "Bipartite: node set split into tools T and entities E, with every edge between T and E; here directed (T to E is produces, E to T is requires). Degree of an entity = producerCount + consumerCount, which sizes entity nodes in the viewer (mapData(deg, 0, 120, 22, 62)). Hub: high degree entity; github.repo_owner (146 producers, 637 consumers) dominates GitHub. Two hop path: t1 to e to t2 means t1 can supply an argument t2 needs; it is the immediate predecessor relation, not a full plan. Opaque handle: Entity.opaque = true (thread id, issue number, commit sha); semi opaque: opaque = false but often fetched (email address, repo owner, branch). Slot buckets: tool_derived, user_supplied, control, enum_or_constant, unresolved. Primary producer: slug head noun names the entity; incidental: any other tool whose output embeds it.",
+      "evidence": [
+        "repo:tool-dependency-graph/data/graph.json: \"producerCount\": 146,",
+        "repo:tool-dependency-graph/data/graph.json: \"consumerCount\": 637"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Bipartite_graph"
+      ],
+      "tags": [
+        "definitions",
+        "graph"
+      ]
+    },
+    {
+      "id": "tdg-21",
+      "type": "how",
+      "level": 2,
+      "q": "What is the slug inference fallback, and why did it fire zero times?",
+      "easy": "For tools with no output description at all, the code could guess what they produce from their names, for example a tool called LIST_THREADS probably returns threads. It was built and never used, because every tool that needed an output had a real one, so every edge in the graph traces to a declared field.",
+      "deep": "If a tool's informative outputs are empty, graph.ts loops over in scope entities and adds produces edges where slugImpliesProduction(slug, entity) holds, tagged via slug_inference with evidence 'slug verb and object noun'. The first version was too loose: any producing verb plus the noun anywhere in the slug, which credited GITHUB_ADD_SELECTED_REPOSITORY_TO_ORGANIZATION_VARIABLE with producing a repository. Two corrections: only read verbs and CREATE yield a new handle (ADD, SEND and UPDATE act on a handle you already hold), and the noun must be the head of the verb's object phrase. Measured: 1,238 of 1,391 tools have a real output schema, and toolsUsingSlugInference is 0, so all 1,370 produces edges in the graph are via schema. The 153 tools without an output schema produce nothing, which is a potential source of false negatives the fallback would have covered.",
+      "evidence": [
+        "portfolio: A slug based inference fallback was built for tools with no output schema. It fired zero times.",
+        "repo:tool-dependency-graph/README.md: | Tools with a real output schema | 1,238 of 1,391 (89%) |",
+        "repo:tool-dependency-graph/README.md: | Tools needing the slug inference fallback | 0 |",
+        "repo:tool-dependency-graph/src/entities.ts: * GITHUB_ADD_SELECTED_REPOSITORY_TO_ORGANIZATION_VARIABLE with producing a"
+      ],
+      "sources": [],
+      "tags": [
+        "fallback",
+        "provenance",
+        "slug-inference"
+      ]
+    },
+    {
+      "id": "tdg-22",
+      "type": "number",
+      "level": 2,
+      "q": "What are the 568 unresolved slots, and why report them?",
+      "easy": "They are inputs that look like handles (their names end in id, number, sha, token, key and so on) but match no entity in the registry. Reporting them turned them into a to do list: they are how several entities were discovered in the first place.",
+      "deep": "The handle shape regex in classifySlot catches names like repository_id, project_id, runner_id and invitation_id that no alias covered; the write up says those four entities were found by reading this bucket, which is how the registry grew to 46. 568 of 7,101 input slots are still unresolved. Unresolved required slots go into askUser as 'name (unresolved)', so the agent asks the user rather than guessing, which is safe but annoying for handles a tool could have supplied. The alternative of silently treating them as user supplied would hide coverage gaps; treating them as tool derived with a guessed entity would put wrong edges in the graph.",
+      "evidence": [
+        "portfolio: 568 handle shaped parameters the registry does not cover yet",
+        "portfolio: They are how the entities for repository id, project id, runner id and invitation id were found in the first place: the unresolved bucket is the registry's own to do list.",
+        "repo:tool-dependency-graph/README.md: | Input slots | 7,101, of which 2,728 are required |"
+      ],
+      "sources": [],
+      "tags": [
+        "coverage",
+        "unresolved",
+        "registry-growth"
+      ]
+    },
+    {
+      "id": "tdg-23",
+      "type": "how",
+      "level": 1,
+      "q": "How is the graph checked? List the assertions.",
+      "easy": "Eight hand written yes/no checks, run with one command, all passing. They cover the two dependency shapes the project exists to get right (a handle you cannot invent, and a value that is sometimes a handle) plus one GitHub chain.",
+      "deep": "check.py loads data/graph.json (or the sample build) and indexes plans by slug. Assertions: (1) REPLY_TO_THREAD has a gmail.thread_id precursor; (2) GOOGLESUPER_LIST_THREADS is among its producers; (3) SEND_EMAIL resolves person.email_address; (4) a tool with CONTACT or PEOPLE in its slug can supply it; (5) no GITHUB_ tool appears in any SEND_EMAIL precursor list; (6) no askUser entry for REPLY_TO_THREAD starts with s3key or mimetype; (7) GITHUB_CREATE_AN_ISSUE_COMMENT needs github.issue_number; (8) an issue tool with LIST, GET or SEARCH in its slug supplies it. It exits 1 on any failure. Every assertion started out failing, and four of them exposed real bugs: the bare id under threads[], cross service leakage, requiredness not compounding, and the head noun error. The docstring calls it a spot check, not an eval set: it makes the README's claims reproducible but does not measure precision or recall.",
+      "evidence": [
+        "portfolio: Eight hand written assertions, run with one command. All eight pass now, and every one of them started out failing.",
+        "portfolio: Four were real bugs that only surfaced because the assertions were written against the two dependency shapes the project exists to get right, rather than against whatever the code already did:",
+        "repo:tool-dependency-graph/check.py: project exists to get right plus one GitHub chain. This is a spot check, not"
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "assertions"
+      ]
+    },
+    {
+      "id": "tdg-24",
+      "type": "why",
+      "level": 2,
+      "q": "Tell me about the head noun bug.",
+      "easy": "A tool that creates a repository variable was credited with creating a repository, because the word REPOSITORY appears in its name. The fix reads the last noun of the object phrase, which is what the tool actually makes.",
+      "deep": "The original check asked whether any token of the object phrase matched an entity noun. CREATE_A_REPOSITORY_VARIABLE contains REPOSITORY, so it counted as a primary repository producer and would have been suggested as a way to get a repo name. headMatches now compares only the last token (plus joined multiword forms), because English compounds are head final: the rightmost noun names the thing, earlier nouns modify it. The same rule correctly makes CREATE_AN_ORGANIZATION_REPOSITORY a repository producer and CREATE_AN_ISSUE_COMMENT a comment producer. Failure modes left: slugs that put the head first (LIST_ISSUES_FOR_REPOSITORY is handled by stopping at the preposition, but a slug like REPOSITORY_LIST would not be), and verbs outside the list (ENUMERATE, QUERY).",
+      "evidence": [
+        "portfolio: the head noun error above, which credited a tool that creates a variable with creating a repository"
+      ],
+      "sources": [],
+      "tags": [
+        "bugs",
+        "head-noun",
+        "linguistics"
+      ]
+    },
+    {
+      "id": "tdg-25",
+      "type": "concept",
+      "level": 2,
+      "q": "How does the graph handle a value that is sometimes a handle, like an email address?",
+      "easy": "If the user gives an address, it is user input; if they give only a name, a contacts lookup has to run first. The graph records both: the slot is marked as something a tool can supply, but also as something the user may provide directly, and the planner suggests the contacts tool as the precursor.",
+      "deep": "person.email_address is the registry's only cross service entity (services ['*']) and is marked opaque: false with a note calling it semi opaque. Aliases include email, email_address, recipient_email, to, cc, bcc, attendee_email and user_email, so it captures recipients across Gmail, Calendar attendees and GitHub user emails. classifySlot returns tool_derived with the reason 'resolves to person.email_address, user may also supply it directly'. The plan lists GOOGLESUPER_GET_CONTACTS as the precursor for SEND_EMAIL and REPLY_TO_THREAD, and nothing is pushed to askUser, which leaves the runtime decision (do I already have an address?) to the agent. Known gap from the README: one contacts search tool declares no email field in its output schema, so it gets no credit even though it returns people.",
+      "evidence": [
+        "repo:tool-dependency-graph/README.md: user supplied. If the user gives a *name*, a contacts lookup has to run first. The same"
+      ],
+      "sources": [],
+      "tags": [
+        "semi-opaque",
+        "email",
+        "design"
+      ]
+    },
+    {
+      "id": "tdg-26",
+      "type": "case",
+      "level": 2,
+      "q": "Give me a false positive you can see in the graph.",
+      "easy": "For commenting on a GitHub issue, the plan's suggested sources for a repository name include tools like a billing usage summary and a commit author search. Those responses happen to contain a field named like a repository, but nobody would call them to find a repo name.",
+      "deep": "Observed by inspecting plans for GITHUB_CREATE_AN_ISSUE_COMMENT in the committed data/graph.json: the github.repo_name precursors include GITHUB_LIST_ISSUE_DEPENDENCIES_BLOCKED_BY, GITHUB_SEARCH_COMMITS_BY_AUTHOR and GITHUB_GET_GITHUB_BILLING_USAGE_SUMMARY_FOR_USER. The likely cause (Tanay's reading of the code): repository listings return the name in a leaf called name, which is in no alias list and is not a generic leaf, so LIST_REPOSITORIES never produces repo_name; the only producers left are tools whose output has a leaf literally called repo or repository, all incidental, so the primary filter has nothing to keep. By contrast the repo_owner and issue_number lists for the same tool look right. Fixes: let tier 2 resolve name under a repositories[] parent to repo_name, accept full_name, or suppress precursor lists that contain no primary producer and ask the user instead, since owner and repo name are usually known.",
+      "evidence": [
+        "repo:tool-dependency-graph/data/graph.json: \"GITHUB_GET_GITHUB_BILLING_USAGE_SUMMARY_FOR_USER\""
+      ],
+      "sources": [],
+      "tags": [
+        "false-positive",
+        "error-analysis",
+        "producer-ranking"
+      ]
+    },
+    {
+      "id": "tdg-27",
+      "type": "case",
+      "level": 2,
+      "q": "Give me false negatives, cases where a real dependency is missing.",
+      "easy": "Three kinds: a contacts search tool that really returns emails but does not say so in its schema, two required handles (a Gmail attachment ID and a GitHub issue's global ID) that no tool is credited with producing, and about 150 tools with no output schema at all that produce nothing in the graph.",
+      "deep": "(1) Schema thinner than reality: the README notes a contacts search tool whose output declares no email field, so it gets no credit for supplying an address. (2) The two required entity slots without producers are GOOGLESUPER_GET_ATTACHMENT's attachment_id (gmail.attachment_id) and GITHUB_ADD_SUB_ISSUE's issue_id (github.issue_id); graph.json shows zero producers for both. A plausible cause for issue_id, from reading the resolver: tier 2 returns the first registry entity whose nouns match the parent segment, and github.issue_number is listed before github.issue_id, so an issue's global id under issues[] resolves to issue_number. That is a mislabel and a false negative in one. (3) 153 tools lack an informative output schema and produce nothing, since the slug fallback only runs where outputs are entirely empty. (4) Depth: MAX_DEPTH 7 and first branch combinator collapse can hide deep or alternative fields. Each case is a concrete regression test to add.",
+      "evidence": [
+        "repo:tool-dependency-graph/README.md: - **Some schemas are thinner than reality.** One contacts search tool in the",
+        "repo:tool-dependency-graph/data/graph.json: \"notes\": \"Global database id, not the per repository issue_number.\",",
+        "repo:tool-dependency-graph/README.md: | Tools with a real output schema | 1,238 of 1,391 (89%) |"
+      ],
+      "sources": [],
+      "tags": [
+        "false-negative",
+        "error-analysis"
+      ]
+    },
+    {
+      "id": "tdg-28",
+      "type": "case",
+      "level": 2,
+      "q": "How would you measure precision and recall? Is there a labelled set?",
+      "easy": "There is no labelled set yet, so no precision or recall has been measured; the eight assertions are a spot check. Tanay would hand label a stratified sample of tools with their true prerequisites and score the graph against it.",
+      "deep": "Design: sample about 100 consuming tools stratified by service and by entity hub size, and for each required entity slot hand write the set of acceptable producers (and whether the value is usually user known). Edge precision = fraction of top k suggested precursors that a labeller accepts (precision@1 and @3 matter most, since an agent tries the first one). Recall = fraction of labelled true producers that appear anywhere in the list; slot recall = fraction of truly tool derived required slots that resolve to an entity at all (the 65% figure is a proxy for this, not a measurement). Report per service and per entity, because repo_name and repo_owner behave differently from thread_id. Use two labellers on a subset and report agreement. Then an end to end check: agent task success with and without precursor hints on a fixed task set. Every new false positive or negative becomes a check.py assertion.",
+      "evidence": [
+        "repo:tool-dependency-graph/check.py: project exists to get right plus one GitHub chain. This is a spot check, not"
+      ],
+      "sources": [],
+      "tags": [
+        "evaluation",
+        "precision",
+        "recall"
+      ]
+    },
+    {
+      "id": "tdg-29",
+      "type": "concept",
+      "level": 2,
+      "q": "How would you turn this into a call order? Explain topological sorting and whether it applies.",
+      "easy": "A topological sort lists the steps of a dependency graph so that every step comes after the steps it depends on. This project does not build full plans yet; it answers 'what comes immediately before', and turning that into an order needs a slightly different algorithm because a tool needs all of its inputs but each input can come from any one of several tools.",
+      "deep": "Kahn's algorithm: compute in degrees, queue nodes with in degree 0, repeatedly pop a node, append it, decrement its successors' in degrees, and enqueue any that reach 0; O(V + E). If nodes remain when the queue empties, the graph has a cycle. DFS alternative: reverse postorder. Neither applies directly here because the graph is an AND/OR graph: a tool fires only when ALL its required entities are available (AND), and an entity is available when ANY producer has fired or the user supplied it (OR). A plain topological sort would demand every producer, which is wrong. The right tool is forward chaining to a fixpoint: start from entities the user knows, mark a tool runnable when its count of unmet required entities reaches 0, mark its outputs available, repeat. With counters this runs in linear time, the same method as Horn clause satisfiability. Backward chaining from the goal tool, picking the best scored producer per missing entity with a visited set, gives a concrete plan. README: no transitive planning is built.",
+      "evidence": [
+        "repo:tool-dependency-graph/README.md: - **No transitive planning.** This answers \"what comes immediately before\"."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Topological_sorting",
+        "https://en.wikipedia.org/wiki/Horn-satisfiability"
+      ],
+      "tags": [
+        "topological-sort",
+        "planning",
+        "and-or-graph"
+      ]
+    },
+    {
+      "id": "tdg-30",
+      "type": "concept",
+      "level": 3,
+      "q": "Does the graph have cycles, and how would a planner handle them?",
+      "easy": "Yes. A tool like 'get a repository' needs the owner and name and also returns them, so it both consumes and produces the same entity. The current plan builder simply never suggests a tool as its own prerequisite; a full planner would treat already known values as satisfied and refuse to revisit anything on the current path.",
+      "deep": "Cycles arise in three ways: self loops (GET_A_REPOSITORY requires and produces repo_owner), mutual loops (an issue listing needs repo_owner, and some repository tools return issue data), and hub loops through repo_owner and user_login. The plan builder filters candidates with p.slug !== tool.slug, which removes self loops from precursor lists, and it only answers one hop, so it never loops. For transitive planning: (1) forward chaining to a fixpoint is cycle safe by construction, because each entity flips from unavailable to available once and each tool fires once, so it terminates in O(V + E); (2) backward chaining needs a visited set on the current path, and a cycle means that branch is unsatisfiable unless something on it is user known; (3) a cost aware version (shortest hyperpath, Knuth's generalisation of Dijkstra to AND/OR graphs) picks the cheapest derivation and handles cycles because costs only grow. Practical rule: treat non opaque entities (owner, repo, branch) as user known by default, which breaks most GitHub cycles.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Topological_sorting",
+        "https://en.wikipedia.org/wiki/Horn-satisfiability"
+      ],
+      "tags": [
+        "cycles",
+        "planning",
+        "graph-algorithms"
+      ]
+    },
+    {
+      "id": "tdg-31",
+      "type": "how",
+      "level": 2,
+      "q": "What is the time and space complexity of the pipeline?",
+      "easy": "Everything is close to linear in the size of the catalog, so the full 1,391 tool build is quick. The slowest parts are matching each field against all 46 entities and comparing each consumer with all producers of its entities.",
+      "deep": "Let T tools, S total slots (7,101 inputs plus outputs), E entities (46), A aliases per entity. Flattening: O(schema nodes), bounded by depth 7. Service inference: O(T x markers). resolveEntity: O(E x A) per slot, so O(S x E x A); a hash map from alias to entity would make it O(S). Output resolution adds a walk over path segments, O(depth) per slot. Edges: O(slots), giving 3,278. Plans: for each consumer slot, O(p log p) over that entity's producers p (repo_owner has 146), so O(sum over consumer slots of p log p), about the size of the direct projection only in the worst case, then capped at 12. Space: O(T + S + edges). The direct tool to tool graph would be O(sum of producers x consumers), more than 93,000 edges from repo_owner alone, which is why the bipartite form matters for storage and display as well as legibility. The viewer caps each service view at 260 nodes for the same reason.",
+      "evidence": [
+        "repo:tool-dependency-graph/viz.template.html: const NODE_CAP = 260;",
+        "repo:tool-dependency-graph/data/graph.json: \"producerCount\": 146,",
+        "repo:tool-dependency-graph/data/graph.json: \"consumerCount\": 637"
+      ],
+      "sources": [],
+      "tags": [
+        "complexity",
+        "performance"
+      ]
+    },
+    {
+      "id": "tdg-32",
+      "type": "how",
+      "level": 2,
+      "q": "How does the visualization work?",
+      "easy": "Opening graph.html in a browser shows the graph for one service at a time, with entities as large nodes and tools as small ones. Clicking a tool shows what it needs and what can supply it. It works offline from a double click, with no server.",
+      "deep": "viz.ts reads data/graph.json, keeps only the fields the page reads (roughly halving the payload), escapes '</' so the data cannot close the script tag, and inlines it into viz.template.html as graph.html. Inlining avoids a fetch, which file:// pages cannot do because of CORS. The page uses a vendored Cytoscape.js with the cose force directed layout (nodeRepulsion 9000, idealEdgeLength 70, 900 iterations). The view is scoped to one service with options to show only opaque entities or only required edges; tools are ranked by degree and capped at 260, with a visible note saying how many of how many are shown. Entity node size maps degree. Produces and requires edges have different colours. The header states the stats line, including how many required typed inputs another tool can supply.",
+      "evidence": [
+        "repo:tool-dependency-graph/viz.template.html: const NODE_CAP = 260;"
+      ],
+      "sources": [],
+      "tags": [
+        "visualization",
+        "cytoscape"
+      ]
+    },
+    {
+      "id": "tdg-33",
+      "type": "compare",
+      "level": 2,
+      "q": "Why do this statically instead of letting the LLM work out the order from tool descriptions?",
+      "easy": "A model can often guess that a reply needs a thread ID, but it has to work that out again on every call, it can make up IDs, and its guesses cannot be audited. A precomputed graph is deterministic, cheap to look up, and every edge points to the schema field that justifies it.",
+      "deep": "Static graph: deterministic, inspectable provenance (every produces edge cites an output path such as threads.id), zero tokens at runtime, testable with assertions, and usable for tool retrieval (pull a tool's precursors into context). Its limits: only as good as the schemas, heuristics for ranking, no runtime context (whether the user already gave an address). LLM only: handles novel phrasing and context, but costs tokens per decision, is nondeterministic, cannot see output schemas unless they are in context (often too large for 1,391 tools), and fails silently by fabricating handles. Runtime tracing (mining successful agent trajectories for call sequences) learns real usage but needs traffic and inherits the agent's mistakes. The complementary design: the static graph proposes candidates and constraints, the model decides among them with runtime context, and traces validate and reweight edges.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "design",
+        "llm",
+        "static-analysis"
+      ]
+    },
+    {
+      "id": "tdg-34",
+      "type": "compare",
+      "level": 2,
+      "q": "Why a hand built registry and rule based matching instead of embeddings or an LLM labeller?",
+      "easy": "Rules are slower to extend but every decision can be explained and tested, and the project's priority was that no wrong edge gets in silently. Anything uncertain is left unresolved and reported instead of guessed.",
+      "deep": "Embedding similarity between field names would catch spellings the aliases miss but would also reintroduce the collisions the registry exists to prevent (id, name, state embed close to everything) and give no crisp threshold. An LLM labeller could propose entities for the 568 unresolved slots quickly, but its labels need review, and its errors are not reproducible. The registry costs: 46 entities written by hand, alias lists that need upkeep, and coverage limited to what was anticipated. The design choice is explicit in entities.ts: anything still ambiguous is left unmapped and reported rather than guessed, and google_other parks low confidence tools. A pragmatic hybrid: use an LLM to propose new entities and aliases from the unresolved bucket, then review and commit them as rules with a test each.",
+      "evidence": [
+        "portfolio: 568 handle shaped parameters the registry does not cover yet"
+      ],
+      "sources": [],
+      "tags": [
+        "design",
+        "rules-vs-ml",
+        "registry"
+      ]
+    },
+    {
+      "id": "tdg-35",
+      "type": "how",
+      "level": 2,
+      "q": "How are names normalised before matching?",
+      "easy": "Field names come in many spellings (threadId, thread_id, ThreadID), so each one is converted to lower case snake_case, and singular and plural forms are both tried, before comparing with the registry.",
+      "deep": "normalizeName: insert an underscore between a lowercase letter or digit and an uppercase letter (threadId to thread_Id), lowercase, replace runs of non alphanumerics with one underscore, trim leading and trailing underscores. nameVariants adds the singular when the name ends in s and always adds a plural, so label_ids matches alias label_id. segmentNames applies the same singular and plural logic to path segments against object nouns. coreFieldPath strips envelope keys and [] markers before computing depth. Failure modes: naive pluralisation (status to statu, address to addresse are harmless misses; irregular plurals such as people and person are listed explicitly in objectNouns); abbreviations (repo against repository) need explicit aliases; and a name like 'issue' is both an alias of issue_number and a common word, which scoping to github limits.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "normalization",
+        "string-matching"
+      ]
+    },
+    {
+      "id": "tdg-36",
+      "type": "how",
+      "level": 2,
+      "q": "What is the tech stack and how do you run it?",
+      "easy": "TypeScript run directly by Bun, with no build step, a Python script for the checks, and a single HTML page for the viewer. With no catalog of your own it runs on an 8 tool sample.",
+      "deep": "bun install; bun run src/graph.ts builds the graph (data/catalog/*.json if present, else data/sample/catalog.json, writing data/graph.sample.json so a full build is never overwritten); bun run src/viz.ts rebuilds graph.html; python3 check.py verifies, against data/graph.json or the sample build. Layout: src/extract.ts (schema flattening, knows nothing about any service), src/entities.ts (registry, service inference, producer ranking), src/graph.ts (bipartite graph, plans, stats), src/viz.ts (inlining), check.py (eight assertions), viz.template.html. Separation of concerns is deliberate: the schema walker is generic so the domain rules stay readable and swappable. Outputs: graph.json with generatedAt, stats, entities (with producer and consumer counts), tools (slots and produces with evidence), edges, plans.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "stack",
+        "typescript",
+        "bun"
+      ]
+    },
+    {
+      "id": "tdg-37",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations?",
+      "easy": "The entity list is hand built and incomplete, producer ranking is a heuristic, the graph trusts schemas that are sometimes thinner than the real API, it only answers 'what comes immediately before', and there is no measured precision or recall.",
+      "deep": "From the README: 46 entities cover common handles, and 568 handle shaped slots still resolve to nothing; producer ranking prefers a read verb with the entity as direct object, shallow paths, and locality, which gets common cases right and exotic ones wrong; a contacts search tool declares no email in its output; no transitive planning; the raw catalog is not redistributed. Additional limits found while preparing this deck: the precursor list for github.repo_name contains incidental tools because repository listings call the field name; github.issue_id has zero producers, likely because tier 2 takes the first registry match; 112 Google tools are parked in google_other with no service; 153 tools have no informative output schema; and the eight assertions are a spot check, not an eval set.",
+      "evidence": [
+        "repo:tool-dependency-graph/README.md: - **The registry is hand built.** 46 entities cover the common handles, not all",
+        "repo:tool-dependency-graph/README.md: - **Producer ranking is a heuristic.** It prefers a read verb whose direct",
+        "repo:tool-dependency-graph/check.py: project exists to get right plus one GitHub chain. This is a spot check, not"
+      ],
+      "sources": [],
+      "tags": [
+        "limitations"
+      ]
+    },
+    {
+      "id": "tdg-38",
+      "type": "case",
+      "level": 3,
+      "q": "What breaks at 10x and 100x the catalog size, and what would production need?",
+      "easy": "At ten times the tools the hand written registry becomes the bottleneck, name collisions multiply across many more services, and the heuristics for ranking producers get more wrong cases. Production would need semi automatic entity discovery, a labelled evaluation, schema version tracking, and feedback from real agent runs.",
+      "deep": "10x (about 14,000 tools, dozens of toolkits): registry upkeep scales with services, so entities must be proposed automatically (cluster handle shaped unresolved slots by name and parent segment, LLM proposes, human approves). Service inference by regex markers per service does not scale; toolkit metadata or learned classifiers are needed. Matching cost O(S x E x A) needs an alias hash index. 100x: cross toolkit entities (email, URL, user id across many SaaS products) need identity mapping between namespaces; producer lists per hub entity grow, so ranking needs learned weights from usage traces; incremental rebuilds on schema change with diffing and versioned graphs; a serving layer (precursor lookup API, cached plans). Quality: a labelled set with precision@k per service, regression assertions per bug, and monitoring of agent failures attributable to missing precursors.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "scale",
+        "production"
+      ]
+    },
+    {
+      "id": "tdg-39",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next?",
+      "easy": "Build the planner that chains one hop answers into a full call order, build a small labelled set to measure precision and recall, and use the unresolved list plus real agent runs to grow the registry.",
+      "deep": "(1) Transitive planner: forward chaining from user known entities to a fixpoint, then backward extraction of the cheapest derivation using producer scores as costs, cycle safe. (2) Evaluation: about 100 hand labelled consumer tools, precision@1 and @3 and recall, per service; add every found error as an assertion. (3) Fix the observed resolver issues: name under repositories[] to repo_name, issue global id vs number disambiguation by preferring exact aliases over first match, and suppressing precursor lists with no primary producer. (4) Registry growth from the 568 unresolved slots with LLM proposals reviewed by hand. (5) Union over anyOf and oneOf branches in the flattener. (6) Validate edges against real agent traces and reweight producerScore from observed success.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next-steps"
+      ]
+    },
+    {
+      "id": "tdg-40",
+      "type": "pushback",
+      "level": 2,
+      "q": "99.9% coverage sounds like a vanity number.",
+      "easy": "Agreed that it is easy to misread, which is why the write up says so. It is coverage of the inputs that resolved to an entity; the more honest figure is that 65% of required inputs are typed handles, and almost all of those can be supplied by another tool.",
+      "deep": "Concede: the denominator is 1,770 resolved slots, not 2,728 required ones; 'has a producer' says nothing about whether the top suggestion is correct; and the repo_name precursor list shows that a slot can count as covered while its suggestions are poor. Defend: the number is reported with its denominator, the 568 unresolved handles are published rather than hidden, every produces edge cites a declared output field (the slug fallback fired zero times), and the two uncovered slots are named. What would make it a real metric: precision@k on a labelled sample.",
+      "say": "You're right that it's easy to misread, so I put the denominator next to it. It's coverage of the inputs that resolved to an entity. The honest figure is that 65% of required inputs are typed handles, and almost all of those have a producer. It also doesn't measure whether the top suggestion is right. That needs a labelled set, which I haven't built yet.",
+      "evidence": [
+        "portfolio: The headline is 99.9 percent, and it would be dishonest to leave it there: that is coverage of the inputs that resolved to an entity, not of all required inputs.",
+        "portfolio: The honest version is that 65 percent of required inputs are typed handles and almost all of those are satisfiable."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "metrics",
+        "honesty"
+      ]
+    },
+    {
+      "id": "tdg-41",
+      "type": "pushback",
+      "level": 2,
+      "q": "Eight assertions isn't an evaluation.",
+      "easy": "Correct, and the check script says so itself: it is a spot check that makes the README's claims reproducible. Its value was that every assertion started out failing and four exposed real bugs that reading the code had not.",
+      "deep": "Concede: eight assertions over three tools cannot estimate precision or recall, and they were written by the author. Defend: they target the two dependency shapes the project exists for (an opaque handle, a value that is sometimes a handle) plus one GitHub chain; they were written before the code was right, so they tested intent rather than whatever the code did; and four bugs fell out (bare id, cross service leak, requiredness, head noun). Next: a stratified hand labelled set with precision@k and recall, plus one regression assertion per observed error.",
+      "say": "It isn't, and the script calls itself a spot check. What it did well was catch bugs. Every assertion started out failing, and four of them exposed real bugs I couldn't see by reading the code. The next step is a labelled sample so I can report precision and recall.",
+      "evidence": [
+        "repo:tool-dependency-graph/check.py: project exists to get right plus one GitHub chain. This is a spot check, not",
+        "portfolio: Eight hand written assertions, run with one command. All eight pass now, and every one of them started out failing.",
+        "portfolio: Four were real bugs that only surfaced because the assertions were written against the two dependency shapes the project exists to get right, rather than against whatever the code already did:"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "evaluation"
+      ]
+    },
+    {
+      "id": "tdg-42",
+      "type": "pushback",
+      "level": 2,
+      "q": "Modern models figure out tool order on their own. Why build this?",
+      "easy": "Models often guess right on small toolsets, but on 1,391 tools the schemas do not fit in context, the guesses cost tokens on every call, and a wrong guess shows up as a made up ID. The graph gives the model a checked shortlist instead of asking it to rediscover the structure.",
+      "deep": "Concede: with a handful of tools and clear descriptions, a strong model rarely needs this, and the graph has no runtime context. Defend: output schemas are what reveal producers, and they are large; 1,391 tools cannot all be in context; tool retrieval benefits from pulling precursors along with the chosen tool; the graph is deterministic and auditable, which matters when an agent acts on a user's mail or repos; and a fabricated id fails late and confusingly. The intended use is complementary: graph proposes, model decides.",
+      "say": "On a small toolset, sure, the model usually gets it. At 1,391 tools the output schemas don't fit in context, and output schemas are what tell you who produces a handle. The graph hands the model a short, checked list of precursors. The model still makes the runtime call.",
+      "evidence": [
+        "repo:tool-dependency-graph/README.md: Measured on a production catalog of 1,391 tools across two large toolkits."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "llm",
+        "design"
+      ]
+    },
+    {
+      "id": "tdg-43",
+      "type": "pushback",
+      "level": 2,
+      "q": "A registry of 46 hand written entities doesn't scale.",
+      "easy": "It does not scale by hand, agreed. The design makes the gap visible: 568 handle shaped inputs are reported as unresolved, and that list is exactly where new entities came from. The next step is to have a model propose entities from that list and keep a human in the approval step.",
+      "deep": "Concede: adding a toolkit means writing entities and aliases, and coverage is 65% of required inputs. Defend: hand built rules mean every edge is explainable and testable; the unresolved bucket turns coverage gaps into a prioritised backlog (it produced repository_id, project_id, runner_id and invitation_id); and the generic parts (schema walker, three tier resolution, head noun ranking, bipartite graph) carry over unchanged. Scale path: cluster unresolved slots by name and parent, have an LLM draft entities, review and commit each with an assertion.",
+      "say": "By hand, no, and I'd say that first. What scales is the loop. Anything handle shaped that doesn't resolve gets reported, and that list is where several entities came from. I'd have a model draft new entities from it and review each one with a test.",
+      "evidence": [
+        "portfolio: 568 handle shaped parameters the registry does not cover yet"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "registry",
+        "scale"
+      ]
+    },
+    {
+      "id": "tdg-44",
+      "type": "pushback",
+      "level": 3,
+      "q": "Your producer score is a pile of hand tuned magic numbers.",
+      "easy": "Fair. The weights were set by hand, and there is no labelled ranking data to fit them. They do encode a clear ordering of priorities, though: locality first, then purpose, then shallowness, and the assertions check the cases that matter most.",
+      "deep": "Concede: +100 primary, +70 same service, +50 schema, +40 head hit, +30 read verb, -12 per depth level and the rest are not learned, not validated beyond eight assertions, and their interactions are not analysed; small changes can reorder long lists. Defend: the weights implement a lexicographic intent (a primary local producer from a real schema should beat anything else), the tie break is deterministic, and two hard filters (primary only when any primary exists, local toolkit only when any local exists) do most of the work before scoring. Improvement: collect accepted and rejected suggestions from labelling or agent traces and fit a pairwise ranking model (logistic regression on the same features), keeping the features interpretable.",
+      "say": "Fair hit. They're hand set, and I don't have labelled ranking data to fit them yet. They encode an order I can defend: local beats remote, purpose built beats incidental, shallow beats buried. Most of the work is done by two hard filters before the score even runs. With labels, I'd fit a simple pairwise ranker on the same features.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "ranking",
+        "heuristics"
+      ]
+    },
+    {
+      "id": "tdg-45",
+      "type": "pushback",
+      "level": 3,
+      "q": "Parsing English out of tool slugs is brittle. What happens with slugs that don't follow your pattern?",
+      "easy": "It is brittle at the edges, and it is used narrowly: only to decide whether a producer is primary and, in a fallback that never fired, to guess outputs. When the slug pattern fails, the tool is treated as incidental rather than wrong.",
+      "deep": "Concede: verbs outside LIST, SEARCH, GET, FETCH, FIND and CREATE are ignored; head first slugs (REPOSITORY_LIST) or nominalised verbs would not parse; prepositions outside the list would let modifiers leak into the object phrase. Defend: these catalogs use a consistent VERB_ARTICLE_OBJECT_PREP pattern, so the heuristic covers the common case; a parse failure demotes a producer from primary to incidental, which only matters when no primary producer exists; and edges themselves come from output schemas, never from slugs, because the fallback fired zero times. Hardening: add verbs from a frequency count over all slugs, and test the parser on every slug in the catalog to list the ones it cannot parse.",
+      "say": "At the edges, yes. But the slug parse only decides primary versus incidental. The edges themselves come from output schemas, and the slug fallback never fired. If a slug doesn't parse, that tool gets demoted, not wired wrong.",
+      "evidence": [
+        "portfolio: A slug based inference fallback was built for tools with no output schema. It fired zero times."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "heuristics",
+        "linguistics"
+      ]
+    },
+    {
+      "id": "tdg-46",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager.",
+      "easy": "Lead with the agent failure it prevents, then what was built, the honest headline, and how it was checked.",
+      "deep": "One sentence on the failure (a call needs a handle the agent cannot produce), one on the artifact (a dependency map built from 1,391 schemas), one on the result with its denominator, one on validation and what is next (a labelled eval and a planner).",
+      "say": "Agents often fail a tool call because it needs an ID they can't produce, like the thread they're replying to. I built a static analyser that reads 1,391 tool schemas and says which tools must run first and what to ask the user. Two thirds of required inputs turn out to be handles another tool can supply, and almost all of those have a producer. Next I'd add a labelled evaluation and a planner that chains the steps.",
+      "evidence": [
+        "portfolio: The honest version is that 65 percent of required inputs are typed handles and almost all of those are satisfiable.",
+        "repo:tool-dependency-graph/README.md: Measured on a production catalog of 1,391 tools across two large toolkits."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "tdg-47",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain it to a staff engineer.",
+      "easy": "Give the three failures of name matching and the fix for each, the bipartite design, the numbers with denominators, and volunteer the weak spots.",
+      "deep": "Hit: namespaced, service scoped entities; three tier resolution for bare ids; head noun primary versus incidental; bipartite encoding (repo_owner 146 x 637 as the motivating hub); 1,768 of 1,770 with the 65% framing; zero slug inference; and the gaps: no labelled precision, repo_name precursor noise, issue_id first match, one hop only.",
+      "say": "Name matching fails three ways, so I fixed each. Handles resolve to namespaced entities scoped to the owning service. Bare ids resolve through their parent path, then the tool's own object. Producers are primary only if the slug's head noun names the entity. Tools and entities are both nodes, which keeps the edge count linear. Every edge cites a declared output field. The gaps are a missing labelled eval, some noisy precursor lists, and no multi step planner yet.",
+      "evidence": [
+        "portfolio: A slug based inference fallback was built for tools with no output schema. It fired zero times.",
+        "portfolio: Of 2,728 required inputs across the catalog, 1,770 resolve to a typed entity, and 1,768 of those have at least one tool that can supply them."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer"
+      ]
+    },
+    {
+      "id": "tdg-48",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain it to a product manager.",
+      "easy": "Frame it as a map that tells an assistant what to look up first and what to ask the customer, which cuts failed actions and pointless questions.",
+      "deep": "Use the email example: reply to a thread needs a thread from a listing; sending to 'Priya' needs a contacts lookup first; the subject and body come from the user. The PM value: fewer failed actions, fewer questions the user cannot answer, and a list of gaps to prioritise.",
+      "say": "It's a map for an AI assistant that uses lots of tools. Before it replies to an email thread, it needs the thread's ID, so it has to look the thread up first. If you say 'email Priya', it needs to find her address. The map tells the assistant what to look up first and what it should actually ask you. That means fewer failed actions and fewer questions you can't answer.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "pm"
+      ]
+    },
+    {
+      "id": "tdg-49",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain it to a recruiter.",
+      "easy": "One sentence each: what it does, the scale, the skill it shows.",
+      "deep": "Recruiter version: no jargon beyond 'AI assistant' and 'tools'; one number (1,391 tools); the skill is turning messy real world specifications into a reliable, checked system.",
+      "say": "AI assistants call lots of tools, and they often fail because a step needs information from an earlier step. I built a system that reads the descriptions of 1,391 tools and works out what has to happen first. It shows I can take messy real specifications and turn them into something reliable and checked.",
+      "evidence": [
+        "repo:tool-dependency-graph/README.md: Measured on a production catalog of 1,391 tools across two large toolkits."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "Topological sorting (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Topological_sorting",
+      "why": "Kahn's algorithm and DFS ordering, O(V+E), and cycle detection, the baseline for any call ordering."
+    },
+    {
+      "title": "Horn-satisfiability (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Horn-satisfiability",
+      "why": "Unit propagation solves Horn formulas in linear time, the same counting idea a cycle safe AND/OR tool planner needs."
+    },
+    {
+      "title": "Understanding JSON Schema: structuring a complex schema",
+      "url": "https://json-schema.org/understanding-json-schema/structuring",
+      "why": "$ref, $defs and schema reuse, which the flattener resolves."
+    },
+    {
+      "title": "Bipartite graph (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Bipartite_graph",
+      "why": "Definition: two disjoint node sets with every edge running between them, the shape of the tool and entity graph."
+    }
+  ]
+}
