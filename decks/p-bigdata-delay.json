@@ -1,0 +1,701 @@
+{
+  "deck_id": "p-bigdata-delay",
+  "title": "Real Time Big Data Inflow: Communication and Computation Delay",
+  "group": "Portfolio",
+  "repo": "",
+  "summary_easy": "A year long research review on where real time sensor data should be processed. Tanay reviewed twelve primary sources and argued that sending everything to the cloud is the wrong default for real time systems, proposing a tiered design that handles time critical work near the sensors and keeps the cloud for storage, batch analytics, and global state.",
+  "summary_deep": "The work frames real time big data inflow as a tradeoff between communication delay (transmission, propagation, network queueing) and computation delay (work over processor speed plus waiting). From twelve primary sources on stream processing, edge deployment patterns, and latency optimization, it proposes a tiered hybrid architecture across IoT, edge, fog, and cloud, pushing time critical computation toward the edge and keeping durability, batch analytics, and global state in the cloud. A six dimension comparison (scalability, reliability, bandwidth, privacy and security, cost, end to end latency) finds the tiered design wins on latency, with a 40 to 60% reduction potential for appropriately partitioned workloads drawn from the literature, on bandwidth, and on privacy, while paying in operational complexity and consistency guarantees. No experiment of Tanay's measured the range, so the interview depth is the placement decision rule, queueing behavior of small nodes, consistency under partition, and how to test the claim.",
+  "sheet": {
+    "easy": "## What it is\n- Research project (Jan 2024 to Dec 2024): where should real time sensor data be processed, near the sensor or in the cloud?\n- Argument: sending everything to the cloud is the default, and for real time systems it is the wrong default.\n\n## Method\n- Literature review of **twelve** primary sources on stream processing, edge deployment, and latency optimization (stat line says 12+).\n- Proposed a **tiered hybrid architecture**; compared it with cloud only on **six dimensions**.\n\n## The tiers\n| Tier | What it is | What runs there |\n|---|---|---|\n| Edge | on or next to the device | urgent decisions, alarms, filtering |\n| Fog | local gateway or site server | aggregation, heavier local analysis |\n| Cloud | remote data center | long term storage, batch analytics, global state |\n\n## Findings\n- Tiered wins on **latency** (40 to 60% reduction potential for workloads that split well, a range from the reviewed literature, not measured by Tanay), **bandwidth** (less raw data crosses the WAN), and **privacy** (sensitive data stays local).\n- It costs **operational complexity** and **consistency**.\n\n## Delay in one line\n- Total delay = moving the data (upload, distance, waiting in the network) + processing it (work over speed, waiting for a processor).\n\n## Say carefully\n- The 40 to 60% is borrowed from sources and conditional on partitioning.\n- It is a narrative review, not a systematic one.\n\n## Next\n- A testbed that moves the cut point and measures median and worst case delay.\n",
+    "deep": "## As written\n- Question: which computations belong near the sensor (latency cheap, durability fragile, storage limited) vs the data center (storage durable, compute elastic, round trips cost real time).\n- Twelve primary sources (stat line: 12+), themes: stream processing, edge deployment patterns, latency optimization in distributed systems; each summarized for architecture and headline findings.\n- Proposal: tiered hybrid, time critical computation toward the edge; cloud tiers for durability, batch analytics, global state.\n- Six dimensions: scalability, reliability, bandwidth usage, privacy and security, cost effectiveness, end to end latency.\n- Wins: latency (40 to 60% reduction for appropriately partitioned workloads, literature), bandwidth (less raw data over WAN), privacy (local processing). Price: operational complexity, consistency guarantees.\n- Not in the write up: crowd tier, any experiment, search protocol, tail latency figures.\n\n## Delay decomposition\n$T_{e2e} = \\sum_{hops}(T_{trans} + T_{prop} + T_{queue} + T_{proc}) + T_{comp}$, with $T_{trans} = L/R$, $T_{prop} = d/v$ ($v \\approx 2\\times10^8$ m/s, about 5 ms per 1,000 km), $T_{comp} = C/f + W_q$.\n\n## Placement rule\nEdge if $\\frac{D}{R_{lan}} + RTT_{lan} + \\frac{C}{f_{edge}} + W_{edge} < \\frac{D}{R_{wan}} + RTT_{wan} + \\frac{C}{f_{cloud}} + W_{cloud}$. Partition at a cut with small intermediate data.\n\nIllustrative: 2 MB frame, 20 Mbps uplink, 60 ms RTT: cloud about 0.88 s vs edge about 0.17 s. 1 KB reading: cloud about 80 ms vs weak edge about 151 ms.\n\n## Queueing\n- M/M/1: $\\rho = \\lambda/\\mu$, $W = 1/(\\mu-\\lambda)$, $L = \\rho/(1-\\rho)$. $\\rho$ 0.5, 0.9, 0.99 gives $W$ = 2, 10, 100 service times.\n- p99 of M/M/1 time in system $= \\ln 100/(\\mu-\\lambda) \\approx 4.6\\times$ mean.\n- Little's law $L = \\lambda W$.\n- Pooling: M/M/c beats c separate M/M/1 queues at equal $\\rho$ (Erlang C); argument for a fog tier.\n- Bursty arrivals: Kingman, waits scale with $(c_a^2 + c_s^2)/2$.\n\n## Six dimensions\n| Dimension | Cloud only | Tiered |\n|---|---|---|\n| Latency | WAN on every decision | local for time critical (40 to 60% literature) |\n| Bandwidth | all raw data upstream | filtered, aggregated |\n| Privacy and security | raw data leaves site | local processing; larger physical attack surface |\n| Scalability | elastic | edge fixed per site |\n| Reliability | needs connectivity | operates through outages; fragile local storage |\n| Cost | transfer and cloud compute | hardware and fleet operations |\n\n## Consistency\n- CAP: under partition choose availability at the edge; store and forward; reconcile.\n- Tools: idempotent event IDs, event time and watermarks, LWW or CRDTs, versioned config, global decisions in cloud. PACELC: consistency costs latency even without partitions.\n\n## Stream architecture\n- Lambda (batch plus speed plus serving) vs Kappa (one stream job over a replayable log). Speed path toward edge and fog, log and batch in cloud.\n- Event time vs processing time; tumbling, sliding, session windows; watermarks; backpressure; exactly once via replay, checkpoints, idempotent sinks.\n\n## Evidence level\n- Narrative review; borrowed range; condition stated qualitatively. Publication bias and testbed heterogeneity.\n\n## Next\n- Testbed: replayer, edge box, cloud region, netem; sweep cut point and load; p50, p95, p99, WAN bytes, missed events, outage recovery.\n- SimPy discrete event simulation of tiers under bursty load. Decision guide with thresholds.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "It's a research review on where real time sensor data should be processed. The default in most enterprises is to send everything to the cloud, and for real time systems that's the wrong default. I reviewed twelve primary sources on stream processing and edge deployment and proposed a tiered design: time critical work near the sensor, and the cloud for durability, batch analytics, and global state. The literature points to 40 to 60% lower latency for workloads that split well; I didn't measure that myself.",
+      "keypoints": [
+        "Where to process real time sensor data",
+        "Cloud by default is wrong for real time",
+        "Twelve primary sources reviewed",
+        "Tiered design: edge for time critical, cloud for durability and global state",
+        "40 to 60% is a literature range, not measured"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "The question was where computation should happen for real time big data inflow, framed as communication delay versus computation delay. Near the sensor, latency is cheap, but storage is limited and fragile. In the data center, storage is durable and compute is elastic, but every round trip costs time. Most enterprise architectures default to the cloud, and I argue that for real time systems that's wrong. The method was a literature review. I took twelve primary sources on stream processing, edge deployment patterns, and latency optimization in distributed systems, and summarized each one's architecture and headline findings. From that I proposed a tiered hybrid architecture. Time critical computation moves toward the edge: control loops, alarms, filtering. The cloud keeps durability, batch analytics, and global state. Then I compared cloud only and tiered designs across six dimensions: scalability, reliability, bandwidth, privacy and security, cost, and end to end latency. The tiered design wins on latency, with a 40 to 60% reduction potential from the literature for workloads that partition well. It wins on bandwidth because less raw data crosses the WAN, and on privacy because sensitive data can stay local. It pays in operational complexity and weaker consistency. The honest limits: it's a narrative review, the range is borrowed from other people's testbeds, and 'partitions well' needs to be a test, not a phrase. Next I'd build a testbed with an edge box and a cloud region, move the cut point, and measure p50 and p99 latency and WAN bytes.",
+      "keypoints": [
+        "Communication vs computation delay framing",
+        "Twelve primary sources, three themes",
+        "Tiered design: edge time critical, cloud durable and global",
+        "Six dimension comparison",
+        "Wins: latency (literature 40 to 60%), bandwidth, privacy",
+        "Costs: operations and consistency",
+        "Next: testbed with cut point sweep, p50 and p99"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Take me through the technical reasoning in depth.",
+      "script": "I'll give the framing, the model I use to reason about it, the comparison, and where the evidence is thin. Framing. End to end latency is communication delay plus computation delay. Communication is transmission, which is bits over link rate, plus propagation, which is distance over signal speed, about five milliseconds per thousand kilometers in fiber, plus queueing in routers and per hop processing. Computation is the cycles a task needs over the cycles per second available, plus waiting for a free processor. The cloud minimizes the compute term and maximizes the communication term; the edge does the opposite. The project's question is which computations belong where. Decision rule. A computation should run at the edge when the WAN transfer and round trip it avoids are bigger than the extra compute time on a slower node plus any extra queueing. Big inputs and tight deadlines push work down; small inputs and heavy compute push it up. That's why partitioning matters: you look for a cut point where the data crossing the WAN is much smaller than the raw input, like filtering video down to events, and put the cheap stage before the cut at the edge. Queueing. The edge's weakness isn't only a slower processor. In a simple single server queue, time in system is one over mu minus lambda, so at 90% utilization you wait ten service times and at 99% you wait a hundred. Sensor traffic is bursty, so a small edge node sized for average load falls over at peak. Pooling helps: many devices sharing a fog node wait far less than each device running its own queue, which is the queueing argument for a middle tier. And real time means deadlines, so I care about the 99th percentile, which in that simple queue is about 4.6 times the mean. The proposal. Time critical work goes toward the edge: control loops, threshold alarms, filtering, privacy scrubbing, small model inference. Aggregation and heavier stateful work can sit at a fog layer. The cloud keeps the durable event log, batch analytics, global state, and model training. In stream architecture terms, the speed path moves down and the batch path stays up, which is roughly a Lambda split across tiers. Comparison. Across six dimensions, tiered wins latency, with a 40 to 60% reduction potential for appropriately partitioned workloads from the literature, wins bandwidth because less raw data crosses the WAN, and wins privacy because sensitive data can be processed locally. Cloud only keeps elastic scaling, durable storage, simpler operations, and one consistent view. The tiered design pays in operations, meaning fleets of heterogeneous devices to deploy, monitor, and patch, and in consistency. Under a partition, the edge has to keep acting on local state and reconcile later, so you need event time, idempotent event IDs, and global decisions kept in the cloud. Where the evidence is thin. It's a narrative review of twelve sources without a stated protocol, so selection bias is possible. The 40 to 60% comes from other people's testbeds with different hardware and metrics, and I didn't measure it. And 'appropriately partitioned' should be a test: a large data reduction at the cut, edge utilization well below one at peak, and a deadline near the WAN round trip. Next, I'd build a testbed with network emulation, sweep the cut point and load, and report latency at p50 and p99, WAN bytes, and outage recovery, so the range becomes a curve I own.",
+      "keypoints": [
+        "Latency = transmission + propagation + queueing + compute",
+        "Edge wins when avoided WAN cost exceeds extra compute and queueing",
+        "Partition at a cut with small intermediate data",
+        "Queueing: 1/(mu minus lambda); bursts; pooling at fog; p99",
+        "Proposal: edge time critical, fog aggregation, cloud durable and global",
+        "Six dimensions; costs in operations and consistency",
+        "Evidence limits: narrative review, borrowed range",
+        "Next: testbed sweep with p50, p99, WAN bytes"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone who isn't technical.",
+      "script": "Factories, cars, and cameras produce a constant flood of data, and the usual habit is to send all of it to big remote data centers to be processed. That works, but every trip to the data center and back takes time, and for things that need an instant reaction, like stopping a machine, that delay matters. I spent a year reading the research on this and proposed a layered approach: handle urgent decisions right next to the sensors, and send only summaries and long term records to the data center. The research I reviewed suggests this can cut response times by 40 to 60% for the right kinds of tasks, and it also saves network costs and keeps private data on site. The catch is that you now have many more machines to manage.",
+      "keypoints": [
+        "Sensors produce floods of data",
+        "Round trips to data centers take time",
+        "Urgent decisions near the sensors",
+        "Research suggests 40 to 60% faster for the right tasks",
+        "Catch: more machines to manage"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the architecture and the tradeoff.",
+      "script": "First I draw three horizontal bands from bottom to top: edge, fog, cloud. In the edge band, small boxes for sensors and a gateway. In the fog band, one site server. In the cloud band, a big box with a database cylinder. Second, on the left I draw a latency arrow going up the bands and write small, medium, large next to each, and on the right a capacity arrow also going up, small to elastic. I say each tier up adds latency and capacity and loses locality. Third, I write the delay formula across the top: T equals transmission plus propagation plus queueing plus compute, and I underline the first three as communication and the last as computation. Fourth, I place work in the bands. Edge: filter, alarm, control loop. Fog: aggregate, windowed analytics, heavier inference. Cloud: durable log, batch analytics, global state, model training. I draw a thick arrow for raw data at the bottom and a thin arrow leaving the edge, and say the cut point is where the data gets small. Fifth, next to the edge I sketch the queueing curve, waiting time against utilization, flat and then shooting up near one, and write peak load, not average. Last, a small table with six rows, the six dimensions, and checkmarks: tiered wins latency, bandwidth, privacy; cloud wins simplicity and consistency. Under the latency check I write 40 to 60%, literature, partitioned workloads.",
+      "keypoints": [
+        "Three bands: edge, fog, cloud",
+        "Latency and capacity both grow upward",
+        "Delay formula: communication plus computation",
+        "Place work by tier; cut where data gets small",
+        "Queueing curve: size for peak",
+        "Six dimension table with the literature caveat"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Break down end to end latency for me.",
+      "script": "Two parts: moving the data and processing it. Moving it costs transmission time, the size divided by the link rate; propagation time, distance over signal speed, about five milliseconds per thousand kilometers of fiber; queueing in routers, which depends on congestion; and a little per hop processing, all in both directions. Processing costs the work divided by the processor speed, plus waiting for a free processor. The cloud makes the processing term small and the moving term large. The edge does the reverse. The whole design question is which term dominates for a given computation.",
+      "keypoints": [
+        "Transmission: size over rate",
+        "Propagation: about 5 ms per 1,000 km in fiber",
+        "Queueing and per hop processing, both directions",
+        "Compute: work over speed plus waiting",
+        "Cloud shrinks compute; edge shrinks communication"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "When does the cloud win?",
+      "script": "When the input is small, the computation is heavy, or the decision needs a global view. A one kilobyte sensor reading uploads in under a millisecond, so the round trip is mostly fixed latency, and a fast cloud processor can beat a weak edge box by a wide margin. The cloud also wins for anything needing durable storage, history, cross site state, or model training. And it wins on simplicity: one platform, elastic scaling, one consistent view of the data. That's why I'd start in the cloud and move work down only when a requirement forces it.",
+      "keypoints": [
+        "Small inputs, heavy compute",
+        "Fast cloud CPU beats weak edge node",
+        "Durability, history, global state, training",
+        "Simpler operations and consistency",
+        "Start in the cloud; move down when forced"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you validate the 40 to 60% figure?",
+      "script": "I'd build a testbed: a data replayer for a few workloads, an edge box, and a cloud region, with a network emulator controlling round trip time, bandwidth, and outages. Then I'd run the same pipeline with the cut point in different places, cloud only, edge filter plus cloud model, and full edge, and sweep the load past edge saturation. I'd report latency at p50 and p99 with synchronized clocks, bytes over the WAN, and whether filtering dropped real events. The output would be latency reduction as a function of data reduction and load.",
+      "keypoints": [
+        "Testbed: replayer, edge box, cloud region",
+        "Network emulation for RTT, bandwidth, outages",
+        "Sweep cut points and load",
+        "Report p50, p99, WAN bytes, missed events",
+        "Result: reduction as a curve, not a range"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What happens when an edge site loses its connection to the cloud?",
+      "script": "The edge has to keep working, which is half the reason to put time critical work there. It keeps running control loops on local state, buffers events, and forwards them when the link returns. That's choosing availability over consistency during a partition. The costs are stale global state, like a new threshold arriving late, and a burst of old events on reconnect. So events need unique IDs for deduplication, processing should use event time with watermarks, and anything that needs a single global decision stays in the cloud.",
+      "keypoints": [
+        "Edge keeps operating on local state",
+        "Store and forward buffering",
+        "Availability over consistency under partition",
+        "Stale config and late event bursts",
+        "Event IDs, event time, global decisions in cloud"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "You didn't run an experiment. Why should I trust the 40 to 60%?",
+      "script": "You shouldn't take it as my measurement, because it isn't one. It's a range from the sources I reviewed, for workloads that partition well, and I say that whenever I quote it. What I'd defend is the reasoning: the delay decomposition, the decision rule for placement, and the six dimension comparison that names the costs as well as the wins. The way to earn the number is a testbed that sweeps cut points and load and reports p50 and p99, and that's the next step I'd take.",
+      "keypoints": [
+        "Concede: literature range, not measured",
+        "Always quoted with the partitioning condition",
+        "Defend: decomposition, decision rule, six dimensions",
+        "Costs named, not only wins",
+        "Next: testbed with p50 and p99"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Twelve sources and no protocol. Isn't this just an opinion piece?",
+      "script": "It's a narrative review, not a systematic one, and I'd call it that. With no registered search or inclusion criteria, I can't rule out selection bias, and edge papers tend to report wins. So I claim the direction and the conditions, not a precise effect. What makes it more than opinion is that the framework is checkable: the delay terms, the placement rule, and the queueing behavior are standard and testable. To tighten it, I'd write the protocol first, tabulate each study's setup and metric, and include cases where the cloud won.",
+      "keypoints": [
+        "Concede: narrative review, possible selection bias",
+        "Claim direction and conditions, not effect size",
+        "Framework is standard and testable",
+        "Fix: protocol first, per study table",
+        "Include cloud wins on purpose"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "bd-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is this research project, and what is its argument?",
+      "easy": "A year long literature review on where to process fast arriving sensor data. Most companies send everything to the cloud by default; the paper argues that for real time systems this is wrong, and proposes a tiered design that does time critical work near the sensors and keeps the cloud for storage, batch analysis, and global state.",
+      "deep": "Research project (Jan 2024 to Dec 2024) on real time big data inflow, framed as communication delay versus computation delay. The core design question: which computations belong near the sensor, where latency is cheap but durability is fragile and storage is limited, and which belong in the data center, where storage is durable and compute is elastic but every round trip costs real time. Method: review of twelve primary sources on stream processing, edge deployment patterns, and latency optimization in distributed systems, each summarized for its architecture and headline findings. Output: a proposed tiered hybrid architecture plus a comparison of cloud only and tiered designs across six dimensions (scalability, reliability, bandwidth usage, privacy and security, cost effectiveness, end to end latency). Finding: the tiered design wins on latency (a 40 to 60% reduction potential for appropriately partitioned workloads, from the literature), bandwidth, and privacy, and pays in operational complexity and consistency guarantees.",
+      "say": "It's a literature review on where to process real time sensor data. The default in most companies is to ship everything to the cloud, and for real time systems that's the wrong default. I reviewed twelve primary sources and proposed a tiered design: time critical work near the sensor, durability and batch analytics in the cloud. The sources point to a 40 to 60% latency reduction for workloads that split well, and that's a literature range, not something I measured.",
+      "evidence": [
+        "portfolio: META: Research / Jan 2024 to Dec 2024",
+        "portfolio: The implicit default in most enterprise architectures is to send everything to the cloud. For real time systems, that default is wrong.",
+        "portfolio: The hard design work is deciding which computations belong near the sensor (where latency is cheap but durability is fragile and storage is limited) and which belong in the data center (where storage is durable and compute is elastic but round trips cost real time).",
+        "portfolio: The paper reviews twelve primary sources on stream processing, edge deployment patterns, and latency optimization in distributed systems.",
+        "portfolio: From the literature, I propose a tiered hybrid architecture that pushes time critical computation toward the edge and keeps cloud tiers for durability, batch analytics, and global state.",
+        "portfolio: The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally)."
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "edge-computing",
+        "literature-review"
+      ]
+    },
+    {
+      "id": "bd-02",
+      "type": "how",
+      "level": 1,
+      "q": "How was the research done?",
+      "easy": "Tanay read and summarized twelve primary sources on stream processing, deploying computation at the edge, and cutting latency in distributed systems. From them they proposed a tiered architecture and compared it with a cloud only design on six dimensions.",
+      "deep": "Steps as written: (1) select primary sources on three themes: stream processing, edge deployment patterns, latency optimization in distributed systems; (2) summarize each for its proposed architecture and headline findings; (3) synthesize a tiered hybrid architecture; (4) compare cloud only and tiered designs on scalability, reliability, bandwidth usage, privacy and security, cost effectiveness, and end to end latency. The page says '12+ primary sources reviewed' in the stat line and 'twelve primary sources' in the body; say twelve. What the write up does not describe: search strategy, inclusion and exclusion criteria, a quality rating of sources, or any experiment or simulation. That makes it a narrative review rather than a systematic review, and its quantitative claims are inherited from the sources (bd-10, bd-21).",
+      "evidence": [
+        "portfolio: The paper reviews twelve primary sources on stream processing, edge deployment patterns, and latency optimization in distributed systems.",
+        "portfolio: Each source is summarized for its proposed architecture and headline findings.",
+        "portfolio: From the literature, I propose a tiered hybrid architecture that pushes time critical computation toward the edge and keeps cloud tiers for durability, batch analytics, and global state.",
+        "portfolio: The paper compares cloud only and tiered architectures across six dimensions: scalability, reliability, bandwidth usage, privacy and security, cost effectiveness, and end to end latency.",
+        "portfolio: 40 to 60% latency reduction potential  |  12+ primary sources reviewed  |  Comparative analysis across six dimensions"
+      ],
+      "sources": [],
+      "tags": [
+        "method",
+        "literature-review"
+      ]
+    },
+    {
+      "id": "bd-03",
+      "type": "define",
+      "level": 1,
+      "q": "Define IoT, edge, fog, and cloud computing as tiers.",
+      "easy": "IoT devices are the sensors and machines producing data. The edge is computing on or right next to those devices. Fog is a middle layer, such as a local gateway or a small server in the building or at the cell tower. The cloud is the large remote data center.",
+      "deep": "Edge: compute on the device or an attached gateway; latency of a millisecond or less to the data, tiny storage, limited CPU and power, physically exposed, intermittently connected. Fog: intermediate nodes (gateways, on premises servers, base station or metro micro data centers) that aggregate many edge devices; tens of milliseconds or less away, more compute, shared by many sensors, still resource limited. Cloud: centralized data centers reached over the WAN; elastic compute, durable replicated storage, global view of all data, but round trips commonly tens to hundreds of milliseconds plus bandwidth costs. Write up mapping: the body names edge and cloud tiers and a tiered hybrid architecture, and the tags list IoT, edge, fog, and cloud computing; time critical computation moves toward the edge, and the cloud keeps durability, batch analytics, and global state. A useful rule: each tier up adds latency and capacity and loses locality.",
+      "evidence": [
+        "portfolio: TAGS: IoT, Edge Computing, Fog Computing, Cloud Computing, Stream Architecture",
+        "portfolio: The hard design work is deciding which computations belong near the sensor (where latency is cheap but durability is fragile and storage is limited) and which belong in the data center (where storage is durable and compute is elastic but round trips cost real time).",
+        "portfolio: From the literature, I propose a tiered hybrid architecture that pushes time critical computation toward the edge and keeps cloud tiers for durability, batch analytics, and global state."
+      ],
+      "sources": [],
+      "tags": [
+        "edge",
+        "fog",
+        "cloud",
+        "iot",
+        "tiers"
+      ]
+    },
+    {
+      "id": "bd-04",
+      "type": "formula",
+      "level": 1,
+      "q": "Break end to end latency into communication delay and computation delay.",
+      "easy": "Total delay is the time to move the data plus the time to process it. Moving data costs the time to push the bits onto the link, the time for the signal to travel, and any waiting in line at routers. Processing costs the work divided by the processor's speed, plus any waiting in line for that processor.",
+      "deep": "$T_{e2e} = T_{comm} + T_{comp}$. Communication per hop: $T_{trans} = L/R$ (bits over link rate), $T_{prop} = d/v$ (distance over signal speed, about $2\\times10^8$ m/s in fiber, so about 5 ms per 1,000 km one way), $T_{queue}$ (waiting in router buffers, load dependent), $T_{proc}$ (per packet handling). Summed over hops and both directions: request up, result down. Computation: $T_{comp} = C/f + W_q$, where $C$ is the CPU cycles the task needs, $f$ the cycles per second available, and $W_q$ the wait for a free processor. The tradeoff the paper frames: the cloud minimizes $C/f$ (fast, elastic compute) but maximizes $T_{comm}$ (WAN, distance, shared links); the edge minimizes $T_{comm}$ but has small $f$ and a queue that saturates quickly. Propagation is a physical floor that no cloud scaling removes, which is why control loops with deadlines of a few milliseconds cannot cross a continent.",
+      "evidence": [
+        "portfolio: The hard design work is deciding which computations belong near the sensor (where latency is cheap but durability is fragile and storage is limited) and which belong in the data center (where storage is durable and compute is elastic but round trips cost real time)."
+      ],
+      "sources": [],
+      "tags": [
+        "latency",
+        "delay-decomposition",
+        "networking"
+      ]
+    },
+    {
+      "id": "bd-05",
+      "type": "formula",
+      "level": 2,
+      "q": "When should a task run at the edge instead of the cloud? Write the decision rule.",
+      "easy": "Run it at the edge when the time saved by not shipping the data to the cloud is bigger than the extra time the slower edge processor takes. Big inputs, tight deadlines, and light computation favor the edge; small inputs and heavy computation favor the cloud.",
+      "deep": "Edge if $T_{edge} < T_{cloud}$, with $T_{edge} = \\frac{D}{R_{lan}} + RTT_{lan} + \\frac{C}{f_{edge}} + W_{edge}$ and $T_{cloud} = \\frac{D}{R_{wan}} + RTT_{wan} + \\frac{C}{f_{cloud}} + W_{cloud} + \\frac{D_{out}}{R_{wan}}$. Rearranged: offload to the cloud only if $\\frac{D}{R_{wan}} - \\frac{D}{R_{lan}} + (RTT_{wan}-RTT_{lan}) < C\\left(\\frac1{f_{edge}}-\\frac1{f_{cloud}}\\right) + (W_{edge}-W_{cloud})$. Reading it: the left side grows with input size $D$ and network distance; the right side grows with work $C$ and the speed gap. Partitioning a pipeline means choosing a cut point where the intermediate data is small (features, detections, aggregates) so that $D$ crossing the WAN shrinks, which is what the write up's 'appropriately partitioned workloads' points at. Energy on battery devices adds a second objective. This is a standard formulation for teaching; the write up states the conclusion, not this inequality.",
+      "evidence": [
+        "portfolio: The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally).",
+        "portfolio: The hard design work is deciding which computations belong near the sensor (where latency is cheap but durability is fragile and storage is limited) and which belong in the data center (where storage is durable and compute is elastic but round trips cost real time)."
+      ],
+      "sources": [],
+      "tags": [
+        "offloading",
+        "decision-rule",
+        "partitioning"
+      ]
+    },
+    {
+      "id": "bd-06",
+      "type": "case",
+      "level": 2,
+      "q": "Work a numeric example where the edge wins, and one where the cloud wins.",
+      "easy": "A 2 MB camera frame over a 20 Mbps uplink takes most of a second just to upload, so processing it locally wins even on a slow box. A 1 KB sensor reading uploads instantly, so the faster cloud processor wins. Same architecture question, opposite answers, decided by data size and compute.",
+      "deep": "Illustrative numbers (not from the paper). Case A, video frame: D = 2 MB = 16 Mb. Cloud: upload 16/20 = 0.8 s, RTT 60 ms, inference 20 ms, total about 0.88 s. Edge gateway on 1 Gbps LAN: transfer 16 ms, RTT 1 ms, inference 150 ms, total about 0.17 s, roughly 80% lower. Case B, temperature reading: D = 1 KB. Cloud: upload about 0.4 ms, RTT 60 ms, compute 20 ms, total about 80 ms. Edge: about 1 ms plus 150 ms of compute on the weak node, about 151 ms, so the cloud is nearly 2x faster. Case C, partitioned video: run a cheap motion filter at the edge (5 ms) and upload only the 5% of frames with motion; mean upload cost drops 20x and the cloud still runs the heavy model. Lessons: the winner depends on $D$, $C$, link rate, and RTT; 'send everything to the cloud' and 'do everything at the edge' are both wrong defaults; reductions like the literature's 40 to 60% apply to workloads where a split point with small intermediate data exists.",
+      "evidence": [
+        "portfolio: The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally)."
+      ],
+      "sources": [],
+      "tags": [
+        "worked-example",
+        "latency",
+        "partitioning"
+      ]
+    },
+    {
+      "id": "bd-07",
+      "type": "concept",
+      "level": 2,
+      "q": "Give the queueing intuition: why does a busy edge node become slow so suddenly?",
+      "easy": "Waiting time does not grow evenly with load. A server at half capacity has short lines, but as it approaches full capacity the line explodes. Edge nodes are small, so a burst of sensor data can push them near capacity, while the cloud can add servers.",
+      "deep": "M/M/1 queue (Poisson arrivals at rate $\\lambda$, exponential service at rate $\\mu$, one server): utilization $\\rho = \\lambda/\\mu$; mean time in system $W = \\frac{1}{\\mu-\\lambda} = \\frac{1/\\mu}{1-\\rho}$; mean number in system $L = \\frac{\\rho}{1-\\rho}$. At $\\rho = 0.5$, $W = 2/\\mu$; at 0.9, $10/\\mu$; at 0.99, $100/\\mu$. The curve is the reason for headroom: a node sized for average load is overloaded during bursts, and sensor data is bursty (events trigger many sensors at once). Implications for tier design: edge capacity must be sized for peak, or the edge must shed or degrade work (sample, drop low priority streams, push overflow upstream); the cloud's elastic capacity keeps $\\rho$ low by adding servers, at the price of WAN delay. Real traffic is burstier than Poisson, which makes waits worse than M/M/1 predicts (Kingman's approximation scales waiting with the squared coefficients of variation of arrivals and service). This is the standard model to explain the computation delay side; the write up names the tradeoff, not a queueing model.",
+      "evidence": [
+        "portfolio: The hard design work is deciding which computations belong near the sensor (where latency is cheap but durability is fragile and storage is limited) and which belong in the data center (where storage is durable and compute is elastic but round trips cost real time)."
+      ],
+      "sources": [],
+      "tags": [
+        "queueing",
+        "mm1",
+        "utilization",
+        "capacity"
+      ]
+    },
+    {
+      "id": "bd-08",
+      "type": "formula",
+      "level": 2,
+      "q": "State Little's law and explain why tail latency matters more than the mean for real time systems.",
+      "easy": "Little's law: the average number of items in a system equals the arrival rate times the average time each spends there. For real time systems the slowest few percent of requests matter, because a control loop that usually meets its deadline but misses it 1% of the time is still broken.",
+      "deep": "Little's law $L = \\lambda W$ holds for any stable system regardless of distributions; it converts between backlog, throughput, and delay (100 messages buffered at 1,000 per second means 100 ms of delay). Tails: in M/M/1 the time in system is exponential with rate $\\mu - \\lambda$, so the 99th percentile is $\\ln(100)/(\\mu-\\lambda) \\approx 4.6\\times$ the mean. Fan out multiplies the problem: a request waiting on 100 parallel servers sees the max of 100 latencies, so per server p99 becomes the typical request latency. Real time requirements are deadlines (p99 or p99.9 under a bound), so architecture comparisons should report percentiles, not means. Tiered designs help tails by removing the WAN's variable component (congestion, retransmissions) from the critical path; they can hurt tails if small edge nodes run hot. A literature range such as 40 to 60% is usually a mean or median, which is a caveat to state.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "littles-law",
+        "tail-latency",
+        "percentiles"
+      ]
+    },
+    {
+      "id": "bd-09",
+      "type": "concept",
+      "level": 3,
+      "q": "Why does pooling compute in the fog or cloud reduce waiting, and how does that cut against pushing everything to the edge?",
+      "easy": "Ten small separate lines are worse than one shared line served by ten clerks, because a busy clerk's customers cannot use an idle one. Pooling compute at a fog node or in the cloud smooths out bursts that would swamp individual edge devices.",
+      "deep": "Compare $c$ separate M/M/1 queues each with load $\\lambda$ and rate $\\mu$ against one M/M/c queue with load $c\\lambda$ and $c$ servers: same utilization $\\rho$, but the pooled system's mean wait is much lower (Erlang C), and the gap grows with $\\rho$. This is statistical multiplexing: independent bursts rarely coincide, so shared capacity needs less headroom per source. Consequence for tier design: putting compute on every device maximizes locality but forfeits pooling; a fog tier pools many devices while staying a short hop away, which is why three tier designs often place stateful aggregation and heavier inference at the fog layer and keep only filtering and deadline critical control on the device. This is reasoning beyond the write up, offered as the queueing argument for a middle tier.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "statistical-multiplexing",
+        "erlang-c",
+        "fog",
+        "queueing"
+      ]
+    },
+    {
+      "id": "bd-10",
+      "type": "number",
+      "level": 1,
+      "q": "What is the 40 to 60% figure, exactly?",
+      "easy": "It is the latency reduction the tiered design can offer for workloads that split well between edge and cloud, as reported across the sources the paper reviewed. It is a potential drawn from the literature, and no experiment of Tanay's measured it.",
+      "deep": "Source and scope: the write up says the tiered architecture wins on latency with a 40 to 60% reduction for appropriately partitioned workloads, and the stat line calls it a 'latency reduction potential'. The write up presents it as a potential drawn from the reviewed literature for appropriately partitioned workloads; it describes no experiment of Tanay's that measured it. How to present it: (1) as a range synthesized from other people's testbeds, which differ in hardware, networks, workloads, and whether they report mean, median, or tail latency; (2) conditional on partitioning, meaning workloads where a cut point exists with small intermediate data; (3) as an upper bound on what a given system will see, since workloads with small inputs and heavy compute can get slower at the edge (bd-06, case B). Interview line: 'the literature range is 40 to 60% for workloads that split well; I didn't measure it, and here's how I would' (bd-25).",
+      "evidence": [
+        "portfolio: The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally).",
+        "portfolio: 40 to 60% latency reduction potential  |  12+ primary sources reviewed  |  Comparative analysis across six dimensions"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "latency",
+        "honesty"
+      ]
+    },
+    {
+      "id": "bd-11",
+      "type": "compare",
+      "level": 1,
+      "q": "Walk through the six dimension comparison of cloud only and tiered architectures.",
+      "easy": "Tiered wins on latency, bandwidth, and privacy. Cloud only is simpler to operate and keeps data consistent in one place. Scalability, reliability, and cost depend on the workload.",
+      "deep": "| Dimension | Cloud only | Tiered (edge, fog, cloud) |\n|---|---|---|\n| End to end latency | WAN round trip on every decision | time critical work local; 40 to 60% reduction potential for appropriately partitioned workloads (literature range) |\n| Bandwidth | all raw data crosses the WAN | less raw data crosses the WAN |\n| Privacy and security | raw sensitive data leaves the site | sensitive data can be processed locally; larger physical attack surface |\n| Scalability | elastic compute and storage | cloud tier still elastic; edge capacity fixed per site |\n| Reliability | depends on connectivity; durable storage | local operation continues during WAN outages; edge storage fragile |\n| Cost effectiveness | pay per use, egress and ingest costs grow with raw volume | less transfer and cloud compute; more hardware and fleet operations |\n\nThe write up states the wins (latency, bandwidth, privacy) and the price (operational complexity and consistency guarantees); the rows for scalability, reliability, and cost above add the reasoning behind each, consistent with its framing that edge storage is limited and fragile while the cloud is durable and elastic.",
+      "evidence": [
+        "portfolio: The paper compares cloud only and tiered architectures across six dimensions: scalability, reliability, bandwidth usage, privacy and security, cost effectiveness, and end to end latency.",
+        "portfolio: The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally).",
+        "portfolio: It pays a small price in operational complexity and consistency guarantees.",
+        "portfolio: The hard design work is deciding which computations belong near the sensor (where latency is cheap but durability is fragile and storage is limited) and which belong in the data center (where storage is durable and compute is elastic but round trips cost real time)."
+      ],
+      "sources": [],
+      "tags": [
+        "comparison",
+        "architecture",
+        "tradeoffs"
+      ]
+    },
+    {
+      "id": "bd-12",
+      "type": "concept",
+      "level": 2,
+      "q": "How does a tiered design reduce bandwidth, and why does that matter?",
+      "easy": "Instead of shipping every raw reading or video frame to the cloud, the edge filters, summarizes, or extracts the interesting parts and sends only those. Less data on the wide area network means lower cost, less congestion, and less delay.",
+      "deep": "Techniques: filtering (drop readings inside normal bounds; send only anomalies), aggregation (send one minute summaries such as mean, min, max, count instead of 600 samples), compression and delta encoding, event extraction (send 'person detected at 10:02' instead of video), and on device feature extraction (send embeddings). Why it matters: uplink bandwidth at remote sites is limited and shared, cloud ingest and egress are billed, and congestion raises queueing delay for everything on the link, including the time critical messages. Risk: data discarded at the edge cannot be reanalyzed later, so designs keep a short local raw buffer or sample raw data upstream for audits and model retraining. The write up's statement: less raw data crosses the WAN.",
+      "evidence": [
+        "portfolio: The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally)."
+      ],
+      "sources": [],
+      "tags": [
+        "bandwidth",
+        "edge-filtering",
+        "aggregation"
+      ]
+    },
+    {
+      "id": "bd-13",
+      "type": "concept",
+      "level": 2,
+      "q": "What are the privacy and security consequences of processing at the edge?",
+      "easy": "Keeping sensitive data on site means less of it travels or sits in a central store, which helps privacy. But edge devices are many, physically reachable, and harder to patch, so the security attack surface grows.",
+      "deep": "Privacy gains: data minimization (raw video, health readings, or location never leave the premises; only derived signals do), easier compliance with data residency rules, smaller blast radius than one central store. Security costs: thousands of devices with physical exposure (tampering, theft), heterogeneous firmware, slow patch cycles, device identity and key management, and inconsistent logging. Controls: mutual TLS with per device certificates, secure boot and signed updates, encrypted local storage, least privilege for what each device can publish, and centralized audit of edge events. The write up claims the privacy win (sensitive data can be processed locally) and bundles security into the same dimension; an interview answer should name both sides.",
+      "evidence": [
+        "portfolio: The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally).",
+        "portfolio: The paper compares cloud only and tiered architectures across six dimensions: scalability, reliability, bandwidth usage, privacy and security, cost effectiveness, and end to end latency."
+      ],
+      "sources": [],
+      "tags": [
+        "privacy",
+        "security",
+        "edge"
+      ]
+    },
+    {
+      "id": "bd-14",
+      "type": "concept",
+      "level": 2,
+      "q": "What consistency guarantees does a tiered design give up, and how do you manage that?",
+      "easy": "When decisions are made locally, different sites can briefly disagree, and a site cut off from the cloud keeps acting on its own copy of the data. The system accepts being eventually consistent in exchange for staying fast and available.",
+      "deep": "CAP: during a network partition a distributed system chooses consistency (refuse or delay operations) or availability (keep serving with possibly stale state). Edge designs usually choose availability: the edge keeps controlling machines during a WAN outage, buffers events (store and forward), and reconciles when connectivity returns. Costs: stale global state at the edge (an updated threshold or model arrives late), conflicting updates across sites, duplicate or out of order events upstream. Tools: idempotent event IDs for deduplication, event time with watermarks for late data, last writer wins or CRDTs for mergeable state, versioned configuration with acknowledgments, and keeping truly global decisions (billing, cross site coordination) in the cloud tier. PACELC adds the normal case: even without partitions, stronger consistency costs latency. The write up's own wording: the tiered design pays a small price in consistency guarantees and keeps global state in the cloud.",
+      "evidence": [
+        "portfolio: It pays a small price in operational complexity and consistency guarantees.",
+        "portfolio: From the literature, I propose a tiered hybrid architecture that pushes time critical computation toward the edge and keeps cloud tiers for durability, batch analytics, and global state."
+      ],
+      "sources": [],
+      "tags": [
+        "consistency",
+        "cap",
+        "eventual-consistency"
+      ]
+    },
+    {
+      "id": "bd-15",
+      "type": "concept",
+      "level": 2,
+      "q": "What does the operational complexity price look like in practice?",
+      "easy": "Instead of one cloud system, you run software on many small machines in many places. Deploying updates, monitoring them, debugging failures, and keeping versions in sync all get harder.",
+      "deep": "Concrete costs: fleet deployment (staged rollouts to thousands of nodes, rollback when a site is offline), heterogeneity (different hardware, OS versions, accelerators), observability (logs and metrics from intermittently connected nodes, clock skew when correlating events), remote debugging without physical access, capacity planning per site, hardware failure and replacement logistics, and security patching (bd-13). Tooling that reduces it: containerized workloads with lightweight orchestrators at the edge, infrastructure as code, a central control plane, and the same stream processing abstractions across tiers so logic can move between them. The write up calls this a small price; in an interview, say it is the reason the cloud only default persists, and that it is only worth paying when latency, bandwidth, or privacy requirements demand it.",
+      "evidence": [
+        "portfolio: It pays a small price in operational complexity and consistency guarantees.",
+        "portfolio: The implicit default in most enterprise architectures is to send everything to the cloud. For real time systems, that default is wrong."
+      ],
+      "sources": [],
+      "tags": [
+        "operations",
+        "fleet-management",
+        "complexity"
+      ]
+    },
+    {
+      "id": "bd-16",
+      "type": "compare",
+      "level": 2,
+      "q": "Compare the Lambda and Kappa stream architectures, and say where tiers fit.",
+      "easy": "Lambda runs two pipelines, a fast approximate one for live results and a slow batch one for correct historical results, and merges them. Kappa runs one streaming pipeline and recomputes history by replaying the stored event log.",
+      "deep": "Lambda: batch layer (complete, recomputable views over all data), speed layer (low latency incremental views over recent data), serving layer merging both; cost is two code paths that must agree. Kappa: a single stream processor (Flink, Kafka Streams, Spark Structured Streaming) over a durable, replayable log (Kafka); reprocessing means replaying the log through a new version of the job. Mapping to tiers: the speed path naturally moves toward the edge and fog (time critical, small state), while the batch path and the durable log sit in the cloud (durability, batch analytics, global state), which is the split the paper's proposal describes. Stream architecture is in the project's tags, and stream processing is one of the three source themes; Lambda and Kappa are the standard vocabulary to place the proposal in.",
+      "evidence": [
+        "portfolio: TAGS: IoT, Edge Computing, Fog Computing, Cloud Computing, Stream Architecture",
+        "portfolio: The paper reviews twelve primary sources on stream processing, edge deployment patterns, and latency optimization in distributed systems.",
+        "portfolio: From the literature, I propose a tiered hybrid architecture that pushes time critical computation toward the edge and keeps cloud tiers for durability, batch analytics, and global state."
+      ],
+      "sources": [],
+      "tags": [
+        "lambda-architecture",
+        "kappa-architecture",
+        "streaming"
+      ]
+    },
+    {
+      "id": "bd-17",
+      "type": "define",
+      "level": 2,
+      "q": "Define the stream processing terms that come up with real time inflow: event time, processing time, windows, watermarks, and backpressure.",
+      "easy": "Event time is when something happened at the sensor; processing time is when the system sees it. Windows group a stream into chunks of time for aggregation. Watermarks tell the system how long to wait for late data. Backpressure slows producers down when consumers fall behind.",
+      "deep": "Event time vs processing time: they diverge with network delay, buffering at the edge during outages, and retries; correct aggregates use event time. Windows: tumbling (fixed, non overlapping), sliding or hopping (overlapping), session (gaps of inactivity close a window). Watermark: an assertion that no events older than time t are expected; it trades latency (wait longer) for completeness (fewer late drops), and late events can update results through allowed lateness. Backpressure: when a stage cannot keep up, it signals upstream to slow down instead of growing an unbounded queue; without it, queues and latency explode (bd-07). Exactly once processing combines replayable sources, checkpointed state, and idempotent or transactional sinks. Tiered designs make event time essential, because edge buffering during disconnection produces bursts of old events when the link returns.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "stream-processing",
+        "event-time",
+        "watermarks",
+        "backpressure"
+      ]
+    },
+    {
+      "id": "bd-18",
+      "type": "how",
+      "level": 1,
+      "q": "What goes in which tier in the proposed architecture?",
+      "easy": "Time critical work goes near the sensor: control loops, alarms, filtering. The cloud keeps what needs durability or a global view: long term storage, batch analytics, global state, and heavy jobs like model training.",
+      "deep": "The write up's rule: push time critical computation toward the edge; keep cloud tiers for durability, batch analytics, and global state. Expanded placement guide: edge (device or gateway): deadline bound control, threshold alarms, filtering, compression, privacy scrubbing, small model inference; fog (site or metro): aggregation across many devices, stateful windowed analytics, heavier inference, short term buffering and store and forward; cloud: the durable event log and data lake, batch and historical analytics, cross site global state, model training and distribution of new models and configuration back down. The deciding questions per computation: what is its deadline, how big is its input relative to its output, how much state and compute it needs, whether its data may leave the site, and whether it needs a global view.",
+      "evidence": [
+        "portfolio: From the literature, I propose a tiered hybrid architecture that pushes time critical computation toward the edge and keeps cloud tiers for durability, batch analytics, and global state.",
+        "portfolio: The hard design work is deciding which computations belong near the sensor (where latency is cheap but durability is fragile and storage is limited) and which belong in the data center (where storage is durable and compute is elastic but round trips cost real time)."
+      ],
+      "sources": [],
+      "tags": [
+        "architecture",
+        "placement",
+        "tiers"
+      ]
+    },
+    {
+      "id": "bd-19",
+      "type": "pushback",
+      "level": 1,
+      "q": "The 40 to 60% isn't your number. You didn't measure anything.",
+      "easy": "Correct. It is a range from the reviewed literature for workloads that partition well, and the project was a review and an architecture proposal, not an experiment. Tanay should say so up front and describe how they would measure it.",
+      "deep": "Concede: no testbed, simulation, or benchmark is described in the write up; the figure inherits each source's conditions, and those differ in hardware, networks, workloads, and the latency statistic reported. Defend: the contribution is the synthesis and the decision framework, which sources agree on the direction and on the condition (partitioning) that makes the gain appear, and a six dimension comparison that names the costs (complexity, consistency) instead of only the win. Then show the path to a measurement (bd-25).",
+      "say": "Right, it's a range from the literature, for workloads that split well, and I say that every time I quote it. My project was the review and the architecture, not an experiment. If I were to measure it, I'd build a small testbed with an edge box and a cloud region and run the same pipeline at different cut points, reporting p50 and p99.",
+      "evidence": [
+        "portfolio: The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally).",
+        "portfolio: 40 to 60% latency reduction potential  |  12+ primary sources reviewed  |  Comparative analysis across six dimensions"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "honesty",
+        "evidence"
+      ]
+    },
+    {
+      "id": "bd-20",
+      "type": "pushback",
+      "level": 2,
+      "q": "'Appropriately partitioned workloads' does all the work in that sentence. Isn't the claim circular?",
+      "easy": "It is conditional, not circular, but the condition needs to be stated as a test. A workload is appropriately partitioned when a cut point exists where the data crossing the WAN is much smaller than the raw input and the edge can run the work before that point within its capacity.",
+      "deep": "Make the condition operational: (1) data reduction ratio at the cut, raw bytes over bytes sent upstream, large (filtering, features, events); (2) edge compute before the cut fits the node at peak load with headroom ($\\rho$ well below 1); (3) the deadline is shorter than or comparable to the WAN round trip; (4) the decision does not need global state. When these hold, the decision rule in bd-05 favors the edge and gains like the literature's appear; when they fail (small inputs, heavy compute, global decisions), the cloud wins and the tiered design adds cost without benefit. Concede that the write up states the condition without this test, which makes the headline sound broader than it is.",
+      "say": "It's a condition, and I should state it as a test. A workload partitions well when there's a cut point where the data going upstream is much smaller than the raw input, the edge can do the work before that point at peak load, and the deadline is near the WAN round trip. When those don't hold, the cloud wins, and I'd say that alongside the range.",
+      "evidence": [
+        "portfolio: The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally)."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "partitioning",
+        "conditions"
+      ]
+    },
+    {
+      "id": "bd-21",
+      "type": "pushback",
+      "level": 2,
+      "q": "Twelve sources is not a systematic review. How do you know you didn't cherry pick?",
+      "easy": "Fair. With no stated search protocol or inclusion criteria, it is a narrative review, and selection bias is possible. The defensible claim is a framework and a direction of effect, not a pooled estimate.",
+      "deep": "What a systematic review would add: a registered question, databases and search strings, inclusion and exclusion criteria, screening by two reviewers, quality assessment of each study, and a PRISMA style flow diagram; for quantitative synthesis, a common latency metric and a meta analysis or at least a table of conditions per study. Bias risks: publication bias (edge papers report wins), testbed favoritism (authors benchmark workloads that suit their design), and heterogeneity in what latency means (mean, median, p99). Mitigations within a narrative review: report every source's conditions, include sources where the cloud won, and state the result as conditional. The write up describes twelve primary sources summarized for architecture and headline findings, and no protocol.",
+      "say": "Fair, it's a narrative review: twelve primary sources, no registered protocol. So I'd claim the direction and the conditions, not a precise effect size. To make it systematic, I'd write down search terms and inclusion criteria up front, tabulate each study's setup and latency metric, and deliberately include cases where the cloud won.",
+      "evidence": [
+        "portfolio: The paper reviews twelve primary sources on stream processing, edge deployment patterns, and latency optimization in distributed systems.",
+        "portfolio: Each source is summarized for its proposed architecture and headline findings."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "methodology",
+        "systematic-review"
+      ]
+    },
+    {
+      "id": "bd-22",
+      "type": "pushback",
+      "level": 2,
+      "q": "With 5G and cloud regions close to every city, isn't the edge argument obsolete?",
+      "easy": "Shorter networks shrink the communication delay, which narrows the gap, but they do not remove it. Propagation and queueing still apply, uplink bandwidth for raw video is still limited and billed, and privacy rules and outages still favor local processing.",
+      "deep": "Lower radio latency and metro edge zones reduce $RTT$ and move the fog tier closer, which is the tiered design in a carrier's form rather than its refutation. What remains: propagation (physics, about 5 ms per 1,000 km one way in fiber), congestion and tail latency on shared links, uplink bandwidth for high rate sensors (multiple camera streams saturate a site's uplink before compute becomes the issue), data residency and privacy constraints, and the need to operate during WAN outages. The decision rule (bd-05) simply gets new parameters: as $RTT_{wan}$ and $R_{wan}$ improve, more workloads flip to the cloud, which is the right outcome. The write up is from 2024 and compares cloud only with tiered designs; metro edge offerings fit inside its fog tier.",
+      "say": "It narrows the gap, and with lower round trips more workloads should move to the cloud. But propagation is physics, uplinks still choke on raw video, and privacy and outage requirements don't change with the radio. Metro edge zones are really the fog tier in a carrier's form, so they fit the design rather than replace it.",
+      "evidence": [
+        "portfolio: The implicit default in most enterprise architectures is to send everything to the cloud. For real time systems, that default is wrong.",
+        "portfolio: The hard design work is deciding which computations belong near the sensor (where latency is cheap but durability is fragile and storage is limited) and which belong in the data center (where storage is durable and compute is elastic but round trips cost real time)."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "5g",
+        "networking"
+      ]
+    },
+    {
+      "id": "bd-23",
+      "type": "pushback",
+      "level": 2,
+      "q": "Edge devices are weak. Won't the slower computation cancel out the network savings?",
+      "easy": "Sometimes, yes, and that is exactly when the cloud should win. The edge pays off when the input is large and the work before the cut is light; for heavy computation on small inputs, the cloud's faster processors win.",
+      "deep": "The decision rule makes the tradeoff explicit: the edge's extra computation time $C(1/f_{edge} - 1/f_{cloud})$ plus its queueing delay must be smaller than the WAN transfer and round trip it avoids. Weak devices also saturate under bursts (bd-07), so peak load matters more than average. Remedies inside a tiered design: run only the cheap stage at the edge (filtering, compression, a small model), move heavier stages to a pooled fog node (bd-09), use hardware accelerators sized for the workload, and degrade gracefully (sample or defer non urgent work) when edge utilization climbs. The write up's claim is conditional on partitioning for exactly this reason.",
+      "say": "Sometimes it does, and then the cloud should win. The edge only pays off when the input is big and the work before the cut is light, like filtering video down to events. Heavy compute on small inputs belongs upstream, and a fog node that pools many devices is often the right middle ground.",
+      "evidence": [
+        "portfolio: The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally).",
+        "portfolio: The hard design work is deciding which computations belong near the sensor (where latency is cheap but durability is fragile and storage is limited) and which belong in the data center (where storage is durable and compute is elastic but round trips cost real time)."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "computation-delay",
+        "edge-hardware"
+      ]
+    },
+    {
+      "id": "bd-24",
+      "type": "pushback",
+      "level": 2,
+      "q": "Sending everything to the cloud is simpler and cheaper to run. Why fight the default?",
+      "easy": "For most workloads that is the right call, and the paper concedes the operational and consistency costs. The default is wrong specifically for real time systems with tight deadlines, high raw data rates, or data that should not leave the site.",
+      "deep": "Concede: one platform, elastic scaling, a single source of truth, mature tooling, and no fleet to manage; the write up itself says the tiered design pays in operational complexity and consistency guarantees. Defend: the argument is scoped to real time systems, where WAN round trips and congestion put a floor under latency, raw data volumes make transfer costly, and local operation during outages is a requirement. Decision heuristic: start cloud only; move a computation down a tier only when a measured deadline, bandwidth bill, or privacy requirement forces it, and move it to the lowest tier that satisfies the constraint while keeping global state upstream.",
+      "say": "For most workloads, yes, and the paper says the tiered design costs complexity and consistency. The claim is narrower: for real time systems the cloud default is wrong. My rule would be to start in the cloud and move a computation down a tier only when a deadline, a bandwidth bill, or a privacy rule forces it.",
+      "evidence": [
+        "portfolio: The implicit default in most enterprise architectures is to send everything to the cloud. For real time systems, that default is wrong.",
+        "portfolio: It pays a small price in operational complexity and consistency guarantees."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "simplicity",
+        "defaults"
+      ]
+    },
+    {
+      "id": "bd-25",
+      "type": "case",
+      "level": 2,
+      "q": "How would you test the 40 to 60% claim empirically?",
+      "easy": "Build a small testbed: sensors or a data replayer, an edge box, and a cloud region. Run the same pipeline with the cut point in different places, at different loads, and measure delay at the median and the slow tail, plus bandwidth used.",
+      "deep": "Design: (1) workloads with different data to compute ratios: video analytics, high rate vibration sensors, low rate telemetry; (2) placements: cloud only, edge filter plus cloud model, fog aggregation plus cloud, full edge; (3) controlled network conditions with an emulator (tc netem) for RTT, bandwidth, loss, and outages, plus a real WAN run; (4) load sweeps up to and past edge saturation; (5) metrics: end to end latency at p50, p95, p99 with synchronized clocks, bytes over the WAN, cost per hour, accuracy of results (filtering can drop events), and recovery behavior after an outage; (6) repetitions with confidence intervals. Output: latency reduction as a function of data reduction ratio and load, which turns 'appropriately partitioned' into a measured curve and replaces a borrowed range with an owned result.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "experiment-design",
+        "testbed",
+        "next-steps"
+      ]
+    },
+    {
+      "id": "bd-26",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations of this work, and what would you do next?",
+      "easy": "It is a review without its own measurements, its headline range is borrowed, the partitioning condition is not made testable, and costs like operations and security are discussed qualitatively. Next would be a testbed experiment and a decision guide with thresholds.",
+      "deep": "Limitations: (1) no experiment or simulation described; (2) the 40 to 60% range is inherited from sources with different setups and metrics; (3) narrative review without a stated protocol (bd-21); (4) 'appropriately partitioned' left qualitative (bd-20); (5) six dimensions compared without weights or numbers for cost and complexity; (6) tail latency and failure behavior not reported; (7) 12+ in the stat line versus twelve in the body. Next: the testbed in bd-25; a small discrete event simulation (for example with SimPy) of edge, fog, and cloud queues under bursty arrivals to map where each placement wins; a decision guide with thresholds (deadline versus RTT, data reduction ratio, peak utilization); and an update for metro edge zones and newer radio networks.",
+      "evidence": [
+        "portfolio: 40 to 60% latency reduction potential  |  12+ primary sources reviewed  |  Comparative analysis across six dimensions",
+        "portfolio: The paper reviews twelve primary sources on stream processing, edge deployment patterns, and latency optimization in distributed systems."
+      ],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "next-steps",
+        "simulation"
+      ]
+    },
+    {
+      "id": "bd-27",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager.",
+      "easy": "What question, what method, what finding with its caveat, and the decision framework it gives Tanay.",
+      "deep": "Hiring manager version: a year long review of where real time data should be processed; twelve sources; tiered architecture; wins on latency, bandwidth, privacy with a literature range of 40 to 60% for well partitioned workloads; costs in operations and consistency.",
+      "say": "I spent a year on a research question: for real time sensor data, what should be processed near the sensor and what in the cloud. I reviewed twelve primary sources and proposed a tiered design. The literature points to 40 to 60% lower latency for workloads that split well, plus less bandwidth and better privacy, at the cost of operational complexity. What I took from it is a way to decide placement, and I'm clear the range came from the sources, not my own measurements.",
+      "evidence": [
+        "portfolio: The paper reviews twelve primary sources on stream processing, edge deployment patterns, and latency optimization in distributed systems.",
+        "portfolio: The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally).",
+        "portfolio: It pays a small price in operational complexity and consistency guarantees."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "bd-28",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the technical substance to a staff distributed systems engineer.",
+      "easy": "Delay decomposition, the offloading rule, queueing at small nodes, consistency under partition, and the honest evidence level.",
+      "deep": "Staff version: $T = T_{comm} + T_{comp}$; edge wins when avoided WAN transfer and RTT exceed extra compute and queueing; utilization curve at the edge; pooling at fog; AP choice under partition with event time reconciliation; literature range, not measured.",
+      "say": "The framing is end to end delay as communication plus computation. The edge wins when the WAN transfer and round trip you avoid exceed the extra compute and queueing on a small node, so it depends on data size, work, and peak utilization. Under partition the edge has to stay available and reconcile later with event time, which is the consistency price. The 40 to 60% is a literature range; my next step would be measuring it on a testbed at p99.",
+      "evidence": [
+        "portfolio: The hard design work is deciding which computations belong near the sensor (where latency is cheap but durability is fragile and storage is limited) and which belong in the data center (where storage is durable and compute is elastic but round trips cost real time).",
+        "portfolio: It pays a small price in operational complexity and consistency guarantees."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer"
+      ]
+    },
+    {
+      "id": "bd-29",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain this project to a product manager.",
+      "easy": "Frame placement as a product requirement: response time, connectivity, bandwidth cost, and privacy decide where features run.",
+      "deep": "PM version: features with hard response time requirements or sensitive data run locally; everything else stays in the cloud; tradeoffs are cost and complexity; the literature suggests large latency gains only for workloads that split well.",
+      "say": "If a feature has to respond in milliseconds, keep working when the internet drops, or handle data that shouldn't leave the building, it should run close to the device. Everything else is cheaper and simpler in the cloud. The research suggests 40 to 60% faster responses for workloads that split cleanly, but you pay in more devices to manage, so I'd only move a feature down when a requirement forces it.",
+      "evidence": [
+        "portfolio: The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally).",
+        "portfolio: It pays a small price in operational complexity and consistency guarantees."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "pm"
+      ]
+    },
+    {
+      "id": "bd-30",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a recruiter.",
+      "easy": "Plain words: a research review on edge versus cloud computing for real time data.",
+      "deep": "Recruiter version: research project over a year, reviewed twelve sources, proposed an architecture, compared six dimensions; skills are distributed systems, IoT, edge, fog, and cloud computing, and stream architecture.",
+      "say": "It was a year long research project on how to handle real time data from sensors: what to process on site and what to send to the cloud. I reviewed twelve research sources, proposed a design that does urgent work locally, and compared it with a cloud only design on six factors like speed, cost, and privacy. The skills are distributed systems, edge and cloud computing, and streaming data.",
+      "evidence": [
+        "portfolio: TAGS: IoT, Edge Computing, Fog Computing, Cloud Computing, Stream Architecture",
+        "portfolio: The paper compares cloud only and tiered architectures across six dimensions: scalability, reliability, bandwidth usage, privacy and security, cost effectiveness, and end to end latency."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": []
+}
