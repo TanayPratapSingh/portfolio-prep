@@ -16,6 +16,7 @@ import datetime as dt
 import json
 import re
 import sys
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -56,7 +57,7 @@ _raw_cache: dict[str, str | None] = {}
 
 
 def repo_file(repo: str, path: str) -> str | None:
-    url = f"https://raw.githubusercontent.com/TanayPratapSingh/{repo}/HEAD/{path}"
+    url = f"https://raw.githubusercontent.com/TanayPratapSingh/{repo}/HEAD/{urllib.parse.quote(path)}"  # file names can contain spaces
     if url not in _raw_cache:
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "interview-prep-build"}), timeout=30) as r:
