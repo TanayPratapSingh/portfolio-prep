@@ -1,0 +1,1421 @@
+{
+  "deck_id": "p-drgrpo-replication",
+  "title": "Replicating Dr. GRPO",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/drgrpo-replication",
+  "summary_easy": "Tanay retrained Qwen2.5-1.5B on math problems with reinforcement learning, once with GRPO and once with Dr. GRPO, a 2025 fix that claims to stop wrong answers from getting longer without hurting accuracy. Using the paper's own data and grader, accuracy held (51.6% vs 51.2% on MATH500) but both length claims came out reversed. It is one seed and 100 short training steps, so Tanay reports it as not reproduced here rather than refuted.",
+  "summary_deep": "A paired replication of Liu et al. 2025's Figure 5: Qwen2.5-1.5B base, R1 template, MATH questions from the authors' arrow files, and a binary answer tag reward from their vendored grader. The arms differ only in std_norm and length_norm: GRPO divides centred group rewards by their std and averages each response's clipped token loss over its own length; Dr. GRPO does neither and divides by the 1024 token budget. Each step samples 8 responses for each of 16 shared questions in vLLM on one T4, takes one on policy LoRA (rank 64) AdamW step on the other T4 in fp16, and streams merged weights back to the sampler. Analysis is paired per step and per problem with 10,000 sample percentile bootstraps. Seed 0: accuracy 0.516 vs 0.512 (paired +0.4 points [-3.4, +4.0]); Dr. GRPO 99 tokens longer per step [77, 123] and longer on wrong answers (680 vs 545). Gradient identities were tested in MLX and PyTorch, and the sampler versus learner log prob gap stayed at most 0.004 nats.",
+  "sheet": {
+    "easy": "## What it is\nA replication of the Dr. GRPO paper (Liu et al. 2025): does removing two terms from GRPO stop wrong answers from getting longer while keeping accuracy? Tanay trained Qwen2.5-1.5B twice on math with reinforcement learning, changing only those two terms.\n\n## Setup in one line\nQwen2.5-1.5B base, the paper's own MATH data, prompt template and grader, 16 questions x 8 answers per step, 100 steps, LoRA adapter, Kaggle 2x T4. Two runs that differ only in `std_norm` and `length_norm`.\n\n## Results (seed 0 only)\n| Paper's claim | Here | Verdict |\n|---|---|---|\n| GRPO length grows more | Dr. GRPO 99 tokens longer per step [77, 123] | reversed |\n| Dr. GRPO wrong answers shorter | 680 vs 545 tokens (Dr. GRPO longer) | reversed |\n| Accuracy kept | 51.6% vs 51.2%, paired +0.4 [-3.4, +4.0] | holds |\n\n## How to say it\n- \"Not reproduced here\", never \"refuted\": one seed, 100 LoRA steps, 1024 token cap.\n- Half the mechanism shows: GRPO's correct answers are shorter (262 vs 399 tokens).\n- Truncation equal in both arms (55 of 500 each), so it does not explain the gap.\n\n## Key ideas\n- Policy gradient: raise the probability of answers that beat the baseline, lower the rest.\n- GRPO: no value network; baseline = average reward of 8 answers to the same question.\n- Length bias: dividing by answer length punishes long wrong answers less per token.\n- Difficulty bias: dividing by reward spread up weights too easy and too hard questions.\n- Dr. GRPO: divide by a constant (1024) and skip the spread division.\n- Reward: 1 only if the response has `</think> <answer>` and a correct final answer, else 0.\n\n## How it was checked\n- Gradient per token tested exactly in two frameworks.\n- The answer generator and the trainer agreed on token probabilities to at most 0.004 nats.\n\n## What broke\nLaptop GPU timeout, slow vLLM from per request seeds, out of memory while merging weights, fake bf16 support on T4.\n\n## Next\nSeeds 1 and 2 (about 4.4 GPU hours each), the two single term ablations, a bigger token budget.\n",
+    "deep": "## Claim under test (Liu et al. 2025, Figure 5)\n1. Response length keeps growing under GRPO but not under Dr. GRPO.\n2. Dr. GRPO's incorrect responses are substantially shorter on evaluation.\n3. Dr. GRPO maintains reasoning performance.\n\n## Policy gradient and PPO\n$$\\nabla J=\\mathbb E\\big[(R-b)\\nabla_\\theta\\log\\pi_\\theta(o|q)\\big],\\qquad \\mathbb E[b\\nabla\\log\\pi]=0$$\n$$L^{CLIP}=\\hat{\\mathbb E}_t\\big[\\min(\\rho_t\\hat A_t,\\ \\mathrm{clip}(\\rho_t,1-\\epsilon,1+\\epsilon)\\hat A_t)\\big],\\quad \\rho_t=\\frac{\\pi_\\theta(o_t)}{\\pi_{\\theta_{old}}(o_t)},\\ \\epsilon=0.2$$\nPPO: GAE advantages from a learned $V_\\phi$, plus value loss and entropy bonus. Liu et al.'s PPO objective sums over the response's tokens with no $1/|o|$.\n\n## GRPO and Dr. GRPO\n$$\\hat A_i^{GRPO}=\\frac{R_i-\\operatorname{mean}(R)}{\\operatorname{std}(R)+10^{-8}},\\qquad \\mathcal L_{GRPO}=-\\frac1N\\sum_{i}\\frac{1}{|o_i|}\\sum_{t=1}^{|o_i|}\\min\\big(\\rho_{i,t}\\hat A_i,\\ \\operatorname{clip}(\\rho_{i,t},1\\pm\\epsilon)\\hat A_i\\big)$$\nDr. GRPO: $\\tilde A_i=R_i-\\operatorname{mean}(R)$ and $\\frac{1}{|o_i|}\\to\\frac{1}{L}$, $L=1024$ here. $\\frac{G}{G-1}\\tilde A_i$ equals the RLOO advantage.\nOriginal GRPO KL (added to the loss): $\\frac{\\pi_{ref}}{\\pi_\\theta}-\\log\\frac{\\pi_{ref}}{\\pi_\\theta}-1$. Here $\\beta=0$.\n\n## Gradients actually tested (ratio = 1, one on policy step)\n$$\\frac{\\partial\\mathcal L}{\\partial\\log\\pi(o_{i,t})}=-\\frac{\\hat A_i}{|o_i|\\,N}\\ \\text{(GRPO)},\\qquad -\\frac{\\tilde A_i}{L\\,N}\\ \\text{(Dr. GRPO)}$$\n`tests/test_objective.py`, `tests/test_objective_torch.py` (LENS [3, 7, 5], ADV [1.5, -0.5, -1.0]); PyTorch vs MLX losses agree to 1e-6; clipping test gives exactly 0 gradient past $1+\\epsilon$.\n\n## The two biases, with numbers\n- Length: GRPO's total weight per response is $\\hat A_i/N$ regardless of length, so per token weight is $\\hat A_i/(|o_i|N)$. Wrong answers of 100 and 1000 tokens: GRPO penalises each token of the short one 10x harder. Correct answers: short ones reinforced 10x harder per token (brevity).\n- Difficulty: with $k$ of $G=8$ correct, $s=\\sqrt{\\frac{G}{G-1}p(1-p)}$. One correct: GRPO $+2.47/-0.354$, Dr. GRPO $+0.875/-0.125$. Per question total weight $k=1$ vs $k=4$: Dr. GRPO 1.75 vs 4.0; GRPO 4.95 vs 7.48.\n- Zero signal: all 8 rewards equal gives $A_i=0$; logged as `signal_groups` (step 1: 2 of 16).\n\n## Reward and grading (`src/vendor/math_grader.py`, unmodified)\n- Gate: response must contain `</think> <answer>` and `</answer>`; else 0, `formatted: False`.\n- Answer = text after the last `<answer>`; `\\boxed{}` extracted by brace matching.\n- Correct if mathd normalised strings match, or sympy simplify of the difference is 0 (exact match required for unreduced fractions and integer truths).\n- Called with `fast=True`: the math_verify recall pass is skipped. Formatted but wrong = 0 (no format reward).\n- Prompt: R1 Template 1 ending `Assistant: <think>`; stop string `</answer>` kept in output.\n\n## Data\n`fetch_data.py`: authors' arrow files from sail-sg/understand-r1-zero. Train `math_12k`, order = `default_rng(seed).permutation`, 16 questions per step, 1,600 over 100 steps. Eval MATH500 in `default_rng(1234)` order: first 100 at steps 0, 25, 50, 75; all 500 at step 100, greedy. `gsm_8k`, `asdiv_2k` fetched, unused.\n\n## Hyperparameters (`runs/kaggle/*/config.json`)\n| | value |\n|---|---|\n| model | Qwen/Qwen2.5-1.5B base |\n| batch | 16 prompts x group 8 = 128 responses per step, 100 steps |\n| sampling | temperature 1.0, top_p 1.0, max 1024 new tokens, max prompt 512 |\n| LoRA | rank 64, scale 1.0 (alpha 64), dropout 0, q k v o gate up down, 73,859,072 params |\n| optimizer | AdamW lr 5e-5 constant, betas (0.9, 0.95), eps 1e-8, wd 0, clip 1.0 (never fired) |\n| loss | clip eps 0.2 (inert, ratio 1), KL off, budget normaliser 1024 |\n| learner | fp16 autocast + GradScaler, fp32 adapter and Adam state, grad checkpointing, 4096 padded tokens per micro batch |\n| sampler | vLLM, merged fp16 weights, 0.75 memory, prefix caching reset every step, seeded once |\n| eval | every 25 steps on 100; final greedy on 500 |\n| hardware | Kaggle 2x Tesla T4; sampler cuda:0, learner cuda:1 |\n| compute | seed 0, 4.35 GPU hours; about 4.4 per extra seed |\n\n## Results, seed 0 (`runs/kaggle/analysis_seed0.json`)\n| metric | GRPO | Dr. GRPO | paired (95% bootstrap) |\n|---|---|---|---|\n| MATH500 accuracy (500, greedy) | 0.512 | 0.516 | +0.4 pts [-3.4, +4.0] |\n| train length, all steps | | | Dr. GRPO +99 tokens [77, 123] |\n| train length, last third | 319 | 558 | Dr. GRPO +239 [217, 262] |\n| length slope per step | -0.2 | +3.0 | |\n| train reward, last third | 0.457 | 0.523 | |\n| train incorrect length | | | GRPO minus Dr. GRPO about -97 [-126, -67] |\n| eval length, incorrect | 545 [504, 588] | 680 [646, 715] | |\n| eval length, correct | 262 [243, 280] | 399 [381, 418] | |\n| eval length, mean | 400 | 535 | |\n| both wrong (199 problems) | | | GRPO minus Dr. GRPO -120 [-160, -80] |\n| truncated, final eval | 55 / 500 | 55 / 500 | |\n| truncated per step (of 128) | 8.22 | 9.21 | |\n\nInterim evals (100 problems), GRPO vs Dr. GRPO: step 0, 0.02 both; step 25, 0.43 vs 0.36; step 50, 0.5 vs 0.46; step 75, 0.4 vs 0.52. GRPO collapse: train length 498.5 at step 50, 227.9 at step 75 (format 0.984, 2 truncated).\n\n## Analysis and figures\n`boot_ci`: $B=10{,}000$ resamples, `default_rng(0)`, percentile interval of the mean of paired differences. $\\operatorname{Var}(\\bar d)=(\\sigma_A^2+\\sigma_B^2-2\\operatorname{Cov})/n$. Caveats: steps autocorrelated, no seed variance.\nFigures: `length_by_step.png` (5 step rolling mean), `paired_length_difference.png` (above 0 = paper's prediction; below 0 from about step 50), `final_eval_lengths.png` (correct vs wrong, 95% bootstrap bars).\n\n## Verification\n- fp64 per sequence forward vs batched padded log probs: 1e-5; caught CPU `log_softmax` off by 1.7e-4 over 151,936 tokens.\n- Merged weights reproduce LoRA logits to 1e-3; checkpoint restore bit exact.\n- Sampler vs learner mean absolute log prob gap per step: at most 0.004 nats.\n\n## Deviations from the paper\nLoRA r64 vs full; lr 5e-5 vs 1e-6; budget 1024 vs 3000; 100 vs several hundred steps; 1 update per 128 vs 8 per 1024; 2x T4 fp16 vs 8x A100 bf16; 1 seed vs 3; MATH500 only vs five benchmarks; grader in fast mode.\n\n## Hypotheses for the reversal (untested)\nToken level weighting favours long correct answers under Dr. GRPO; brevity side of the GRPO bias dominated; 1024 cap removes the regime where the paper's wrong answers live (1,000 to 1,800 tokens); both terms removed at once; LoRA and short training regime; Adam eps on tiny gradients; trajectory and seed noise.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "I replicated a 2025 paper called Dr. GRPO. It claims the GRPO objective behind DeepSeek-R1-Zero makes wrong answers longer, and that removing two terms fixes it without costing accuracy. I trained Qwen2.5-1.5B with the paper's own data and grader, twice, changing only those two terms. Accuracy held, 51.6% against 51.2% on MATH500. Both length claims came out reversed. It's one seed and 100 LoRA steps, so I call it not reproduced here.",
+      "keypoints": [
+        "Names the paper and the claim (two biases, length inflation)",
+        "Same model, data and grader; arms differ in two terms",
+        "Accuracy 51.6% vs 51.2% on MATH500",
+        "Both length claims reversed",
+        "One seed, scoped as not reproduced here"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "GRPO is the objective behind DeepSeek-R1-Zero. It has no value network; it samples several answers per question and uses their average reward as the baseline. Liu et al. argue it has two biases. It averages each answer's loss over that answer's own length, so a long wrong answer is penalised less per token. And it divides by the spread of rewards per question, which up weights questions that are too easy or too hard. Their fix, Dr. GRPO, removes both, and they report shorter wrong answers with no accuracy loss.\n\nI rebuilt their Figure 5 setup at free GPU scale. Qwen2.5-1.5B base, their R1 template, their MATH files, and their grader vendored unmodified. Each step samples 8 answers for each of 16 questions, and both arms see the same 16 questions, so every comparison is paired. The arms differ in exactly two flags. Before trusting anything I tested that the per token gradient is exactly minus A over length for GRPO and minus A over budget for Dr. GRPO. I also logged the gap between the sampler's and the learner's log probs every step. It stayed at most 0.004 nats.\n\nResults, seed 0. Accuracy held: 51.6% against 51.2% on 500 MATH500 problems, paired interval minus 3.4 to plus 4.0. Length went the other way. Dr. GRPO was 99 tokens longer per step, and its wrong answers averaged 680 tokens against 545. Truncation was equal in both arms, so it doesn't explain the gap.\n\nWhat broke: a Metal timeout on my laptop, vLLM crawling at 350 tokens per second because of per request seeds, and an out of memory error from merging weights all at once.\n\nIt's one seed, so I report it as not reproduced here. Next I'd run seeds 1 and 2 and the two single term ablations.",
+      "keypoints": [
+        "GRPO mechanism and the two biases explained correctly",
+        "Paired design: same 16 questions per step, same 500 eval problems, two flags differ",
+        "Verification before results (gradient identity, sampler vs learner gap at most 0.004 nats)",
+        "Numbers: 51.6 vs 51.2, +99 tokens per step, 680 vs 545 wrong answers",
+        "What broke, at least one concrete bug",
+        "Honest scope and next steps (seeds, ablations)"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "Liu et al. 2025 looked at the GRPO objective that DeepSeek used for R1-Zero and found two normalisations the policy gradient doesn't call for. The first divides each response's summed token loss by that response's own length. Under that rule every response gets the same total weight however long it is, so the per token push shrinks as length grows. For a correct answer that favours brevity. For a wrong answer it means a long failure is penalised less per token than a short one, and the paper argues that is why wrong answers inflate. The second divides each question's centred rewards by their standard deviation, which up weights questions where almost every sample agrees. Dr. GRPO removes both. It divides by a constant, the generation budget, and uses the plain centred reward. With those changes the objective is PPO's, with a Monte Carlo return and an unbiased baseline.\n\nI rebuilt the paper's Figure 5 comparison. The model is Qwen2.5-1.5B base. The prompt is their R1 template. The training questions and the MATH500 eval set are their published arrow files, and the grader is their math_grader.py, copied unmodified. I wrote my own trainer, first in MLX on my laptop and then in PyTorch for Kaggle. Each step samples 8 responses for each of 16 questions. Both arms see the same questions in the same order, and the vLLM engine is seeded once, so step 1 rollouts are identical across arms. The two configs differ in exactly two flags.\n\nThe systems side took most of the effort. vLLM runs on one T4 with merged fp16 weights. The learner runs on the other T4 with a rank 64 LoRA on all seven projections, fp32 adapter weights and Adam state, and fp16 autocast with loss scaling. After each optimizer step I fold the adapter into the base weights, stream them into vLLM one tensor at a time, and reset the prefix cache. I take one on policy step per rollout, so the importance ratio is exactly 1. Because that assumption only holds if the two engines agree, I log the mean absolute gap between the sampler's and the learner's log probs on every trained token. It stayed at most 0.004 nats. Before any of that, I tested that the per token gradient is exactly minus A over length for GRPO and minus A over 1024 for Dr. GRPO, in both frameworks.\n\nResults, seed 0, 100 steps. Accuracy on 500 MATH500 problems was 51.6% for Dr. GRPO and 51.2% for GRPO. The paired bootstrap interval on the difference runs from minus 3.4 to plus 4.0 points, so that claim holds. Length came out reversed. Dr. GRPO was 99 tokens longer per training step on average, and 239 longer over the last third. On eval its wrong answers averaged 680 tokens against 545. On the 199 problems both arms missed, it ran 120 tokens longer. Half of the paper's mechanism did appear: GRPO's correct answers were much shorter, 262 tokens against 399. Truncation was identical, 55 of 500 in each arm, so the cap doesn't explain the gap between them.\n\nWhy might it reverse? I have hypotheses, not findings. Without the length average, long correct responses carry more total gradient, which can push length up. The 1024 cap cuts off exactly the long wrong answers the paper says GRPO grows; the paper's incorrect lengths sit above 1,000 tokens. LoRA at 5e-5 for 100 steps is a different regime from full fine tuning for hundreds. And I removed both terms at once, so I can't say which one did it. The single term ablation arms are in the code, unrun.\n\nThe honest scope is one seed. Two identical runs drift apart after the first update because the fp16 backward pass isn't bit reproducible, and my intervals don't include seed variance. So I call it not reproduced here. Seeds 1 and 2 cost about 4.4 GPU hours each and are the next thing I'd run, then the two ablations and a bigger budget.",
+      "keypoints": [
+        "Both biases derived correctly, including the brevity side for correct answers",
+        "Dr. GRPO recovers PPO with a Monte Carlo return and unbiased baseline",
+        "Paired design: same questions, identical step 1 rollouts, two flags differ",
+        "Systems: merged weight sync, prefix cache reset, ratio 1, gap at most 0.004 nats",
+        "All headline numbers with intervals: 51.6 vs 51.2, +99, +239, 680 vs 545, 199 both wrong",
+        "Hypotheses labelled as untested, including both terms removed at once",
+        "One seed scope and the concrete next experiments"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone outside machine learning.",
+      "script": "Companies train AI models to solve math by letting them practise and rewarding right answers. A 2025 paper said the most popular recipe for this has a hidden flaw: it quietly lets wrong answers get longer and longer, which wastes computing time and makes models look like they are thinking harder when they aren't. The paper proposed a fix. I tested it myself on free cloud computers, using the paper's own model, practice questions and answer checker, and changing only the two settings the fix touches. The fix kept accuracy the same, about 51% on a standard 500 question test. But the length effect went the opposite way from the paper's prediction. I ran each version once, so I report it as not reproduced at my scale, and I wrote down exactly which extra runs would settle it.",
+      "keypoints": [
+        "Plain statement of the paper's claim (wrong answers get longer)",
+        "Fair test: same model, questions and checker, two settings changed",
+        "Accuracy unchanged, about 51%",
+        "Length went the opposite way",
+        "Honest caveat: one run each, not reproduced at this scale"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw it for me.",
+      "script": "First I draw one question box on the left with eight arrows coming out of it, each ending in a response bar of a different length, and I write 1 or 0 next to each bar. I say: this is one group, and the baseline is the mean of these eight numbers. Second, under the bars I write the two advantage formulas side by side: R minus mean, divided by std, for GRPO, and plain R minus mean for Dr. GRPO. I circle the std and say it up weights questions where almost all eight agree. Third, I draw two wrong answers, one short and one long, and write minus A over length on each token for GRPO and minus A over 1024 for Dr. GRPO. I say the long wrong answer gets a smaller per token penalty under GRPO, which is the paper's inflation argument, and the mirror image makes correct answers shorter. Fourth, I draw the system: a vLLM box on GPU 0 and a learner box on GPU 1, an arrow of 128 responses with sampler log probs going right, and an arrow of merged weights going back left after every step. Next to that arrow I write the check: sampler versus learner gap at most 0.004 nats. Fifth, a small results table with three rows: training length, wrong answer length, accuracy, with the verdicts reversed, reversed, holds, and the numbers 99 tokens, 680 against 545, and 51.6 against 51.2. I finish by writing seed 0 only under the table and listing seeds 1 and 2, the two single term ablations, and a bigger budget as what would settle it.",
+      "keypoints": [
+        "Group of 8 with 0/1 rewards and the group mean baseline",
+        "Both advantage formulas, std circled as the difficulty bias",
+        "Per token weights: -A/|o| vs -A/1024 on short and long wrong answers",
+        "Two GPU system with weight sync and the 0.004 nats check",
+        "Results table with verdicts and the seed 0 caveat"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why exactly does dividing by length favour long wrong answers?",
+      "script": "Because GRPO gives every response the same total weight regardless of length. A wrong answer with advantage minus A spreads that penalty over its own tokens, so each token of a 1,000 token answer gets a tenth of the push that each token of a 100 token answer gets. The policy is less discouraged from producing long failures. The mirror image applies to correct answers: short ones get stronger per token reinforcement, so GRPO should favour brevity when it's right. Dr. GRPO divides every response by the same constant, so each token gets the same push and a long failure takes proportionally more blame. In my run the brevity side showed up clearly; the inflation side didn't.",
+      "keypoints": [
+        "Equal total weight per response under GRPO",
+        "Per token penalty scales as 1/|o|, 10x example",
+        "Mirror effect on correct answers (brevity)",
+        "Dr. GRPO equal per token weight",
+        "Only the brevity side showed up here"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you make sure you were training the same policy you sampled from?",
+      "script": "Three layers. First, a unit test that merged weights loaded into a plain model reproduce the LoRA model's logits, so the names and the scaling in the merge are right. Second, after every weight load I reset vLLM's prefix cache, because cached prompt keys and values were computed with the old weights. Third, a runtime check: vLLM returns its own log prob for every sampled token, the learner recomputes them, and I log the mean absolute gap on every trained token, every step. Since my loss forces the ratio to 1, that gap is the only thing standing between me and silently off policy updates. It stayed at most 0.004 nats in both arms.",
+      "keypoints": [
+        "Merge test against LoRA logits",
+        "Prefix cache reset after each sync",
+        "Logged sampler versus learner gap per step",
+        "Why it matters: ratio forced to 1",
+        "At most 0.004 nats"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "So why do you think the length result reversed?",
+      "script": "I have hypotheses, and I keep them labelled that way. One: removing the length average means long correct answers get more total gradient, and Dr. GRPO's correct answers were indeed longer. Two: the 1024 token cap. The paper's wrong answers on eval run above 1,000 tokens, a regime I can't reach, and here an inflating answer loses its answer tag and scores zero, which penalises length in both arms. Three: I removed both terms at once, so the std change could be driving it. Four: one seed, and GRPO had an unexplained length collapse between steps 55 and 80 that accounts for a lot of the gap.",
+      "keypoints": [
+        "Hypotheses, not findings",
+        "Token weighting favours long correct answers",
+        "1024 cap versus the paper's long wrong answers",
+        "Both terms removed at once",
+        "One seed and the GRPO collapse"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What would you run next, and what result would change your mind?",
+      "script": "Seeds 1 and 2 first, about 4.4 GPU hours each, on exactly the same questions. If GRPO comes out longer than Dr. GRPO in two of three seeds, I'd say my seed 0 was the outlier and the paper's claim survives at this scale. Then the two single term arms already in my variants file, GRPO without the length term and GRPO without the std term, to attribute whatever effect remains. Then a larger budget on a subset, because the cap is my most plausible suppressor. I'd also switch the step level interval to a block bootstrap, since training steps are autocorrelated.",
+      "keypoints": [
+        "Seeds 1 and 2 at about 4.4 GPU hours each",
+        "Explicit criterion: GRPO longer in two of three seeds",
+        "Single term ablations for attribution",
+        "Larger budget",
+        "Block bootstrap for autocorrelated steps"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Dr. GRPO divides by 1024 instead of the response length, so its gradients are much smaller. How do you know you didn't just give it a lower learning rate?",
+      "script": "It does shrink the gradient. At step 1 the logged grad norm was 0.046 for GRPO and 0.0014 for Dr. GRPO. Two things keep that from acting like a learning rate change. AdamW divides each coordinate by its running RMS, so a constant scale on the whole gradient mostly cancels. And the clip threshold was 1.0, so clipping never rescaled either arm. What doesn't cancel is the relative weighting inside a step: GRPO weights tokens by one over response length and questions by one over reward std, Dr. GRPO weights every token equally. That reweighting is the treatment. The cleaner test is the two single term arms, which I haven't run.",
+      "keypoints": [
+        "Concedes the raw gradient is smaller, with step 1 numbers",
+        "Adam's per coordinate normalisation cancels a constant scale",
+        "Clipping at 1.0 never fired",
+        "Relative weighting is the actual treatment",
+        "Names the unrun single term ablations"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "One seed. Why should I believe anything here?",
+      "script": "You shouldn't believe more than I claim, and I claim little. The bootstrap intervals cover variation across steps and problems, not across seeds, and two identical runs drift apart after the first update because the fp16 backward pass isn't bit reproducible. The paper used three seeds. What I can defend is the design: same questions every step, identical first rollouts, same eval set, same grader, so the seed is the main unknown left. That's why I say not reproduced here and never refuted. Seeds 1 and 2 are one argument away and cost about 4.4 GPU hours each; stopping at seed 0 was my choice and the write up says so.",
+      "keypoints": [
+        "Concedes seed variance is not in the intervals",
+        "Explains why runs diverge (fp16 nondeterminism)",
+        "Defends the paired design",
+        "Scoped claim: not reproduced here",
+        "Cheap, named fix: seeds 1 and 2"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "LoRA, a 1024 token cap and 100 steps. Is this even a replication?",
+      "script": "It's a partial one, and I list every deviation in a table. The model, template, grader, training data and eval set are the paper's own. The deviations are LoRA instead of full fine tuning, a 5e-5 learning rate, 1024 tokens instead of 3000, 100 steps, one update per 128 responses, T4s in fp16, and one seed. They apply identically to both arms, and neither term under test depends on any of them. The one I take most seriously is the cap, because the claim is about length growth. I measured truncation separately: 55 of 500 final responses in each arm, so it can't explain the gap between arms, though it may suppress growth in both.",
+      "keypoints": [
+        "Concedes it is partial, deviations listed",
+        "What is identical to the paper",
+        "Deviations hit both arms and neither term depends on them",
+        "Budget is the most serious caveat",
+        "Truncation measured: 55 of 500 each"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "grpo-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is this project, in two sentences?",
+      "easy": "Tanay trained a small language model on math problems with reinforcement learning twice: once with the standard GRPO objective and once with Dr. GRPO, a corrected version proposed in a 2025 paper. The paper says the correction keeps accuracy and stops answers from bloating; at this scale the accuracy claim held and both length claims came out the other way, on a single seed.",
+      "deep": "A replication of Liu et al. 2025 (Understanding R1-Zero-Like Training: A Critical Perspective) on the paper's Figure 5 setup: Qwen2.5-1.5B base, the R1 template, MATH training questions, and a binary answer tag reward scored by the authors' grader vendored unmodified. The two arms differ in exactly two flags, std_norm and length_norm. Both arms see the same 16 questions at every step and the same 500 MATH500 problems at the end, so every comparison is paired, with 95% bootstrap intervals. Scale: seed 0 only, 100 LoRA steps, a 1024 token budget, Kaggle 2x T4 in fp16. Accuracy 51.6% vs 51.2% (holds); Dr. GRPO longer during training and on wrong answers (both length claims reversed). Tanay reports it as not reproduced here rather than refuted.",
+      "say": "I replicated the main comparison from the Dr. GRPO paper on Qwen2.5-1.5B, with the authors' own data and grader. Accuracy held, 51.6% against 51.2% on MATH500. Both length claims came out reversed. That's one seed, so I call it not reproduced here, and I stop short of refuted.",
+      "evidence": [
+        "portfolio: BADGE: 51.6% vs 51.2% on MATH500 / both length claims reversed / 1 seed, 100 steps",
+        "portfolio: The two run configs differ in exactly two flags: std_norm and length_norm are on for GRPO and off for Dr. GRPO."
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2503.20783"
+      ],
+      "tags": [
+        "grpo",
+        "dr-grpo",
+        "replication",
+        "overview"
+      ]
+    },
+    {
+      "id": "grpo-02",
+      "type": "why",
+      "level": 1,
+      "q": "Why does the question matter? One plain sentence, then the technical version.",
+      "easy": "Reasoning models are trained until they write longer answers, and many people read that growth as better thinking; if part of the growth comes from a quirk in the loss, people pay for tokens that only look like thinking.",
+      "deep": "DeepSeek-R1-Zero's response length climbs steadily during RL, and that climb is often read as emergent long chain of thought. Liu et al. argue part of it is an optimization artifact: GRPO divides each response's loss by its own length, so the per token penalty on a wrong answer shrinks as the answer grows, and the policy can lower the loss on its failures by rambling. If that holds, response length is a confounded progress signal, inference token budgets are inflated, and the problem is wider than GRPO: the paper lists trl, OpenRLHF, verl, SimpleRL-Zero and Open-Reasoner-Zero as PPO loss implementations that normalise by response length. The proposed fix changes the loss that many training stacks use, so an independent check at a different scale says something about how general the effect is. That is the gap this project fills, at the scale a free GPU allows.",
+      "evidence": [
+        "portfolio: GRPO is the objective behind DeepSeek-R1-Zero, and Liu et al. 2025 argue it has two biases built in."
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783",
+        "https://arxiv.org/abs/2503.20783"
+      ],
+      "tags": [
+        "motivation",
+        "length-bias",
+        "overthinking"
+      ]
+    },
+    {
+      "id": "grpo-03",
+      "type": "formula",
+      "level": 1,
+      "q": "Start from first principles: what is the policy gradient, and why subtract a baseline?",
+      "easy": "The model gets a score for each answer. The policy gradient raises the probability of every token in answers that scored above what was expected and lowers it for answers below. Subtracting the expected score (the baseline) leaves the average direction unchanged but makes each update far less noisy.",
+      "deep": "Objective $J(\\theta)=\\mathbb E_{q,\\,o\\sim\\pi_\\theta}[R(q,o)]$. The log derivative trick $\\nabla\\pi=\\pi\\nabla\\log\\pi$ gives $\\nabla J=\\mathbb E[R\\,\\nabla\\log\\pi_\\theta(o|q)]$ with $\\log\\pi_\\theta(o|q)=\\sum_t\\log\\pi_\\theta(o_t|q,o_{<t})$, so every token's log prob gradient is multiplied by the same scalar when the reward is a single outcome. A baseline $b$ that does not depend on the sampled $o$ keeps the estimator unbiased, because $\\mathbb E[b\\nabla\\log\\pi]=b\\nabla\\sum_o\\pi(o)=b\\nabla1=0$; a good $b\\approx\\mathbb E[R]$ cuts variance. The advantage $A=R-b$ is the centred score. In LLM RL an episode is one response, an action is one token, and the state is prompt plus prefix. GRPO and Dr. GRPO use the mean reward of the G samples for the same question as $b$. Including the sample itself in that mean couples $b$ to $o$; RLOO uses the leave one out mean instead, and Liu et al. show Dr. GRPO's advantage equals RLOO's up to the factor $G/(G-1)$, which only rescales the step. Failure modes: high variance with sparse 0/1 rewards, zero gradient when all G samples tie, and no per token credit assignment.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783",
+        "https://arxiv.org/abs/2402.14740"
+      ],
+      "tags": [
+        "policy-gradient",
+        "reinforce",
+        "baseline",
+        "fundamentals"
+      ]
+    },
+    {
+      "id": "grpo-04",
+      "type": "formula",
+      "level": 2,
+      "q": "Write the PPO objective and explain clipping and the value baseline.",
+      "easy": "PPO lets you reuse one batch of samples for several updates, but stops each token's probability ratio from moving more than about 20% per round. It trains a separate value network that predicts the expected reward, used as the baseline.",
+      "deep": "$L^{CLIP}(\\theta)=\\hat{\\mathbb E}_t\\big[\\min(\\rho_t\\hat A_t,\\ \\mathrm{clip}(\\rho_t,1-\\epsilon,1+\\epsilon)\\hat A_t)\\big]$ with $\\rho_t=\\pi_\\theta(a_t|s_t)/\\pi_{\\theta_{old}}(a_t|s_t)$ and $\\epsilon=0.2$ in the PPO paper. The min makes it a pessimistic bound: with $\\hat A>0$ the gain stops once $\\rho>1+\\epsilon$, with $\\hat A<0$ once $\\rho<1-\\epsilon$, and moves that make the objective worse are never clipped. Full PPO adds a value loss $c_1(V_\\phi(s_t)-V^{targ}_t)^2$ and an entropy bonus, and estimates $\\hat A_t$ with GAE, $\\hat A_t=\\sum_l(\\gamma\\lambda)^l\\delta_{t+l}$, $\\delta_t=r_t+\\gamma V(s_{t+1})-V(s_t)$. For an LLM the reward arrives at the last token, so the critic must learn a per token value from a sparse signal, and it is roughly policy sized; that memory and that difficulty are what GRPO removes. Liu et al. write PPO's objective as a plain sum over the response's tokens, with no division by length, which is the reference point for both biases. In this repo the clip epsilon is 0.2 in sequence_losses but inert, because one on policy step per rollout keeps the ratio at exactly 1.",
+      "evidence": [
+        "repo:drgrpo-replication/src/objective_torch.py: clip_eps: float = 0.2,"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/1707.06347",
+        "https://arxiv.org/abs/1707.06347",
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "ppo",
+        "clipping",
+        "gae",
+        "value-model"
+      ]
+    },
+    {
+      "id": "grpo-05",
+      "type": "compare",
+      "level": 1,
+      "q": "How does GRPO differ from PPO?",
+      "easy": "PPO trains a second network that predicts how good each state is and uses it as a baseline. GRPO drops that network: it samples several answers to the same question and uses their average reward as the baseline. That saves a lot of memory, which is why it became the default for reasoning RL.",
+      "deep": "GRPO (Shao et al. 2024, DeepSeekMath) samples G outputs per question, gives every token of output i the same advantage $(r_i-\\mathrm{mean}(r))/\\mathrm{std}(r)$, keeps PPO's clipped ratio, averages each output's token terms over $1/|o_i|$, and in its original form adds a KL penalty to a reference policy directly to the loss using the always positive estimator $\\frac{\\pi_{ref}}{\\pi_\\theta}-\\log\\frac{\\pi_{ref}}{\\pi_\\theta}-1$ instead of folding it into the reward. Gains: no critic to train or hold in memory, and no per token value fit from a sparse final reward. Costs: G rollouts per question, a Monte Carlo baseline with no per token credit assignment, and zero signal on questions where all G samples agree. Dr. GRPO keeps the group baseline but drops the std division and the $1/|o_i|$ average; Liu et al. show that recovers PPO's objective with a Monte Carlo return and an unbiased baseline. In this repo KL is off and there is one on policy step per rollout, so the update is a plain policy gradient with a group mean baseline.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/html/2402.03300",
+        "https://arxiv.org/abs/2402.03300",
+        "https://arxiv.org/abs/1707.06347",
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "grpo",
+        "ppo",
+        "policy-gradient",
+        "kl"
+      ]
+    },
+    {
+      "id": "grpo-06",
+      "type": "formula",
+      "level": 2,
+      "q": "Compute GRPO's advantages for a group of 8 with one correct answer, and show how the std term reweights questions by difficulty.",
+      "easy": "With one right answer out of eight the group mean is 0.125. Dr. GRPO gives the right answer +0.875 and each wrong one -0.125. GRPO also divides by the spread of the scores, about 0.354, so they become about +2.47 and -0.35. Dividing by the spread gives questions the model almost always gets right, or almost always gets wrong, extra weight.",
+      "deep": "Rewards $(1,0,0,0,0,0,0,0)$, mean $0.125$. Unbiased std (ddof=1, as in variants.py and torch .std()): $s=\\sqrt{\\tfrac17(0.875^2+7\\cdot0.125^2)}=\\sqrt{0.125}=0.354$. GRPO: $+2.47$ and $-0.354$; Dr. GRPO: $+0.875$ and $-0.125$. In general with $k$ of $G$ correct and $p=k/G$, $s=\\sqrt{\\tfrac{G}{G-1}p(1-p)}$. Per question total weight $\\sum_i|A_i|$ is $2Gp(1-p)$ under Dr. GRPO and $2\\sqrt{G(G-1)}\\sqrt{p(1-p)}$ under GRPO. For $G=8$: Dr. GRPO gives 1.75 at $k=1$ and 4.0 at $k=4$ (ratio 0.44); GRPO gives 4.95 and 7.48 (ratio 0.66). So relative to a 50/50 question, GRPO up weights the nearly all wrong and nearly all right questions by the factor $1/s$; that is the question level difficulty bias. Batch level advantage normalisation would scale every question by the same number and leave relative weights alone. If all 8 rewards tie, $A_i=0/(0+10^{-8})=0$ under both variants and the question contributes nothing; the trainer logs signal_groups for that reason.",
+      "evidence": [
+        "repo:drgrpo-replication/src/variants.py: adv = adv / (r.std(axis=1, ddof=1, keepdims=True) + 1e-8)"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783",
+        "https://arxiv.org/html/2402.03300"
+      ],
+      "tags": [
+        "advantage",
+        "difficulty-bias",
+        "worked-example"
+      ]
+    },
+    {
+      "id": "grpo-07",
+      "type": "formula",
+      "level": 2,
+      "q": "Write down the GRPO and Dr. GRPO losses as this repo implements them.",
+      "easy": "Both turn each answer's advantage into a per token score. GRPO averages that score over the answer's own length and divides advantages by the spread of rewards in the group. Dr. GRPO sums over tokens, divides by a fixed 1024, and only subtracts the group mean.",
+      "deep": "For a question with $G=8$ responses and rewards $R_i\\in\\{0,1\\}$. GRPO: $\\hat A_i=\\frac{R_i-\\bar R}{\\mathrm{std}(R)+10^{-8}}$ (ddof=1), $\\ell_i=\\frac{1}{|o_i|}\\sum_t\\max\\big(-\\hat A_i\\rho_{i,t},\\ -\\hat A_i\\,\\mathrm{clip}(\\rho_{i,t},0.8,1.2)\\big)$. Dr. GRPO: $\\hat A_i=R_i-\\bar R$ and $\\ell_i=\\frac{1}{1024}\\sum_t(\\cdot)$. Batch loss $L=\\frac1N\\sum_i\\ell_i$ with $N=128$ responses per step; zero advantage responses are skipped in the backward pass but still count in $N$. With the ratio at 1, $\\partial L/\\partial\\log\\pi(o_{i,t})=-\\hat A_i/(|o_i|N)$ under GRPO and $-\\hat A_i/(1024N)$ under Dr. GRPO, which the tests assert exactly. This mirrors the authors' oat aggregator, transcribed in objective.py: masked_mean over the response for GRPO, masked_sum with constant_normalizer=generate_max_length for Dr. GRPO, then a mean over the minibatch.",
+      "evidence": [
+        "portfolio: The per token gradient is exactly -A/|o| under GRPO and -A/budget under Dr. GRPO, tested in both the MLX and the PyTorch version of the loss.",
+        "repo:drgrpo-replication/src/objective.py: drgrpo -> masked_sum(loss, mask, axis=1, constant_normalizer=generate_max_length)"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "grpo",
+        "dr-grpo",
+        "loss",
+        "math"
+      ]
+    },
+    {
+      "id": "grpo-08",
+      "type": "concept",
+      "level": 1,
+      "q": "What are the two biases the paper says GRPO has, and why would they make wrong answers longer?",
+      "easy": "GRPO spreads each answer's reward or penalty over its own length, so a long wrong answer is punished less per word than a short wrong one, and over many updates wrong answers drift longer. It also divides by the spread of rewards within a question, which gives very easy and very hard questions extra weight.",
+      "deep": "Response level length bias: the $1/|o_i|$ factor makes the per token gradient magnitude $|\\hat A_i|/|o_i|$. For a correct response (positive advantage) shorter responses get bigger per token updates, so the policy prefers brevity among correct answers. For an incorrect response (negative advantage) longer responses get smaller per token penalties, so length is penalised less among wrong answers and can grow. Question level difficulty bias: dividing by $\\mathrm{std}(R)$ up weights questions whose rewards are nearly all 0 or all 1, because their std is small. Advantage normalisation is a standard RL trick when done over a whole batch; per question normalisation instead reweights questions by difficulty. Liu et al. also trace the same per response length normaliser to several open source PPO loss implementations and speculate it was inherited from pretraining code, where dividing by a fixed context length was harmless. Dr. GRPO replaces the normaliser with a constant (the generation budget) and uses the centred reward with no std division.",
+      "say": "The length bias is the interesting one. GRPO divides each answer's loss by its own length, so a long wrong answer takes a smaller penalty per token than a short one. The prediction is that wrong answers inflate over training. Dr. GRPO divides by a constant instead.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "dr-grpo",
+        "length-bias",
+        "difficulty-bias"
+      ]
+    },
+    {
+      "id": "grpo-09",
+      "type": "formula",
+      "level": 2,
+      "q": "Show mathematically how the 1/|o| term biases length, with numbers.",
+      "easy": "Under GRPO every answer gets the same total push no matter how long it is, so each token of a long answer gets a smaller share. Under Dr. GRPO each token gets the same push, so long answers carry more total weight, which is what the true policy gradient asks for.",
+      "deep": "With the ratio at 1, the update coefficient on $\\log\\pi(o_{i,t})$ is $\\hat A_i/(|o_i|N)$ for GRPO, so the response's total weight $\\sum_t\\hat A_i/(|o_i|N)=\\hat A_i/N$ does not depend on length. Equivalently, GRPO is the unbiased estimator $\\hat A_i\\nabla\\log\\pi(o_i)$ with each sample reweighted by $1/|o_i|$, so its expectation is no longer the gradient of expected reward. Example: two wrong answers in one group, $\\hat A=-0.354$, one 100 tokens and one 1000 tokens. GRPO pushes each token of the short one down by $0.00354/N$ and each token of the long one by $0.000354/N$, ten times less. Dr. GRPO with budget 1024 pushes every token of both by $0.000346/N$, so the long failure takes ten times the total blame of the short one. Mirror image for correct answers: GRPO gives a 100 token correct answer ten times the per token reinforcement of a 1000 token one, a brevity pressure. The paper's prediction combines both: shorter correct answers and longer wrong ones under GRPO. Any constant works in place of 1024; the paper notes other constants change only the gradient norm.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "length-bias",
+        "math",
+        "worked-example"
+      ]
+    },
+    {
+      "id": "grpo-10",
+      "type": "concept",
+      "level": 2,
+      "q": "What exactly is the Dr. GRPO fix, and why is it called unbiased?",
+      "easy": "Dr. GRPO deletes the two extra divisions. The loss for an answer becomes the sum over its tokens divided by a fixed number, and the advantage is just the reward minus the group's average. With those changes it computes the textbook policy gradient.",
+      "deep": "Remove $\\frac{1}{|o_i|}$ (replace by a constant $L$, the generation budget, MAX_TOKENS in the paper's listing) and remove the $\\mathrm{std}(R)$ division. The objective becomes $\\frac{1}{G}\\sum_i\\frac{1}{L}\\sum_t\\min(\\rho_{i,t}\\tilde A_i,\\mathrm{clip}(\\rho_{i,t},1\\pm\\epsilon)\\tilde A_i)$ with $\\tilde A_i=R_i-\\mathrm{mean}(R)$, which is PPO's Eq. 2 with a Monte Carlo return and a group mean baseline, scaled by a constant. Unbiased here means its expected gradient is proportional to $\\nabla\\mathbb E[R]$, with no per sample weights that depend on length or on the question's reward spread. $\\frac{G}{G-1}\\tilde A_i$ equals the RLOO advantage $R_i-\\frac{1}{G-1}\\sum_{j\\ne i}R_j$, which removes the self inclusion coupling; the factor only rescales the step. In this repo the constant is passed as budget=args.max_tokens=1024, so the Dr. GRPO arm differs from GRPO only in length_norm=False and std_norm=False.",
+      "evidence": [
+        "repo:drgrpo-replication/src/train_torch.py: variant.length_norm, args.max_tokens)",
+        "repo:drgrpo-replication/src/variants.py: \"drgrpo\": Variant(\"drgrpo\", std_norm=False, length_norm=False),"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783",
+        "https://arxiv.org/abs/2402.14740"
+      ],
+      "tags": [
+        "dr-grpo",
+        "unbiased",
+        "rloo"
+      ]
+    },
+    {
+      "id": "grpo-11",
+      "type": "concept",
+      "level": 1,
+      "q": "What is RL with verifiable rewards, and what does R1-Zero style training mean here?",
+      "easy": "Instead of a learned reward model judging answers, a program checks them. The model gets 1 if the final answer inside its answer tags is correct and 0 otherwise, and nothing else is rewarded. R1-Zero style means the RL starts straight from a base model with no supervised warm up.",
+      "deep": "RLVR swaps the learned reward model of RLHF for a rule based verifier, so the policy can only raise reward by getting the answer right (or by exploiting the grader's parsing). R1-Zero style means RL directly on a base model, prompted with a template that asks for reasoning inside <think> and the answer inside <answer>. Here the prompt is the paper's Template 1 ending in 'Assistant: <think>', generation stops on the string </answer>, and answer_tag_reward_fn from the authors' math_grader.py returns 1 or 0. The base model has to emit the format before it can earn anything, so format is the first thing learned: both arms' step 1 format rate was 0.15625 and reward 0.015625. Liu et al. set the KL coefficient to 0 because a rule based verifier has no learned reward model whose accuracy depends on staying near a reference policy; dropping KL also saves the reference model's memory. The trainer here also runs with KL off.",
+      "evidence": [
+        "repo:drgrpo-replication/src/template.py: STOP_STR = \"</answer>\"",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/log.jsonl: {\"step\": 1, \"reward\": 0.015625, \"format_rate\": 0.15625",
+        "repo:drgrpo-replication/runs/kaggle/drgrpo_s0/log.jsonl: {\"step\": 1, \"reward\": 0.015625, \"format_rate\": 0.15625"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "rlvr",
+        "r1-zero",
+        "reward"
+      ]
+    },
+    {
+      "id": "grpo-12",
+      "type": "how",
+      "level": 1,
+      "q": "Exactly how is an answer graded and extracted?",
+      "easy": "An answer only counts if the response closes its reasoning with the exact text '</think> <answer>' and then closes the answer tag. The text inside the last answer tag is compared with the reference after normalisation, first as strings and then symbolically. Right scores 1; wrong or badly formatted scores 0, with no partial credit for format.",
+      "deep": "answer_tag_reward_fn(response, gt, fast=True) from the vendored math_grader.py. (1) Strict format gate: the response must contain both '</think> <answer>' (one space) and '</answer>', else it returns formatted False and 0. (2) The model answer is the text after the last '<answer>' with '</answer>' removed; if it contains \\boxed, the last boxed expression is extracted by brace matching, and a failed extraction scores 0. (3) grade(): a boxed ground truth is unwrapped too; the answer is correct if mathd normalisation makes the strings equal, or if grade_answer_sympy succeeds: normalise, split tuples and intervals, require exact matches for unreduced fractions and integer ground truths, otherwise check that sympy.simplify of (truth) minus (given) is 0, guarded against expressions with more than two unknown letters or exponent patterns that hang sympy. (4) fast=True skips the math_verify recall pass, which runs only when fast is False. (5) Formatted but wrong earns 0, per the source comment, to avoid format reward hacking. The sampler stops at '</answer>' and keeps the stop string in the output so the gate can see it, and format rate is logged separately from reward.",
+      "evidence": [
+        "repo:drgrpo-replication/src/vendor/math_grader.py: if \"</think> <answer>\" in model_response and \"</answer>\" in model_response:",
+        "repo:drgrpo-replication/src/train_torch.py: info, r = answer_tag_reward_fn(t, a, fast=True)",
+        "repo:drgrpo-replication/src/train_torch.py: stop=[STOP_STR], include_stop_str_in_output=True, logprobs=1)"
+      ],
+      "sources": [],
+      "tags": [
+        "reward",
+        "grader",
+        "answer-extraction"
+      ]
+    },
+    {
+      "id": "grpo-13",
+      "type": "how",
+      "level": 1,
+      "q": "How was MATH500 evaluated?",
+      "easy": "Each model answered the same 500 test problems once, always taking its most likely next token (no randomness), under the same 1024 token limit, and the same grader scored them. During training a quicker 100 problem check ran every 25 steps.",
+      "deep": "run_eval(step, n) builds R1 template prompts for MATH500 problems in a fixed order from np.random.default_rng(1234).permutation, then calls sampler.generate(prompts, 1, 0.0): one sample at temperature 0, which is greedy decoding, with max 1024 new tokens and a stop at </answer>. Interim evals use the first 100 problems of that permutation at steps 0, 25, 50 and 75; step 100 runs final_eval_n=500 instead. Each eval logs accuracy (mean reward), format_rate, len_mean, len_correct, len_incorrect and truncated count. The final responses are saved to final_eval_responses.jsonl (len, finish reason, text), and analyze.py regrades them problem by problem with the same grader, which reproduced the trainer's logged accuracies (0.512 and 0.516) and yields per problem pairs. At step 0 both arms scored 2 of 100 with a 0.12 format rate. Differences from the paper's evaluation: 1024 tokens instead of 3000, and MATH500 only instead of five benchmarks. MATH500 is a 500 problem subset of the MATH test set; MATH itself is 12,500 competition problems with worked solutions.",
+      "evidence": [
+        "repo:drgrpo-replication/src/train_torch.py: eval_idx = np.random.default_rng(1234).permutation(len(evald))",
+        "repo:drgrpo-replication/src/train_torch.py: outs = sampler.generate(prompts, 1, 0.0, seed=0)",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/eval.jsonl: {\"step\": 0, \"n\": 100, \"accuracy\": 0.02, \"format_rate\": 0.12,",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"accuracy_grpo\": 0.512,"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2103.03874",
+        "https://arxiv.org/abs/2305.20050"
+      ],
+      "tags": [
+        "math500",
+        "evaluation",
+        "greedy"
+      ]
+    },
+    {
+      "id": "grpo-14",
+      "type": "why",
+      "level": 2,
+      "q": "Where do PPO clipping and the KL penalty show up in your runs?",
+      "easy": "Neither does any work here. The model takes exactly one update per batch of answers, so clipping never triggers, and the KL penalty is switched off as in the paper.",
+      "deep": "Clipping only binds when the policy being updated differs from the one that sampled, which happens on the second and later minibatch steps over the same rollout. The paper takes 8 sequential updates per 1024 response rollout, so its later minibatches are slightly stale and clipping at $\\epsilon=0.2$ can bind. This repo takes one optimizer step per 128 response rollout and passes lp.detach() as old_logps, so the ratio is exactly 1 and the clipped surrogate's gradient reduces to $-\\hat A_i\\nabla\\log\\pi$. The clipping code is still tested (ratio above $1+\\epsilon$ with positive advantage gives zero gradient), so it would behave under a multi step schedule. KL is off ($\\beta=0$). Neither the $1/|o|$ term nor the std term depends on clipping or KL, which is why the deviation is defensible, but it means the biases were tested in the simplest on policy regime.",
+      "evidence": [
+        "repo:drgrpo-replication/src/train.py: The paper takes eight sequential steps per 1024 response rollout, so its",
+        "repo:drgrpo-replication/src/train.py: here the ratio is exactly 1."
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783",
+        "https://arxiv.org/abs/1707.06347"
+      ],
+      "tags": [
+        "ppo",
+        "clipping",
+        "kl",
+        "on-policy"
+      ]
+    },
+    {
+      "id": "grpo-15",
+      "type": "how",
+      "level": 1,
+      "q": "What data did you train and evaluate on, and what did you leave out?",
+      "easy": "Training questions came from the paper authors' own copy of the MATH competition dataset, and the test was MATH500, a standard 500 problem subset. Tanay downloaded the authors' exact files instead of rebuilding them, so the questions match the paper's.",
+      "deep": "src/fetch_data.py downloads Apache Arrow files from sail-sg/understand-r1-zero on GitHub: math_12k (training), gsm_8k and asdiv_2k (fetched, unused here) and evaluation_suite/math (MATH500). Records carry a problem and an answer field. Training order is np.random.default_rng(seed).permutation over math_12k; step k takes the next 16 questions (modulo the dataset size), so both arms of a seed see identical questions in identical order, and 100 steps consume 1,600 questions, a single partial pass with no repeats. The paper describes the 12k set as high school competition math. Quirks: answers are LaTeX strings (fractions, intervals, tuples, boxed expressions), which is why grader normalisation matters, and prompts are capped at 512 tokens. Excluded: the paper's other four benchmarks (AIME 2024, AMC, Minerva Math, OlympiadBench), for time. The reason to use the authors' files: a re derived MATH split could differ in difficulty, and difficulty drives both reward and length.",
+      "evidence": [
+        "repo:drgrpo-replication/src/fetch_data.py: \"math_12k\": \"train/math_12k/train/data-00000-of-00001.arrow\",",
+        "repo:drgrpo-replication/src/train_torch.py: qs = [train[int(order[(k0 + k) % len(order)])] for k in range(args.prompts)]"
+      ],
+      "sources": [
+        "https://github.com/sail-sg/understand-r1-zero",
+        "https://arxiv.org/abs/2103.03874"
+      ],
+      "tags": [
+        "data",
+        "math",
+        "math500"
+      ]
+    },
+    {
+      "id": "grpo-16",
+      "type": "how",
+      "level": 1,
+      "q": "Walk me through the experimental setup and hyperparameters.",
+      "easy": "Same model, same questions, same grader, two training objectives. Each step the model answers 16 math questions 8 times each, the answers are graded, and the model updates once. After 100 steps both versions take the same 500 question test.",
+      "deep": "Model: Qwen/Qwen2.5-1.5B base. Reward: the vendored answer_tag_reward_fn. Rollout: 16 prompts x 8 samples = 128 responses per step, temperature 1.0, top_p 1.0, 1024 max new tokens, 512 max prompt tokens. Learner: LoRA rank 64, scale 1.0 (alpha = 64), dropout 0, on q, k, v, o, gate, up and down projections; AdamW, lr 5e-5 constant, betas (0.9, 0.95), eps 1e-8, weight decay 0, grad clip 1.0; one optimizer step per rollout. Systems: vLLM sampler on one T4 holding merged fp16 weights synced after every step, PyTorch learner on the other T4 in fp16 with loss scaling. Eval every 25 steps on 100 problems, final greedy eval on 500, checkpoint every 10 steps, and a time budget that checkpoints before Kaggle's session limit. Seed 0 only, 4.35 GPU hours.",
+      "evidence": [
+        "portfolio: Each step samples 8 responses for each of 16 questions, 128 in all, and both arms train on the same 16 questions at every step.",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/config.json: \"lora_rank\": 64,",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/config.json: \"lr\": 5e-05,",
+        "repo:drgrpo-replication/src/train_torch.py: optimizer = torch.optim.AdamW(params, lr=args.lr, betas=(0.9, 0.95), eps=1e-8, weight_decay=0.0)",
+        "repo:drgrpo-replication/CLAUDE.md: Seed 0 is complete on Kaggle (4.35 GPU h) and written up."
+      ],
+      "sources": [],
+      "tags": [
+        "setup",
+        "lora",
+        "vllm",
+        "hyperparameters"
+      ]
+    },
+    {
+      "id": "grpo-17",
+      "type": "why",
+      "level": 2,
+      "q": "Why 1.5B and not the cheaper 0.5B model?",
+      "easy": "The 0.5B model almost never produced an answer in the required format, so nearly every answer scored 0. When every answer to a question scores the same, GRPO has nothing to learn from.",
+      "deep": "With a group baseline, $\\hat A_i=R_i-\\bar R$ (divided by std under GRPO). If all 8 responses score 0, or all score 1, every advantage is 0 and that question contributes no gradient. Qwen2.5-0.5B base scored 0 of 128 on MATH and 1 of 128 on GSM8K under the strict R1 format, so GRPO would have had zero gradient almost every step. The trainer skips zero advantage responses and logs signal_groups, the number of questions per step with mixed rewards; even with 1.5B, step 1 had only 2 of 16 groups with signal and trained on 16 sequences. 1.5B is also the paper's Figure 5 model, so the switch removed a deviation instead of adding one. The general RLVR lesson: starting pass rates must sit strictly between 0 and 1 on enough questions, or the group baseline erases the signal; easier data, a curriculum, or a bigger model are the usual fixes.",
+      "evidence": [
+        "repo:drgrpo-replication/CLAUDE.md: Qwen2.5-0.5B base scored 0 of 128 on MATH and 1 of",
+        "repo:drgrpo-replication/CLAUDE.md: 128 on GSM8K under the strict R1 format, so GRPO gets zero gradient. 1.5B is",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/log.jsonl: \"signal_groups\": 2, \"trained_seqs\": 16"
+      ],
+      "sources": [],
+      "tags": [
+        "rlvr",
+        "advantage",
+        "model-choice"
+      ]
+    },
+    {
+      "id": "grpo-18",
+      "type": "why",
+      "level": 2,
+      "q": "Why LoRA, and why a learning rate 50 times the paper's?",
+      "easy": "Full training of a 1.5B model with the usual optimizer did not fit on free GPUs, so Tanay trained a small adapter instead. Adapters normally need a much higher learning rate, and at a lower rate the model was not even learning the answer format.",
+      "deep": "Memory: fp32 AdamW on 1.5B parameters needs about 24 GB (weights, gradients and two moment buffers), and the free GPUs have 15 GB; pure bf16 weights would also lose updates at the paper's 1e-6, because a step that small falls below bf16 precision for most weights. LoRA rank 64 on all seven projection types keeps the base frozen and trains low rank BA deltas, 73,859,072 trainable parameters. Learning rate: LoRA conventionally runs 10x to 100x higher than full fine tuning; at 2e-5 the format rate stayed flat (0.18, 0.20, 0.17, 0.15) over four pilot steps, so 5e-5 was chosen on format learning speed only and applied identically to both arms. The honest cost: LoRA restricts updates to a low rank subspace, so length dynamics could differ from full fine tuning, which is one reason the result is scoped to this regime.",
+      "evidence": [
+        "repo:drgrpo-replication/README.md: | Learning rate | 1e-6 | 5e-5 | LoRA conventionally runs 10x to 100x higher |",
+        "repo:drgrpo-replication/CLAUDE.md: At 2e-5 the format rate stayed flat (0.18, 0.20, 0.17, 0.15) over",
+        "repo:drgrpo-replication/CLAUDE.md: fp32 AdamW on 1.5B needs ~24 GB, and bf16 would lose 1e-6 updates.",
+        "repo:drgrpo-replication/logs/pilot1.log: [grpo s0] trainable LoRA params: 73,859,072"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2106.09685"
+      ],
+      "tags": [
+        "lora",
+        "learning-rate",
+        "memory"
+      ]
+    },
+    {
+      "id": "grpo-19",
+      "type": "why",
+      "level": 2,
+      "q": "Why a 1024 token budget and one optimizer step per rollout?",
+      "easy": "Longer answers cost memory and time on a free GPU, so answers were capped at 1024 tokens instead of the paper's 3000. And instead of reusing each batch of answers for eight updates, the model updates once per batch, which keeps the math exact and simple to test.",
+      "deep": "Budget: the sampler's KV cache, the learner's activations for up to 128 sequences of prompt plus response, and step time all grow with length, and a 3000 token cap on 2x T4 would multiply step time. The cost is that the cap clips the quantity being measured: by steps 31 to 35 of the Mac pilot about 10% of GRPO responses were truncated, so truncation is logged and reported separately. A truncated response loses its closing tag and scores 0, so the cap also acts as an implicit length penalty in both arms. One step per rollout: with a single on policy update the ratio is exactly 1, clipping is inert, and the gradient identity can be tested exactly. The paper's 8 sequential updates per 1024 responses add staleness and active clipping; neither bias term depends on that, but the dynamics differ, and each step here sees an eighth of the paper's responses.",
+      "evidence": [
+        "repo:drgrpo-replication/CLAUDE.md: By steps 31 to 35 about 10% of GRPO",
+        "repo:drgrpo-replication/README.md: | Rollout | 8 sequential updates per 1024 responses | 1 on policy update per 128 responses | laptop scale batch |"
+      ],
+      "sources": [],
+      "tags": [
+        "budget",
+        "truncation",
+        "design-decision"
+      ]
+    },
+    {
+      "id": "grpo-20",
+      "type": "how",
+      "level": 2,
+      "q": "Describe the training system on Kaggle: what runs where, in what precision?",
+      "easy": "Two GPUs with separate jobs. One runs a fast generation engine that writes the 128 answers; the other holds the trainable copy of the model, scores those answers' tokens, and takes one update. After each update the new weights are copied back to the generator.",
+      "deep": "Sampler on cuda:0: vLLM with the base checkpoint in fp16, gpu_memory_utilization 0.75, max_model_len 512 + 1024, prefix caching on, seeded once at startup. Learner on cuda:1: Qwen2.5-1.5B in fp16 with SDPA attention and gradient checkpointing (use_reentrant False); the LoRA parameters are cast to fp32 so adapter weights and Adam state stay fp32; the forward runs under fp16 autocast and the backward through a GradScaler. response_logps runs the transformer body over right padded sequences and applies lm_head only at positions that predict response tokens, then computes each log prob as the gathered logit minus logsumexp in fp32, which keeps the 151,936 wide logits off the prompt. micro_batches sorts sequences longest first and packs them so count times max length stays under 4096 padded tokens; each response's loss is divided by n_total = 128, so accumulating micro batches reproduces the full batch loss. Zero advantage responses are skipped because they contribute exactly zero gradient. bf16 is used only on compute capability 8 or higher.",
+      "evidence": [
+        "repo:drgrpo-replication/src/train_torch.py: ap.add_argument(\"--micro-tokens\", type=int, default=4096, help=\"padded tokens per backward micro batch\")",
+        "repo:drgrpo-replication/src/train_torch.py: loss = loss + seq.sum() / n_total",
+        "repo:drgrpo-replication/src/train_torch.py: p.data = p.data.float()           # LoRA weights and their Adam state in fp32"
+      ],
+      "sources": [],
+      "tags": [
+        "systems",
+        "pytorch",
+        "memory",
+        "kaggle"
+      ]
+    },
+    {
+      "id": "grpo-21",
+      "type": "how",
+      "level": 2,
+      "q": "How does the sampler stay in sync with the learner?",
+      "easy": "After every update the trainer folds the small LoRA adapter into the full weights and copies them into the generation engine one tensor at a time, then clears that engine's cached prompt computations.",
+      "deep": "Serving the policy as a LoRA adapter in vLLM on a T4 ran at about 380 tok/s because vLLM's LoRA kernels fall back to slow paths, so VLLMSampler holds plain merged weights. merged_linear_weights computes W + s * B @ A per LoRA module in fp32, casts to fp16, and yields one tensor at a time under the base checkpoint names; vLLM's load_weights restacks q/k/v and gate/up itself. Yielding matters: materialising all 196 merged weights (7 projections x 28 layers, about 2.6 GB) on top of vLLM's 0.75 memory reservation ran a T4 out of memory. After loading, reset_prefix_cache() is called, because prefix caching keeps KV for repeated prompts computed with the old weights; skipping it would sample from a mixture of old and new policy. The sampler returns its own log prob for each sampled token (logprobs=1; logprobs=0 came back empty on vLLM 0.30), which is what makes the sampler versus learner gap measurable.",
+      "evidence": [
+        "repo:drgrpo-replication/src/train_torch.py: Serving the policy as a LoRA adapter ran at ~380 tok/s on a T4",
+        "repo:drgrpo-replication/src/train_torch.py: Yields one tensor at a time: materialising all 196 merged weights (~2.6 GB) on the",
+        "repo:drgrpo-replication/src/train_torch.py: self.llm.reset_prefix_cache()      # cached prompt KV was computed with the old weights"
+      ],
+      "sources": [
+        "https://docs.vllm.ai/en/stable/features/automatic_prefix_caching.html"
+      ],
+      "tags": [
+        "vllm",
+        "lora",
+        "systems",
+        "weight-sync"
+      ]
+    },
+    {
+      "id": "grpo-22",
+      "type": "why",
+      "level": 1,
+      "q": "Why does agreement between the sampler's and the learner's log probabilities matter?",
+      "easy": "The fast engine that writes the answers and the training code that learns from them are separate copies of the model. If they disagree, the model is trained on answers it would not actually have written, and the math that assumes they are the same quietly breaks.",
+      "deep": "The trainer passes lp.detach() as the old log probs, which forces the importance ratio to 1. That is only correct if the samples came from exactly $\\pi_\\theta$. In practice the sampler (vLLM, merged fp16 weights, its own kernels) and the learner (PEFT, fp16 autocast with fp32 adapter weights, gradient checkpointing) compute slightly different distributions. Any gap makes the update silently off policy with no importance correction, and the bias grows with the gap; a wrong merge (bad names, missing scaling, stale prefix cache) would produce a large gap and train a different policy from the one sampling. The trainer logs sampler_learner_logp_absdiff per step: the mean over trained tokens of $|\\log\\pi_{learner}(o_t)-\\log\\pi_{sampler}(o_t)|$, using vLLM's own log probs. It stayed at most 0.004 nats in both arms, i.e. average per token probability ratios within about 0.4% of 1, small next to PPO's 0.2 clip range. If it had been large, the standard fixes are to use the sampler's log probs as $\\pi_{old}$ with truncated importance weights, or to fix the merge.",
+      "say": "vLLM and the learner are two copies of the policy, and my loss assumes they're the same, because I force the ratio to 1. So I logged the mean absolute log prob gap on every trained token, every step. It stayed at most 0.004 nats. A broken merge or a stale prefix cache would have shown up there first.",
+      "evidence": [
+        "portfolio: During training, the sampler's and the learner's log probabilities for the same tokens never differed by more than 0.004 nats in a step, so the policy being sampled was the policy being trained.",
+        "repo:drgrpo-replication/src/train_torch.py: # sampler vs learner log prob gap on trained tokens: large means the weight sync is wrong"
+      ],
+      "sources": [],
+      "tags": [
+        "off-policy",
+        "vllm",
+        "verification",
+        "importance-sampling"
+      ]
+    },
+    {
+      "id": "grpo-23",
+      "type": "how",
+      "level": 2,
+      "q": "How did the runs survive Kaggle session limits, and how was the job launched?",
+      "easy": "The trainer saves its progress every 10 steps and quits cleanly before the session's time runs out, and a later session can pick up from the last save. A small launcher packages the code, pushes it to Kaggle, and runs both versions one after the other.",
+      "deep": "save_checkpoint writes adapter.pt, optimizer.pt (AdamW and GradScaler state) and state.json into step_NNNN.tmp, then os.rename to step_NNNN, so a kill mid write never leaves a half checkpoint, and older checkpoints are pruned. --max-hours: before each step, if elapsed time plus twice the longest of the last five steps would pass the budget, it checkpoints and exits. --resume-from copies a previous session's run directory; on resume the jsonl logs are truncated back to the checkpoint step so no step is logged twice, and config.json records the resume. kaggle/launch.py uploads src/ as a private Kaggle dataset, writes the arm list into run_kernel.py, and pushes a GPU script kernel; run_kernel.py installs peft, math-verify and vLLM, uninstalls torchao (peft refuses Kaggle's torchao 0.10), finds the code under /kaggle/input recursively, fetches the data, and runs each arm with the remaining session hours. Seed 0 ran both arms in one session: GRPO started with max_hours 11.22, Dr. GRPO with 9.23, so the GRPO arm took about two hours. tests/test_checkpoint.py checks that resume is bit exact on the MLX side.",
+      "evidence": [
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/config.json: \"max_hours\": 11.22,",
+        "repo:drgrpo-replication/runs/kaggle/drgrpo_s0/config.json: \"max_hours\": 9.23,",
+        "repo:drgrpo-replication/CLAUDE.md: Kaggle ships torchao 0.10, which peft refuses; uninstall it in the kernel.",
+        "repo:drgrpo-replication/tests/test_checkpoint.py: assert worst == 0.0, f\"resumed weights differ by up to {worst}\""
+      ],
+      "sources": [],
+      "tags": [
+        "checkpointing",
+        "kaggle",
+        "reliability"
+      ]
+    },
+    {
+      "id": "grpo-24",
+      "type": "how",
+      "level": 1,
+      "q": "How did you know the training loop was correct before trusting any result?",
+      "easy": "Tanay tested the loss math directly, checked two independent implementations against each other, checked the fast token scoring path against a slow reference, and logged during training whether the generator and the trainer agreed on token probabilities.",
+      "deep": "Checks, each with a test or a logged field. The per token gradient is exactly -A/|o| (GRPO) and -A/budget (Dr. GRPO) in both MLX and PyTorch. The PyTorch and MLX losses agree to 1e-6 on identical inputs. test_train_torch.py builds Qwen2.5-0.5B with a rank 8 LoRA whose B matrices are set nonzero, then checks response_logps against the same padded batch with full logits and an fp64 log_softmax to 1e-5 (an off by one in the slicing would silently train on the wrong tokens), and against each sequence run alone to 1e-3. That test caught that PyTorch's CPU log_softmax in fp32 is itself off by 1.7e-4 over the 151,936 token vocabulary, so the reference had to be fp64. test_merge.py checks 7 merged tensors per layer, that the adapter really changes logits, and that merged weights reproduce the LoRA logits to 1e-3. Checkpoint restore is bit exact. In training, the sampler versus learner gap stayed at most 0.004 nats per step.",
+      "evidence": [
+        "portfolio: The PyTorch and MLX losses agree to 1e-6 on identical inputs.",
+        "repo:drgrpo-replication/README.md: - batched, padded log probabilities match an fp64 per sequence forward to 1e-5",
+        "repo:drgrpo-replication/README.md: `log_softmax` is itself off by 1.7e-4 over a 151,936 word vocabulary;",
+        "repo:drgrpo-replication/tests/test_merge.py: assert len(weights) == 7 * plain.config.num_hidden_layers",
+        "portfolio: never differed by more than 0.004 nats in a step"
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "verification"
+      ]
+    },
+    {
+      "id": "grpo-25",
+      "type": "code",
+      "level": 2,
+      "q": "Show me the test that pins down the length bias.",
+      "easy": "Three fake answers of lengths 3, 7 and 5 tokens get advantages 1.5, -0.5 and -1.0. The test checks that every token's gradient equals the advantage divided by that answer's length for GRPO, and divided by 1024 for Dr. GRPO, and that padding gets exactly zero.",
+      "deep": "tests/test_objective_torch.py: LENS = [3, 7, 5], ADV = [1.5, -0.5, -1.0], random log probs in fp64, old log probs = lp.detach() so the ratio is 1, loss = sequence_losses(...).mean() over the 3 responses, then backward.\n\n```python\ndef test_grpo_weights_tokens_by_inverse_own_length():\n    g = grads(True)\n    for i, n in enumerate(LENS):\n        assert np.allclose(g[i, :n], -ADV[i] / n / len(LENS))\n        assert np.allclose(g[i, n:], 0.0)\n```\n\nThe Dr. GRPO twin asserts -ADV[i] / 1024 / len(LENS). A clipping test sets the ratio above 1 + epsilon with positive advantage and asserts the gradient is exactly 0. A cross backend test feeds identical float32 inputs, with old = lp - 0.05 so the ratio is not 1, through PyTorch and MLX and asserts agreement to atol 1e-6. test_objective.py also checks group_advantages against a ddof=1 reference and asserts an all wrong group gets zero advantage under both variants. The point of testing gradients: the paper's claim is about gradients, so if these identities hold, the only difference between arms is the one the paper names.",
+      "evidence": [
+        "repo:drgrpo-replication/tests/test_objective_torch.py: assert np.allclose(g[i, :n], -ADV[i] / n / len(LENS))",
+        "repo:drgrpo-replication/tests/test_objective_torch.py: assert np.allclose(g[i, :n], -ADV[i] / 1024 / len(LENS))"
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "gradients",
+        "code"
+      ]
+    },
+    {
+      "id": "grpo-26",
+      "type": "how",
+      "level": 2,
+      "q": "What is logged at every training step, and why each field?",
+      "easy": "Every step writes one line with the reward, how often the format was right, answer lengths split by right and wrong, how many answers hit the token cap, how many questions gave any learning signal, gradient size, the generator versus trainer agreement, timing, and peak memory.",
+      "deep": "log.jsonl fields: reward (mean of 128), format_rate, len_mean, len_median, len_correct, len_incorrect (the paper's claims are about these two), truncated (finish reason 'length', the cap confound), signal_groups (questions with 0 < correct < 8, the only ones with gradient), trained_seqs (responses with nonzero advantage), grad_norm (pre clip), clipped and nonfinite_grad (fp16 health), tokens, sampler_learner_logp_absdiff (sync health), t_rollout, t_train, peak_gb. rollouts.jsonl keeps every reward, length and format flag per response plus up to 2,000 characters of the best response, so per question analysis is possible later. eval.jsonl holds the interim and final evals; final_eval_responses.jsonl holds the 500 final texts. Across both seed 0 logs, clipped and nonfinite_grad never came back true. Step 1 example: 2 signal groups, 16 trained sequences, 32,982 generated tokens.",
+      "evidence": [
+        "repo:drgrpo-replication/src/train_torch.py: \"signal_groups\": int(((groups > 0) & (groups < args.group)).sum()),",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/log.jsonl: \"tokens\": 32982, \"sampler_learner_logp_absdiff\": 0.00167, \"t_rollout\": 31.0, \"t_train\": 4.5, \"peak_gb\": 7.77}",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/log.jsonl: \"clipped\": false, \"nonfinite_grad\": false"
+      ],
+      "sources": [],
+      "tags": [
+        "metrics",
+        "logging",
+        "observability"
+      ]
+    },
+    {
+      "id": "grpo-27",
+      "type": "how",
+      "level": 2,
+      "q": "What does the analysis script compute, claim by claim?",
+      "easy": "One script compares the two runs on the paper's three claims: whether GRPO's answers grew more during training, whether Dr. GRPO's wrong answers were shorter on the test, and whether accuracy held. Every comparison is between matched pairs: the same training step or the same test problem.",
+      "deep": "src/analyze.py, claims C1 to C3 in its docstring. compare(seed): n = min steps (100). C1: per step paired difference of len_mean, GRPO minus Dr. GRPO, with boot_ci over all steps and over the last third (n // 3 = 33 steps); linear slopes of each arm's length via np.polyfit degree 1; mean reward over the last third; paired difference of len_incorrect over steps where both arms had wrong answers; mean truncated per step. C2 and C3: final_eval_paired regrades both arms' 500 final responses with the vendored grader in the fixed permutation order, then reports accuracy per arm, the paired accuracy difference (Dr. GRPO minus GRPO), bootstrap means for correct and incorrect lengths per arm, the paired length difference on problems both arms got wrong, the count of those problems, and truncation counts. It also copies each arm's last eval.jsonl line. Every interval is a tuple (mean, 2.5th percentile, 97.5th percentile). Output for seed 0: runs/kaggle/analysis_seed0.json.",
+      "evidence": [
+        "repo:drgrpo-replication/src/analyze.py: GRPO response length grows more than Dr. GRPO's during training (Fig 5, plot 2)",
+        "repo:drgrpo-replication/src/analyze.py: \"paired_len_diff_both_wrong_grpo_minus_drgrpo\": boot_ci(gl[both_wrong] - dl[both_wrong]),"
+      ],
+      "sources": [],
+      "tags": [
+        "analysis",
+        "paired-design",
+        "bootstrap"
+      ]
+    },
+    {
+      "id": "grpo-28",
+      "type": "how",
+      "level": 2,
+      "q": "Walk me through the three figures and how to read each.",
+      "easy": "Figure 1 shows each version's average answer length at every training step. Figure 2 shows the difference between them, where above zero is what the paper predicted. Figure 3 compares answer lengths on the final test, split into right and wrong answers.",
+      "deep": "length_by_step.png: mean response length per step for both arms on the same 16 questions, raw values faint and a 5 step rolling mean (np.convolve, valid mode) bold; the arms track each other for about 50 steps, then GRPO shortens and partly recovers while Dr. GRPO keeps growing. paired_length_difference.png: GRPO minus Dr. GRPO per step with a zero line; above zero is the paper's prediction, and from about step 50 the curve runs below zero and stays there. final_eval_lengths.png: grouped bars for correct and wrong answers per arm on the 500 problem greedy eval, with 95% bootstrap error bars and each arm's accuracy in the legend; Dr. GRPO is taller in both groups. plots.py reads only the committed runs/kaggle seed 0 artifacts and uses two validated categorical colors (#2a78d6 and #eb6834). What none of them show: seed to seed spread, because there is one seed.",
+      "evidence": [
+        "portfolio: Figure 2. GRPO minus Dr. GRPO, per step. Above zero is what the paper predicts. From about step 50 the difference runs below zero and stays there.",
+        "portfolio: Figure 1. Training response length on the same 16 questions per step, as a 5 step rolling mean. The arms track each other for the first 50 steps."
+      ],
+      "sources": [],
+      "tags": [
+        "plots",
+        "visualisation"
+      ]
+    },
+    {
+      "id": "grpo-29",
+      "type": "formula",
+      "level": 2,
+      "q": "How are the intervals computed, and why does pairing matter?",
+      "easy": "Both versions answered exactly the same questions, so Tanay compared them question by question instead of comparing two averages. The uncertainty range comes from resampling those differences ten thousand times.",
+      "deep": "boot_ci takes paired differences $d_j$ (per training step, or per eval problem), draws 10,000 resamples with replacement using numpy default_rng(0), and reports the mean with the 2.5th and 97.5th percentiles of the resampled means: a percentile bootstrap. Pairing removes question difficulty variance: $\\mathrm{Var}(\\bar d)=\\frac{\\sigma_A^2+\\sigma_B^2-2\\,\\mathrm{Cov}(A,B)}{n}$, and the covariance is large because a hard question is hard for both arms. Both arms use the same data order and the vLLM engine is seeded once at startup, so step 1 rollouts are identical; after the first update the fp16 backward pass makes trajectories drift. Caveats to raise before the interviewer does: per step differences are autocorrelated along a run, so an iid bootstrap over steps understates uncertainty (a block bootstrap or seed replicates would be stronger), and none of it captures seed variance. For accuracy, the per problem differences take values in {-1, 0, 1}, so the interval is driven by the discordant problems.",
+      "evidence": [
+        "repo:drgrpo-replication/src/analyze.py: def boot_ci(x, n=10_000):",
+        "repo:drgrpo-replication/src/analyze.py: rng = np.random.default_rng(0)"
+      ],
+      "sources": [],
+      "tags": [
+        "bootstrap",
+        "paired-design",
+        "statistics"
+      ]
+    },
+    {
+      "id": "grpo-30",
+      "type": "number",
+      "level": 1,
+      "q": "What was the accuracy result, and how confident are you in it?",
+      "easy": "On the same 500 test problems Dr. GRPO solved 51.6% and GRPO 51.2%. The uncertainty range includes zero, so the honest reading is no loss, which is what the paper claims. This is one training run per method.",
+      "deep": "Final eval: greedy decoding on 500 MATH500 problems in a fixed order, regraded per problem with the vendored grader. Accuracy 0.512 GRPO vs 0.516 Dr. GRPO; paired difference (Dr. GRPO minus GRPO) +0.4 points with a 95% bootstrap interval of [-3.4, +4.0] over problems. That supports the paper's third claim in its weak form: no detectable loss, and at this n a drop larger than 3.4 points is unlikely for this seed. Seed to seed variance is outside the interval. The paper averaged five benchmarks; this replication evaluated MATH500 only. Interim evals on 100 problems moved a lot (at step 75 GRPO was at 40% and Dr. GRPO at 52%, during GRPO's length collapse), which is a reason not to read single checkpoints.",
+      "say": "Accuracy held: 51.6% for Dr. GRPO and 51.2% for GRPO on the same 500 MATH500 problems. The paired interval runs from minus 3.4 to plus 4.0 points. I read that as no loss and make no claim of a gain. One seed.",
+      "evidence": [
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"accuracy_grpo\": 0.512,",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"accuracy_drgrpo\": 0.516,",
+        "portfolio: 51.6% against 51.2%, paired difference +0.4 points [-3.4, +4.0]",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/eval.jsonl: {\"step\": 75, \"n\": 100, \"accuracy\": 0.4,",
+        "repo:drgrpo-replication/runs/kaggle/drgrpo_s0/eval.jsonl: {\"step\": 75, \"n\": 100, \"accuracy\": 0.52,"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "math500",
+        "accuracy",
+        "bootstrap",
+        "result"
+      ]
+    },
+    {
+      "id": "grpo-31",
+      "type": "number",
+      "level": 1,
+      "q": "What happened to response length during training?",
+      "easy": "The paper predicted GRPO's answers would keep growing and Dr. GRPO's would not. The opposite happened in this run: Dr. GRPO's answers were longer on average, and the gap widened in the last third of training. One run per method.",
+      "deep": "Paired per step difference in mean response length over 100 steps on the same 16 questions each step: Dr. GRPO 99 tokens longer per step, 95% bootstrap [77, 123]; 239 tokens longer over the last third [217, 262]. Linear trend: GRPO -0.2 tokens per step, Dr. GRPO +3.0. The arms track each other for about 50 steps, then GRPO shortens and partly recovers while Dr. GRPO keeps growing. Mean length over the last third: GRPO 319, Dr. GRPO 558. Training reward over the last third was higher for Dr. GRPO (0.523 vs 0.457), so the longer arm was also scoring more on training questions. Seed 0 only, and the bootstrap resamples steps, which are autocorrelated, so these intervals are narrower than a seed level interval would be.",
+      "say": "During training Dr. GRPO ran 99 tokens longer per step than GRPO, on the same questions. Over the last third the gap was 239 tokens. That's the opposite of the paper's prediction. It's one seed, and the interval is over steps, so I treat it as what happened in this run.",
+      "evidence": [
+        "portfolio: Dr. GRPO was 99 tokens longer per step [77, 123], and 239 longer over the last third of training [217, 262]. Length trend: GRPO -0.2 tokens per step, Dr. GRPO +3.0",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"len_mean_grpo_last_third\": 319.0968276515151,",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"len_mean_drgrpo_last_third\": 558.241240530303,",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"reward_grpo_last_third\": 0.4569128787878788,",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"reward_drgrpo_last_third\": 0.5229640151515151,"
+      ],
+      "sources": [],
+      "tags": [
+        "length",
+        "training-dynamics",
+        "result"
+      ]
+    },
+    {
+      "id": "grpo-32",
+      "type": "number",
+      "level": 1,
+      "q": "And the claim that Dr. GRPO's wrong answers are shorter? What did correct answers do?",
+      "easy": "Also reversed in this run. On the final test Dr. GRPO's wrong answers averaged 680 tokens against GRPO's 545, and on the 199 problems both got wrong Dr. GRPO still ran 120 tokens longer. Half of the paper's mechanism did show up: GRPO's correct answers were much shorter, 262 tokens against 399. Single seed.",
+      "deep": "Final eval lengths, 500 problems, greedy: incorrect 545 GRPO [504, 588] vs 680 Dr. GRPO [646, 715]; correct 262 [243, 280] vs 399 [381, 418]. The cleanest paired view is the 199 problems both arms got wrong: GRPO minus Dr. GRPO length is -120 tokens [-160, -80]. The paper's argument has two sides: the 1/|o| term should make correct answers shorter (positive advantages favour brevity) and wrong answers longer (negative advantages penalise length less). The first side appears clearly; the second does not. During training the paired incorrect length difference was negative too, about -97 tokens (GRPO minus Dr. GRPO), interval [-126, -67]. Mean final eval length: 400 GRPO, 535 Dr. GRPO. Seed 0 only.",
+      "say": "On the final test Dr. GRPO's wrong answers averaged 680 tokens against 545 for GRPO. On the 199 problems both arms missed, it was still 120 tokens longer. The brevity side of the paper's argument did show up: GRPO's correct answers were 262 tokens against 399. The wrong answer side didn't.",
+      "evidence": [
+        "portfolio: Longer: 680 against 545 tokens. On the 199 problems both arms got wrong, Dr. GRPO ran 120 tokens longer [80, 160]",
+        "portfolio: with GRPO's correct answers at 262 tokens against 399 for Dr. GRPO",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"problems_both_wrong\": 199,",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: 504.2111680327869,",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: -96.65198669211286,",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"len_mean\": 535.166,"
+      ],
+      "sources": [],
+      "tags": [
+        "length",
+        "incorrect-answers",
+        "result"
+      ]
+    },
+    {
+      "id": "grpo-33",
+      "type": "number",
+      "level": 2,
+      "q": "What did the curves look like early on, and what do the interim evals say?",
+      "easy": "Both versions started identical: the base model solved 2 of 100 test problems and used the right format 12% of the time. The format was learned within about 25 steps. The interim test scores bounce around because each uses only 100 problems.",
+      "deep": "Step 0, both arms: accuracy 0.02 and format rate 0.12 on 100 MATH500 problems, 14 truncated. Training step 1 identical across arms: reward 0.015625, format rate 0.15625. Interim evals, GRPO vs Dr. GRPO: step 25 accuracy 0.43 vs 0.36 (format 0.84 vs 0.9); step 50, 0.5 vs 0.46; step 75, 0.4 vs 0.52; final at step 100 on 500 problems, 0.512 vs 0.516. A 100 problem eval at p = 0.5 has a binomial standard error of about 5 points, so differences of 4 to 7 points at steps 25 and 50 are within noise; the 12 point gap at step 75 coincides with GRPO's length collapse and closed by the final eval. Pattern worth stating: accuracy rose from 2% to about 51% in 100 LoRA steps, most of it in the first 50, alongside the format rate climbing from 0.12 to 0.84 by step 25 in the GRPO arm, so a large share of early reward came from learning the answer tag.",
+      "evidence": [
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/eval.jsonl: {\"step\": 0, \"n\": 100, \"accuracy\": 0.02, \"format_rate\": 0.12, \"len_mean\": 365.45,",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/eval.jsonl: {\"step\": 25, \"n\": 100, \"accuracy\": 0.43, \"format_rate\": 0.84,",
+        "repo:drgrpo-replication/runs/kaggle/drgrpo_s0/eval.jsonl: {\"step\": 25, \"n\": 100, \"accuracy\": 0.36, \"format_rate\": 0.9,",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/eval.jsonl: {\"step\": 50, \"n\": 100, \"accuracy\": 0.5,",
+        "repo:drgrpo-replication/runs/kaggle/drgrpo_s0/eval.jsonl: {\"step\": 50, \"n\": 100, \"accuracy\": 0.46,"
+      ],
+      "sources": [],
+      "tags": [
+        "training-dynamics",
+        "evaluation",
+        "format"
+      ]
+    },
+    {
+      "id": "grpo-34",
+      "type": "number",
+      "level": 2,
+      "q": "What happened to GRPO between steps 55 and 80?",
+      "easy": "GRPO's answers suddenly got much shorter: average training answer length fell by more than half between step 50 and step 75, the format became almost perfect, and almost nothing hit the token cap. Then it partly recovered. Tanay reports this as unexplained.",
+      "deep": "Training log, GRPO: step 50 mean length 498.5, format rate 0.84, 18 of 128 truncated; step 75 mean length 227.9, format rate 0.984, 2 truncated. Interim eval on 100 problems: length 500 at step 50 and 272 at step 75, accuracy 0.50 to 0.40, format rate 0.82 to 0.94. Dr. GRPO over the same window kept growing (eval length 571 at step 75). The write up calls the collapse unexplained. Readings consistent with the data, none tested: the brevity pressure that 1/|o| puts on correct answers dominated for a stretch; a feedback loop in which shorter answers truncate less, keep their answer tag, and get rewarded, under a 1024 cap that already penalises length; or a single trajectory event that another seed would not repeat. The rollouts.jsonl texts for steps 55 to 80 are where Tanay would look first.",
+      "evidence": [
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/log.jsonl: {\"step\": 50, \"reward\": 0.421875, \"format_rate\": 0.84375, \"len_mean\": 498.5, \"len_median\": 399.0, \"len_correct\": 290.98148148148147, \"len_incorrect\": 649.9324324324324, \"truncated\": 18,",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/log.jsonl: {\"step\": 75, \"reward\": 0.4609375, \"format_rate\": 0.984375, \"len_mean\": 227.875, \"len_median\": 162.5, \"len_correct\": 185.52542372881356, \"len_incorrect\": 264.0869565217391, \"truncated\": 2,",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/eval.jsonl: {\"step\": 75, \"n\": 100, \"accuracy\": 0.4, \"format_rate\": 0.94, \"len_mean\": 271.59,",
+        "repo:drgrpo-replication/runs/kaggle/drgrpo_s0/eval.jsonl: {\"step\": 75, \"n\": 100, \"accuracy\": 0.52, \"format_rate\": 0.88, \"len_mean\": 570.76,",
+        "portfolio: GRPO's length collapse between steps 55 and 80 is unexplained."
+      ],
+      "sources": [],
+      "tags": [
+        "training-dynamics",
+        "anomaly",
+        "length"
+      ]
+    },
+    {
+      "id": "grpo-35",
+      "type": "number",
+      "level": 2,
+      "q": "How much compute did this take, and where did the time go?",
+      "easy": "Seed 0, both versions, took 4.35 GPU hours on Kaggle's free pair of T4 GPUs. A single step took about half a minute to generate 128 answers at the start, and each further seed would cost about 4.4 more GPU hours.",
+      "deep": "Seed 0, both arms back to back in one session: 4.35 GPU hours on Kaggle 2x T4. GRPO step 1: 31.0 s rollout for 128 responses (32,982 tokens), 4.5 s train, learner peak 7.77 GB; rollouts and training grow with response length, and the learner peaked at 12.21 GB in the Dr. GRPO arm. LoRA trainable parameters: 73,859,072. The Mac pilot on an M5 laptop took 76 s just to generate step 1's 128 responses, and a Metal timeout killed it at step 3. Throughput fixes mattered: per request seeds held vLLM to about 350 tok/s, and removing them gave about 1000. Each extra seed is about 4.4 GPU hours, which is why seeds 1 and 2 are described as one argument away.",
+      "evidence": [
+        "repo:drgrpo-replication/CLAUDE.md: Seed 0 is complete on Kaggle (4.35 GPU h) and written up.",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/log.jsonl: \"tokens\": 32982, \"sampler_learner_logp_absdiff\": 0.00167, \"t_rollout\": 31.0, \"t_train\": 4.5, \"peak_gb\": 7.77}",
+        "repo:drgrpo-replication/runs/kaggle/drgrpo_s0/log.jsonl: \"peak_gb\": 12.21}",
+        "repo:drgrpo-replication/logs/pilot1.log: [grpo s0] step   1 reward 0.016 fmt 0.18 len 254 (c 84.5 / i 256.6111111111111) sig 2/16 gn 0.062 roll 76s",
+        "repo:drgrpo-replication/CLAUDE.md: vLLM per request seeds sampled one request at a time: 350 tok/s. Without them: ~1000.",
+        "repo:drgrpo-replication/README.md: login). Seeds 1 and 2 are one argument away and cost about 4.4 GPU hours each."
+      ],
+      "sources": [],
+      "tags": [
+        "compute",
+        "cost",
+        "kaggle"
+      ]
+    },
+    {
+      "id": "grpo-36",
+      "type": "concept",
+      "level": 1,
+      "q": "What does 'the length claims came out reversed' mean, and how do you say it without overclaiming?",
+      "easy": "The effect in this run pointed the opposite way from the paper's prediction, beyond merely being smaller. Tanay frames it as 'not reproduced here' because one short run cannot overturn a paper that used three seeds and longer training.",
+      "deep": "There are three strengths of claim: (1) failed to detect the effect, (2) measured the opposite sign in this setup, (3) refuted. The data support (2) for seed 0 at 100 LoRA steps and a 1024 token budget. They do not support (3): the bootstrap intervals cover steps and problems but not seeds; fp16 GPU backward passes make two identical runs diverge after step 1; the paper used three seeds; the budget caps the very growth being measured; LoRA at 5e-5 is a different optimisation regime from full fine tuning at 1e-6; and the paper ran several hundred steps. What would move the claim toward (3): seeds 1 and 2 with the sign holding, the two single term ablation arms, and a run with a larger budget. Volunteering this is the point. An interviewer asking about a negative result is usually testing calibration more than the result.",
+      "say": "In this run the effect went the other way: Dr. GRPO produced longer answers, wrong ones included. I don't call that a refutation. It's one seed, 100 LoRA steps and a 1024 token cap. What I can defend is that the paper's length effect did not show up at this scale.",
+      "evidence": [
+        "portfolio: This is the biggest gap, and it is why the result reads as \"not reproduced here\" rather than \"refuted\"."
+      ],
+      "sources": [],
+      "tags": [
+        "honesty",
+        "negative-result",
+        "communication"
+      ]
+    },
+    {
+      "id": "grpo-37",
+      "type": "why",
+      "level": 3,
+      "q": "Why might the length result have reversed? Give every hypothesis, labelled as hypotheses.",
+      "easy": "Several explanations fit and none was tested. The most interesting is that removing the length average makes every token count equally, so long correct answers get more total reinforcement, which can push lengths up. The token cap may also have cut off exactly the long wrong answers the paper says GRPO grows.",
+      "deep": "All untested. (1) Token level weighting: under Dr. GRPO a response's total weight scales with |o|/1024, so long correct responses get more total push than short ones; the long correct answers (399 vs 262 tokens) fit this. (2) Brevity dominated: GRPO's 1/|o| term pushes correct answers shorter and wrong ones longer; at this scale the first force showed up strongly and may have outweighed the second. (3) The cap: the paper's Figure 5 plots incorrect eval lengths on an axis running from about 1,000 to 1,800 tokens at a 3000 budget, a range a 1024 cap cannot reach; here inflating answers lose the answer tag and score 0, an implicit length penalty in both arms. (4) Both terms were removed at once, so the std removal, not the length term, could be driving the sign; the grpo_no_len and grpo_no_std arms exist in variants.py but were not run. (5) Regime: LoRA rank 64 at 5e-5 for 100 steps versus full fine tuning at 1e-6 for several hundred, one on policy update per 128 responses versus 8 per 1024. (6) Optimiser scale: Adam mostly cancels Dr. GRPO's much smaller gradients, but eps 1e-8 is not negligible for coordinates far below the typical gradient size. (7) Trajectory: Dr. GRPO also earned more training reward over the last third (0.523 vs 0.457), so longer answers may have been what solved these questions in this run. (8) Noise: one seed, and GRPO's unexplained collapse between steps 55 and 80 drives much of the gap.",
+      "say": "I have hypotheses, not findings. Without the length average, long correct answers get more total gradient, which can push length up. The 1024 cap cuts off the long wrong answers the paper says GRPO grows; its incorrect lengths sit above 1,000. And I removed both terms at once, so I can't say which one did it. The ablation arms are in the code, unrun.",
+      "evidence": [
+        "portfolio: The mean hides structure. Both arms reach the same accuracy by different routes, and GRPO's length collapse between steps 55 and 80 is unexplained.",
+        "repo:drgrpo-replication/src/variants.py: \"grpo_no_std\": Variant(\"grpo_no_std\", std_norm=False, length_norm=True),",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"reward_drgrpo_last_third\": 0.5229640151515151,"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "hypotheses",
+        "analysis",
+        "senior"
+      ]
+    },
+    {
+      "id": "grpo-38",
+      "type": "case",
+      "level": 2,
+      "q": "What can one seed support, and what can it not?",
+      "easy": "One run per method can show what happened in that run under fair, matched conditions. It cannot show how much the result would move if the whole experiment were rerun, so it cannot separate a real effect from luck.",
+      "deep": "Can support: (a) for this trajectory, Dr. GRPO produced longer responses than GRPO on identical questions, with paired intervals over steps and problems that exclude zero; (b) at this seed, no accuracy loss larger than about 3.4 points; (c) an existence result: under this setup the paper's predicted length sign does not appear automatically; (d) the engineering claims, which are deterministic tests. Cannot support: (a) any statement about the distribution over seeds, because two runs with identical settings drift apart after the first update (fp16 backward passes are not bit reproducible); (b) refutation of the paper; (c) attribution to the length term versus the std term; (d) generalisation to full fine tuning, a 3000 token budget, or several hundred steps. The paper used three seeds. The cheapest upgrade is seeds 1 and 2 at about 4.4 GPU hours each, then a seed level interval or a sign count across seeds.",
+      "say": "One seed tells me what happened in this run under matched conditions. It can't tell me how much that would move on a rerun, because identical runs drift after step 1 on a GPU. So I claim the effect didn't show up here, and I stop there.",
+      "evidence": [
+        "portfolio: One seed. The bootstrap intervals cover variation across steps and problems, not across seeds. Two runs with identical settings drift apart after the first update, because the fp16 backward pass on a GPU is not bit reproducible."
+      ],
+      "sources": [],
+      "tags": [
+        "seeds",
+        "statistics",
+        "scope"
+      ]
+    },
+    {
+      "id": "grpo-39",
+      "type": "case",
+      "level": 2,
+      "q": "What broke along the way?",
+      "easy": "Four engineering problems, each fixed in its own commit: a laptop GPU timeout, a slow generation engine, an out of memory error during weight merging, and a GPU that claimed a number format it does not really support.",
+      "deep": "Metal GPU timeout on the M5: macOS paged out Metal buffers mid command under memory pressure, so the GPU stalled past the watchdog; fixed by capping MLX's buffer cache at 1 GB and wiring 9 GB of the working set (covering a measured 7.6 GB peak). vLLM on a T4 ran at 350 tokens per second; the cause was per request sampling seeds, which make vLLM sample seeded requests one at a time, not LoRA; removing them tripled throughput, and the engine is seeded once at startup instead, which still gives both arms identical first rollouts. Building all merged weights at once ran the sampler GPU out of memory; they now stream one tensor at a time. PyTorch reports bf16 as supported on a T4 by emulating it, so bf16 is keyed on compute capability 8 or higher. Smaller Kaggle lessons: torchao had to be uninstalled because peft refused it, datasets mount under nested paths, and vLLM's logprobs=0 returned nothing. The experiment moved from MLX to Kaggle because the laptop became unusable during runs; the 44 step Mac run is kept as a pilot and never paired with a CUDA arm.",
+      "say": "Four things broke. The laptop GPU timed out because macOS paged out GPU buffers, so I wired the working set. vLLM crawled at 350 tokens a second because of per request seeds. Merging all the weights at once ran the GPU out of memory. And PyTorch claimed bf16 on a T4, which it only emulates.",
+      "evidence": [
+        "portfolio: vLLM on a T4 ran at 350 tokens per second. The cause was per request sampling seeds, not LoRA, and removing them tripled throughput.",
+        "portfolio: PyTorch reports bf16 as supported on a T4 by emulating it, so bf16 is keyed on compute capability instead.",
+        "repo:drgrpo-replication/src/train.py: past the watchdog. 9 GB covers the measured 7.6 GB peak and stays under",
+        "repo:drgrpo-replication/src/train_torch.py: # No per request seed: vLLM samples seeded requests one by one, which held a T4"
+      ],
+      "sources": [],
+      "tags": [
+        "debugging",
+        "vllm",
+        "kaggle",
+        "mlx"
+      ]
+    },
+    {
+      "id": "grpo-40",
+      "type": "case",
+      "level": 2,
+      "q": "What did you get wrong first?",
+      "easy": "Tanay started with a model too small to earn any reward, a learning rate too low to learn the answer format, and the assumption that two runs with the same seed would stay identical.",
+      "deep": "Three early mistakes, each recorded in CLAUDE.md so they would not be repeated. The 0.5B model scored 0 of 128 under the strict format, which gives GRPO no gradient; switching to 1.5B fixed it and matched the paper's figure. At lr 2e-5 the format rate stayed flat across four pilot steps; 5e-5 was chosen on format learning speed. The assumption of bit for bit determinism was wrong: step 1 rollouts are identical across runs and arms, but the GPU backward pass is not reproducible, so trajectories drift after the first update, which is why one seed pair cannot separate the effect from run to run noise. Engineering side: per request vLLM seeds, all at once weight merging, and trusting PyTorch's bf16 support flag on a T4.",
+      "say": "Three things. I started on 0.5B, which scored 0 of 128 on the format, so there was no gradient at all. My first learning rate left the format rate flat. And I assumed same seed meant same run, but GPU backward passes aren't reproducible, so runs drift after step 1. That last one is why I'm careful about what one seed can say.",
+      "evidence": [
+        "repo:drgrpo-replication/CLAUDE.md: - Runs are NOT bit for bit deterministic after step 1. Step 1 rollouts are",
+        "repo:drgrpo-replication/CLAUDE.md: Qwen2.5-0.5B base scored 0 of 128 on MATH and 1 of"
+      ],
+      "sources": [],
+      "tags": [
+        "mistakes",
+        "lessons"
+      ]
+    },
+    {
+      "id": "grpo-41",
+      "type": "pushback",
+      "level": 1,
+      "q": "One seed proves nothing. Why should I believe any of this?",
+      "easy": "Tanay agrees one seed cannot settle it, and says so in the write up. What one seed can show is that the paper's effect did not appear in this setup, and that the accuracy claim survived the same test.",
+      "deep": "Concede: the bootstrap intervals capture variation across steps and problems, not across seeds, and two runs with identical settings drift apart after the first update because the fp16 backward pass on a GPU is not bit reproducible. The paper used three seeds. Defend: the design removes every other source of difference (same questions per step, identical step 1 rollouts, same eval set, same grader), so the seed is the main remaining unknown, and the claim is scoped to 'not reproduced here'. The fix is cheap and known: seeds 1 and 2 are one argument away at about 4.4 GPU hours each. Tanay stopped at seed 0 by choice, and the write up says that in the deviations table instead of hiding it.",
+      "say": "You're right that one seed can't settle it, and I say that in the write up. The bootstrap covers steps and problems, not seeds, and two identical runs drift apart after the first update. So I only claim the effect didn't show up here. Seeds 1 and 2 cost about 4.4 GPU hours each, and that's the next thing I'd run.",
+      "evidence": [
+        "portfolio: One seed. The bootstrap intervals cover variation across steps and problems, not across seeds.",
+        "repo:drgrpo-replication/README.md: login). Seeds 1 and 2 are one argument away and cost about 4.4 GPU hours each."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "seeds",
+        "statistics"
+      ]
+    },
+    {
+      "id": "grpo-42",
+      "type": "pushback",
+      "level": 2,
+      "q": "With LoRA, a 1024 token cap and 100 steps, did you replicate the paper at all?",
+      "easy": "Partly. The model, data, prompt, reward and evaluation set are the paper's own, and every deviation applies equally to both arms. The deviations still limit how far the result generalises, and the token cap is the one Tanay worries about most.",
+      "deep": "Concede the list: LoRA rank 64 vs full fine tuning, lr 5e-5 vs 1e-6, 1024 vs 3000 token budget, 100 steps vs several hundred, one on policy update per 128 responses vs 8 updates per 1024, Kaggle 2x T4 fp16 vs 8x A100 bf16, 1 seed vs 3, MATH500 vs five benchmarks. Defend: neither the 1/|o| term nor the std term depends on any of these, and both arms share them. The weakest point is the budget: the claim is about length growth, and 55 of 500 final responses hit the 1024 cap in each arm, so a longer run could look different once responses have room to grow. Tanay measured truncation separately for that reason instead of letting it hide inside the mean.",
+      "say": "It's a partial replication, and I list every deviation. The model, data, template, grader and eval set are the paper's own. The deviations hit both arms equally and neither term under test depends on them. The one I'd worry about is the 1024 token cap, because the claim is about length growth.",
+      "evidence": [
+        "repo:drgrpo-replication/README.md: | Generation budget | 3000 tokens | 1024 | memory and time |",
+        "portfolio: 55 of 500 final responses hit the 1024 token cap in each arm, and during training the arms truncated a similar share, 8.2 and 9.2 of 128 responses per step."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "deviations",
+        "scope"
+      ]
+    },
+    {
+      "id": "grpo-43",
+      "type": "pushback",
+      "level": 3,
+      "q": "Dr. GRPO's gradient norm is far smaller than GRPO's. Aren't you just comparing two learning rates?",
+      "easy": "Not in a simple way. The optimizer rescales gradients by their own running size, so a constant shrink mostly cancels, and gradient clipping never kicked in. What still differs is how the update is split across answers and questions, which is the thing under test.",
+      "deep": "The normaliser does shrink Dr. GRPO's gradients: dividing by 1024 instead of |o| and skipping the std division both reduce magnitude, and at step 1 the logged grad norms were 0.046 for GRPO and 0.0014 for Dr. GRPO. Two facts limit the damage. AdamW divides each coordinate by the square root of its running second moment, so a constant global scale on the gradient mostly cancels (fully, if eps were zero and the scale fixed over time). The clip threshold is 1.0, far above both arms' norms, so clipping never rescaled either arm. Residual effect: a step 1 norm of 0.0014 spread over 73,859,072 parameters is about 1.6e-7 per coordinate on average, so eps = 1e-8 is a few percent of a typical coordinate and more for small ones, which damps Dr. GRPO's smallest coordinates slightly. What does not cancel is relative weighting: GRPO weights tokens by 1/|o_i| and questions by 1/std, Dr. GRPO weights every token equally. That reweighting is the treatment. A stricter test would be the two single term ablation arms (grpo_no_len, grpo_no_std), defined in variants.py but not run.",
+      "say": "The raw gradient is smaller under Dr. GRPO, about 0.0014 against 0.046 at step 1. But AdamW normalises each coordinate by its running scale, so a constant shrink mostly cancels, and clipping at 1.0 never fired. What's left is how the update is split across answers and questions, which is the treatment itself.",
+      "evidence": [
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/log.jsonl: \"grad_norm\": 0.04621340334415436, \"clipped\": false",
+        "repo:drgrpo-replication/runs/kaggle/drgrpo_s0/log.jsonl: \"grad_norm\": 0.001403092173859477, \"clipped\": false",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/config.json: \"clip_grad\": 1.0,",
+        "repo:drgrpo-replication/logs/pilot1.log: [grpo s0] trainable LoRA params: 73,859,072",
+        "repo:drgrpo-replication/src/variants.py: \"grpo_no_len\": Variant(\"grpo_no_len\", std_norm=True, length_norm=False),"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "pushback",
+        "adam",
+        "gradient-scale",
+        "senior"
+      ]
+    },
+    {
+      "id": "grpo-44",
+      "type": "pushback",
+      "level": 2,
+      "q": "+0.4 points with an interval from -3.4 to +4.0 is noise. Why report it?",
+      "easy": "Because the claim being tested is 'Dr. GRPO does not lose accuracy', and noise around zero is the expected result if that claim is true. Tanay reports it as holding, never as a gain.",
+      "deep": "Concede: the point estimate means nothing as an improvement and Tanay never presents it as one. Defend: the paper's third claim is preservation of performance, so the right question is whether the data exclude a meaningful loss. A paired 95% interval of [-3.4, +4.0] on 500 problems says a drop larger than 3.4 points is unlikely at this seed, which is informative. If the goal were formal equivalence, the next step is a TOST style test with a stated margin (say 2 points) and more seeds, because seed variance is not in this interval.",
+      "say": "I agree it's not a gain, and I never call it one. The paper's claim is that Dr. GRPO keeps accuracy. A paired interval from minus 3.4 to plus 4.0 on 500 problems says a big drop is unlikely, at this seed. A formal equivalence test with a margin and more seeds would be the stronger version.",
+      "evidence": [
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"paired_accuracy_diff_drgrpo_minus_grpo\": ["
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "equivalence",
+        "statistics"
+      ]
+    },
+    {
+      "id": "grpo-45",
+      "type": "pushback",
+      "level": 2,
+      "q": "If you used the authors' grader and data, isn't this just running their code?",
+      "easy": "No. The trainer, sampler, loss, analysis and plots were written from scratch in two frameworks. Tanay borrowed only the parts that should be held fixed, the grader and the question files, so a disagreement could not be blamed on a different answer checker.",
+      "deep": "A replication should vary only the thing under test and hold the rest. Vendoring math_grader.py unmodified and fetching the authors' arrow files removes two confounds: a stricter or looser grader shifts reward and therefore length dynamics, and a re derived MATH split could differ in difficulty. Everything else is independent: the PyTorch and MLX trainers, the objective (transcribed from oat's aggregator semantics and tested), the vLLM weight sync, the paired analysis and bootstrap. The paper used Oat on 8x A100; this used a custom loop on 2x T4. Independent code that disagrees with the paper is more informative than reused code that agrees.",
+      "say": "I reused exactly two things, the grader and the question files, because those should be held fixed. The trainer, the sampler sync, the loss and the analysis are mine, in PyTorch and MLX. So when the length result disagreed, it couldn't be blamed on a different answer checker.",
+      "evidence": [
+        "repo:drgrpo-replication/src/vendor/README.md: `math_grader.py` is copied unmodified from"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "replication",
+        "methodology"
+      ]
+    },
+    {
+      "id": "grpo-46",
+      "type": "pushback",
+      "level": 2,
+      "q": "Couldn't truncation at 1024 tokens explain the length gap?",
+      "easy": "Tanay checked: both versions hit the cap equally often, in training and on the final test, so the cap cannot by itself produce the difference between them.",
+      "deep": "If one arm hit the cap more often, its mean length would be compressed and the gap would partly reflect the cap. Measured: 55 of 500 final responses truncated in each arm, and during training 8.2 vs 9.2 truncated responses per step of 128 (GRPO vs Dr. GRPO). Equal truncation rules out a differential cap artifact. It does not rule out the cap shaping both arms' dynamics: a response that would grow past 1024 is cut and gets reward 0 for a missing answer tag, which penalises length growth in both arms and may suppress exactly the GRPO inflation the paper reports at a 3000 budget.",
+      "say": "I checked that first. Both arms truncated 55 of 500 final responses, and during training 8.2 versus 9.2 per step out of 128. So the cap doesn't explain the difference between arms. It could still be suppressing growth in both, which is why the budget is my main caveat.",
+      "evidence": [
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"truncated_per_step_grpo\": 8.22,",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"truncated_per_step_drgrpo\": 9.21,",
+        "repo:drgrpo-replication/runs/kaggle/analysis_seed0.json: \"truncated_grpo\": 55,"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "truncation",
+        "confounds"
+      ]
+    },
+    {
+      "id": "grpo-47",
+      "type": "pushback",
+      "level": 3,
+      "q": "The paper says its reward used Math-Verify. Did you grade the same way?",
+      "easy": "Mostly, and this is a detail Tanay flags rather than hides. He used the authors' own grader file, but called it in its fast mode, which skips the Math-Verify pass. Both arms were graded identically, so it cannot explain the difference between them.",
+      "deep": "The paper's text says the verification reward is implemented with Math-Verify. The trainer calls answer_tag_reward_fn(..., fast=True); in the vendored grader, fast mode accepts an answer if mathd string normalisation or sympy equality says it matches, and only the non fast path adds is_latex_equal, which calls math_verify. So recall could be slightly lower than a Math-Verify grader on unusual LaTeX forms, which would lower reward a little in both arms. Concede: whether the authors' own training run used fast mode is something Tanay would confirm in their training script. Defend: the same function scored both arms in training and analyze.py regraded the final responses with the same call, so between arm comparisons are unaffected; only the absolute accuracy level could shift. Cheap check: regrade both arms' final_eval_responses.jsonl with fast=False and report any change.",
+      "say": "Good catch. I call the authors' grader in fast mode, which skips the Math-Verify pass, and the paper says it used Math-Verify. Both arms were graded identically, so the comparison holds. The absolute accuracy could move a little, and regrading the saved responses with fast off is a five minute check.",
+      "evidence": [
+        "repo:drgrpo-replication/src/train_torch.py: info, r = answer_tag_reward_fn(t, a, fast=True)",
+        "repo:drgrpo-replication/src/vendor/math_grader.py: # This mode further uses math_verify to recall originally false positives."
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "pushback",
+        "grader",
+        "methodology"
+      ]
+    },
+    {
+      "id": "grpo-48",
+      "type": "pushback",
+      "level": 3,
+      "q": "You removed both terms at once. How do you know which one caused the reversal?",
+      "easy": "Tanay does not know, and says so. The comparison matches the paper's own GRPO versus Dr. GRPO test, which also changes both at once. Separating them needs two more runs that remove one term each; the code for those runs exists but they were not run.",
+      "deep": "Concede: the arms differ in std_norm and length_norm together, so the reversal is the joint effect. The paper's length argument is about 1/|o|, but the std term changes which questions dominate each step and could move length too (for example by up weighting nearly all wrong questions, whose responses are long). Defend: the paper's Figure 5 headline comparison is also GRPO versus Dr. GRPO with both terms changed, so this is the like for like test of the published claim. The attribution experiment is the paper's Appendix C ablation, and variants.py already defines it: grpo_no_len (std on, length off) and grpo_no_std (std off, length on). Two more 100 step arms at about 2 GPU hours each, on the same questions, would say whether the sign follows the length term.",
+      "say": "I don't know which term did it, and I say that. The comparison matches the paper's headline test, which also changes both at once. The attribution runs are already in my variants file: GRPO without the length term and GRPO without the std term. They're about two GPU hours each and I haven't run them.",
+      "evidence": [
+        "repo:drgrpo-replication/src/variants.py: The four variants are the four arms of the paper's Appendix C ablation.",
+        "repo:drgrpo-replication/src/variants.py: \"grpo_no_len\": Variant(\"grpo_no_len\", std_norm=True, length_norm=False),"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "pushback",
+        "ablation",
+        "attribution"
+      ]
+    },
+    {
+      "id": "grpo-49",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations, and what breaks at 10x or 100x scale?",
+      "easy": "The main limits are one seed, short training, a tight token cap, and a small adapter instead of full training. Scaling up would hit memory limits on free GPUs, slow weight copying between the two engines, and costs that grow with answer length.",
+      "deep": "Limitations as stated: one seed; 100 LoRA steps at a 1024 budget; the mean hides structure (GRPO's unexplained collapse); MATH500 only; fp16 on T4 for a bf16 pretrained model. At 10x (a 15B model, or 3000 to 10,000 tokens): the learner no longer fits one 15 GB GPU even with LoRA and checkpointing, so it needs FSDP or tensor parallelism; the 2.6 GB per step weight sync becomes tens of GB and must be sharded, broadcast with NCCL, or replaced by serving the adapter; KV cache per sequence grows linearly with length, so the 128 responses no longer fit and batch size or group size must fall. At 100x (hundreds of steps across many seeds and ablations): run management matters more than code, so checkpoint and resume, seeded queues, and an experiment table become the product; asynchronous rollout (sampling with slightly stale weights) becomes attractive for throughput, at which point the sampler versus learner gap becomes a real importance sampling problem rather than a sanity check. Production RL would also need reward hacking audits of the grader and held out benchmarks beyond MATH500.",
+      "evidence": [
+        "portfolio: Short and small. 100 LoRA steps at a 1024 token budget. The paper's effect could need longer training, full fine tuning, or room to grow past 1024 tokens."
+      ],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "scaling",
+        "systems"
+      ]
+    },
+    {
+      "id": "grpo-50",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next, in order?",
+      "easy": "Run the two missing seeds, run the two half way versions that remove one term each, give answers more room than 1024 tokens, and use a statistics method that respects the fact that training steps are not independent.",
+      "deep": "In priority order: (1) seeds 1 and 2, about 4.4 GPU hours each, for seed level variance and a sign check; (2) the grpo_no_len and grpo_no_std arms already defined in variants.py (the paper's Appendix C ablation) to attribute the effect to one term; (3) a larger generation budget, at least on a subset, since truncation is the most plausible suppressor of the predicted growth; (4) a block bootstrap or seed level interval instead of an iid bootstrap over autocorrelated steps; (5) regrade the saved final responses with the grader's Math-Verify pass on; (6) evaluate on the paper's other benchmarks (AIME 2024, AMC, Minerva Math, OlympiadBench); (7) read rollouts.jsonl from steps 55 to 80 to explain GRPO's collapse. What would change Tanay's mind toward the paper: GRPO longer than Dr. GRPO in two of three seeds, or the reversal disappearing once the budget allows 3000 tokens.",
+      "evidence": [
+        "repo:drgrpo-replication/README.md: login). Seeds 1 and 2 are one argument away and cost about 4.4 GPU hours each."
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "next-steps"
+      ]
+    },
+    {
+      "id": "grpo-51",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager who is not an RL person.",
+      "easy": "A short, plain story: a published claim, a fair test, a mixed result, and an honest label.",
+      "deep": "Hit four beats: the claim (a popular training method makes wrong answers longer, and a fix stops it), the fair test (same model, data and grader, two runs differing in two settings), the result (accuracy held, length went the other way), and the caveat (one seed, so 'not reproduced here').",
+      "say": "A 2025 paper said the method used to train reasoning models has a flaw that makes wrong answers long and rambling, and proposed a fix. I tested that on a free GPU with the paper's own model, data and answer checker, changing only the two settings the fix removes. Accuracy held at about 51% for both. The length effect went the opposite way. Because it's one run per method, I report it as not reproduced at this scale, and I list exactly what would settle it.",
+      "evidence": [
+        "portfolio: Dr. GRPO 51.6% vs GRPO 51.2%, paired +0.4 points [-3.4, +4.0]"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "grpo-52",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain to a staff research engineer why your comparison is fair and what it would take to call the paper wrong.",
+      "easy": "Fairness comes from pairing and from holding everything constant except two flags. Calling the paper wrong would need seeds, ablations and a bigger token budget.",
+      "deep": "Pairing: same 16 questions per step, identical step 1 rollouts, the same 500 eval problems in the same order, the same vendored grader. Verification: gradient identities tested in two frameworks, sampler and learner log probs at most 0.004 nats apart. To move from 'not reproduced' to 'refuted': seeds 1 and 2 with the sign holding, the two single term ablations, and a budget large enough that truncation is not shaping length.",
+      "say": "The two arms differ in exactly two flags, std_norm and length_norm. Both see the same 16 questions every step and the same 500 eval problems, so every difference is paired. I tested the gradient identities in MLX and PyTorch and logged the sampler versus learner gap every step. To call the paper wrong I'd want seeds 1 and 2 holding the sign, the two single term ablations, and a budget bigger than 1024.",
+      "evidence": [
+        "portfolio: The two run configs differ in exactly two flags: std_norm and length_norm are on for GRPO and off for Dr. GRPO."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer",
+        "methodology"
+      ]
+    },
+    {
+      "id": "grpo-53",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the project to a product manager deciding whether to adopt the Dr. GRPO change in a training stack.",
+      "easy": "Lead with the decision: the change looks safe for accuracy, and its promised token savings did not appear in this test, so adopt it for correctness reasons and measure length yourself.",
+      "deep": "Frame for a PM: what the change costs (two lines of loss code, no compute), what it promised (same accuracy, shorter wrong answers, so cheaper inference), what Tanay observed at small scale (accuracy unchanged, answers longer, not shorter), and the confidence level (one run per arm, short training, tight length cap). The recommendation separates the low risk part (no accuracy loss seen) from the unproven part (token savings), and names the cheap experiment that would settle it.",
+      "say": "If you're deciding whether to adopt the fix, here's what I found. Accuracy didn't change, so it looks safe. The token savings the paper promises did not show up in my test; answers got longer. That's one run per version at small scale, so I wouldn't promise savings either way. I'd adopt it for correctness and measure length on your own workload before counting on cheaper inference.",
+      "evidence": [
+        "portfolio: Dr. GRPO 51.6% vs GRPO 51.2%, paired +0.4 points [-3.4, +4.0]"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "pm",
+        "decision"
+      ]
+    },
+    {
+      "id": "grpo-54",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain the project to a recruiter in thirty seconds, no jargon.",
+      "easy": "One sentence on what was tested, one on the result, one on what it shows about how Tanay works.",
+      "deep": "Keep it to the claim, the result, and the habit it demonstrates: checking a published result on a budget, keeping the comparison fair, and reporting a disagreement without overstating it. Name the tools a recruiter screens for: PyTorch, LoRA, vLLM, reinforcement learning.",
+      "say": "I took a 2025 research paper about training AI models to do math and checked its main claims myself, on free cloud GPUs, using PyTorch, LoRA and vLLM. One claim held and two came out the other way. I reported that carefully, with the limits spelled out, because a result you can't trust is worse than no result.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    },
+    {
+      "id": "grpo-55",
+      "type": "define",
+      "level": 1,
+      "q": "Define R1-Zero, the R1 template, and a base model in this context.",
+      "easy": "R1-Zero is DeepSeek's model trained with reinforcement learning directly from a base model, with no example answers shown first. The R1 template is the fixed prompt that tells the model to think inside think tags and answer inside answer tags. A base model is a pretrained model that has not been tuned to follow instructions.",
+      "deep": "R1-Zero style training: RL on a pretrained base model with a rule based reward and no supervised fine tuning stage before it. The R1 template (Template 1 in Liu et al.) is the text 'A conversation between User and Assistant ... The reasoning process is enclosed within <think> </think> and answer is enclosed within <answer> </answer> tags ...' followed by 'User: {question}' and 'Assistant: <think>', so generation begins inside the reasoning block. template.py copies it from the authors' apply_r1_template so the MLX and vLLM paths prompt with byte identical text. Base model here: Qwen2.5-1.5B, not the instruct or math specialised variant. The paper's Section 3.3 reports, for Qwen2.5-Math-1.5B, that applying a template destroys capability before RL reconstructs it; the 2% step 0 accuracy here is consistent with a template the base model has not learned yet.",
+      "evidence": [
+        "repo:drgrpo-replication/src/template.py: # Template 1 of the paper, copied from apply_r1_template in train_zero_math.py.",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/eval.jsonl: {\"step\": 0, \"n\": 100, \"accuracy\": 0.02,"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2503.20783"
+      ],
+      "tags": [
+        "define",
+        "r1-zero",
+        "template"
+      ]
+    },
+    {
+      "id": "grpo-56",
+      "type": "define",
+      "level": 1,
+      "q": "Define LoRA, its rank and scale, and what merging means.",
+      "easy": "LoRA freezes the original model and trains two small matrices per layer whose product is added to the frozen weight. Rank sets how small those matrices are. Merging adds the product into the original weight so the model runs as if it had never had an adapter.",
+      "deep": "For a frozen weight $W\\in\\mathbb R^{d\\times k}$, LoRA learns $B\\in\\mathbb R^{d\\times r}$, $A\\in\\mathbb R^{r\\times k}$ and uses $W+sBA$ with scaling $s=\\alpha/r$; B starts at zero so training begins at the base model. Here $r=64$, lora_alpha $=64\\times1.0$ so $s=1$, dropout 0, on q, k, v, o, gate, up and down projections in all 28 layers: 73,859,072 trainable parameters, against roughly 1.5B frozen. Adam state is kept only for the adapter, which is what makes the run fit in 15 GB. Merging computes $W+sBA$ once; the LoRA paper notes this gives no added inference latency, and this repo merges every step to feed vLLM plain weights. Tradeoff: updates are restricted to a rank 64 subspace per matrix, and adapters usually need learning rates 10x to 100x above full fine tuning.",
+      "evidence": [
+        "repo:drgrpo-replication/src/train_torch.py: return LoraConfig(r=args.lora_rank, lora_alpha=args.lora_rank * args.lora_scale,",
+        "repo:drgrpo-replication/logs/pilot1.log: [grpo s0] trainable LoRA params: 73,859,072"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2106.09685"
+      ],
+      "tags": [
+        "define",
+        "lora"
+      ]
+    },
+    {
+      "id": "grpo-57",
+      "type": "define",
+      "level": 2,
+      "q": "Define vLLM, the KV cache, and prefix caching, and why each mattered here.",
+      "easy": "vLLM is a fast text generation engine. The KV cache stores intermediate results for tokens already processed so they are not recomputed. Prefix caching keeps those results for repeated prompt beginnings, which saves work but goes stale when the weights change.",
+      "deep": "vLLM serves autoregressive generation with paged KV cache memory and continuous batching; here it generates 128 responses per step on one T4 with 0.75 of GPU memory reserved. The KV cache holds each layer's keys and values for every processed token, so memory grows linearly with sequence length and batch size, which is one reason the budget is 1024. Automatic prefix caching reuses cached KV blocks when a new request shares a prefix with an earlier one; it speeds up only the prefill phase. Every rollout here repeats the long R1 template and each question 8 times, so prefix caching helps, but the cached KV was computed by the previous step's weights, so the trainer calls reset_prefix_cache() after every weight load. Forgetting that would make the sampler a mix of old and new policy, which the sampler versus learner log prob check would catch.",
+      "evidence": [
+        "repo:drgrpo-replication/src/train_torch.py: enable_prefix_caching=True)"
+      ],
+      "sources": [
+        "https://docs.vllm.ai/en/stable/features/automatic_prefix_caching.html"
+      ],
+      "tags": [
+        "define",
+        "vllm",
+        "kv-cache"
+      ]
+    },
+    {
+      "id": "grpo-58",
+      "type": "define",
+      "level": 2,
+      "q": "Define nats, log probability, and on policy versus off policy.",
+      "easy": "A log probability is the logarithm of how likely the model thought a token was. A nat is the unit you get with natural logarithms. On policy means the model learns from answers it wrote with its current weights; off policy means it learns from answers written by a different or older version.",
+      "deep": "$\\log\\pi(o_t|\\cdot)$ is a number at most 0; a gap of $\\delta$ nats between two models' log probs for the same token means their probabilities differ by a factor $e^{\\delta}$, so 0.004 nats is a ratio of about 1.004. Sums of log probs over tokens give the sequence log probability. On policy: samples come from $\\pi_\\theta$ itself, so the policy gradient needs no correction. Off policy: samples come from $\\mu\\ne\\pi_\\theta$ and need importance weights $\\pi_\\theta/\\mu$ (PPO's ratio) to stay unbiased; PPO's multiple epochs per batch make later minibatches mildly off policy, which is why it clips the ratio. This repo is on policy by construction (one step per rollout, ratio exactly 1) and checks that claim empirically with the sampler versus learner gap, which stayed at most 0.004 nats.",
+      "evidence": [
+        "portfolio: never differed by more than 0.004 nats in a step"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/1707.06347"
+      ],
+      "tags": [
+        "define",
+        "log-prob",
+        "on-policy"
+      ]
+    },
+    {
+      "id": "grpo-59",
+      "type": "define",
+      "level": 2,
+      "q": "Define fp16, bf16, loss scaling and compute capability, and explain the T4 problem.",
+      "easy": "fp16 and bf16 are two 16 bit number formats. fp16 is more precise but has a narrow range, so tiny gradients can round to zero; loss scaling multiplies the loss to keep them visible. bf16 has fp32's range but less precision. Compute capability is NVIDIA's hardware generation number, and only generation 8 and newer run bf16 natively.",
+      "deep": "fp16: 5 exponent bits, 10 mantissa bits, max about 65,504, so small gradients underflow. bf16: 8 exponent bits like fp32, 7 mantissa bits. Loss scaling (torch GradScaler): multiply the loss by a large factor before backward so small gradients stay representable, unscale before clipping and the optimizer step, and skip steps with inf or NaN while lowering the scale. Compute capability: the T4 is 7.5 (Turing), Ampere is 8.0. torch.cuda.is_bf16_supported() returns true on a T4 because it emulates bf16 slowly, and vLLM refuses bf16 there, so the trainer keys bf16 on capability 8 or higher and runs fp16 plus GradScaler on T4. Risk: PyTorch's docs warn that bf16 pretrained models can overflow in fp16; Qwen2.5 is such a model, so the trainer logs nonfinite_grad every step, and it never fired in either seed 0 arm. LoRA weights and Adam state stay fp32 regardless.",
+      "evidence": [
+        "repo:drgrpo-replication/src/train_torch.py: # a T4 (7.5) by emulating it, which is slow, and vLLM refuses bf16 there outright.",
+        "repo:drgrpo-replication/runs/kaggle/grpo_s0/log.jsonl: \"clipped\": false, \"nonfinite_grad\": false"
+      ],
+      "sources": [
+        "https://docs.pytorch.org/docs/2.9/amp.html"
+      ],
+      "tags": [
+        "define",
+        "mixed-precision",
+        "fp16",
+        "hardware"
+      ]
+    },
+    {
+      "id": "grpo-60",
+      "type": "define",
+      "level": 3,
+      "q": "Define MLX, Metal, and wired memory, and why they came up.",
+      "easy": "MLX is Apple's machine learning library for its own chips, and Metal is Apple's GPU interface. Wired memory is memory the operating system promises never to move to disk. The laptop pilot crashed until the GPU's working memory was wired.",
+      "deep": "MLX is Apple's array framework for Apple Silicon with unified CPU and GPU memory; mlx_lm provides model loading, LoRA layers and a BatchGenerator, which rollout.py drives directly to record the exact sampled token ids (re tokenising decoded text does not always round trip). Metal executes command buffers on the GPU under a watchdog timeout. On the 16 GB M5, MLX's freed buffer cache pushed the pilot into swap, macOS paged out Metal buffers mid command, the GPU stalled past the watchdog, and the run died with a Metal command buffer timeout. Fix: mx.set_cache_limit(1 GB) to cap the cache and mx.set_wired_limit(9 GB) to pin the working set, chosen to cover the measured 7.6 GB peak and stay under the M5's 11.84 GB recommended working set. The MLX trainer remains the reference implementation that the PyTorch loss is tested against.",
+      "evidence": [
+        "repo:drgrpo-replication/logs/pilot1.log: RuntimeError: [METAL] Command buffer execution failed: Caused GPU Timeout Error",
+        "repo:drgrpo-replication/src/train.py: the M5's 11.84 GB recommended working set."
+      ],
+      "sources": [],
+      "tags": [
+        "define",
+        "mlx",
+        "apple-silicon"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "Understanding R1-Zero-Like Training: A Critical Perspective (abstract)",
+      "url": "https://arxiv.org/abs/2503.20783",
+      "why": "The paper under test; the abstract names the GRPO length bias and the Dr. GRPO fix."
+    },
+    {
+      "title": "Understanding R1-Zero-Like Training (PDF)",
+      "url": "https://arxiv.org/pdf/2503.20783",
+      "why": "Section 3 defines both biases, the beta = 0 argument, Listing 1's constant normaliser, the Figure 5 setup, and the RLOO equivalence in the appendix."
+    },
+    {
+      "title": "sail-sg/understand-r1-zero",
+      "url": "https://github.com/sail-sg/understand-r1-zero",
+      "why": "The authors' code: Oat based training, the math grader, and the dataset files this replication fetched."
+    },
+    {
+      "title": "DeepSeekMath (HTML)",
+      "url": "https://arxiv.org/html/2402.03300",
+      "why": "Original GRPO: group mean and std advantages, no critic, KL added to the loss with an always positive estimator."
+    },
+    {
+      "title": "DeepSeekMath (abstract)",
+      "url": "https://arxiv.org/abs/2402.03300",
+      "why": "Where GRPO was introduced as a memory saving PPO variant."
+    },
+    {
+      "title": "Proximal Policy Optimization Algorithms (abstract)",
+      "url": "https://arxiv.org/abs/1707.06347",
+      "why": "PPO's idea: several epochs of minibatch updates on one batch of samples."
+    },
+    {
+      "title": "Proximal Policy Optimization Algorithms (PDF)",
+      "url": "https://arxiv.org/pdf/1707.06347",
+      "why": "The clipped surrogate objective and epsilon = 0.2 that GRPO inherits."
+    },
+    {
+      "title": "LoRA: Low-Rank Adaptation of Large Language Models",
+      "url": "https://arxiv.org/abs/2106.09685",
+      "why": "Frozen weights plus trainable low rank matrices, and no added inference latency."
+    },
+    {
+      "title": "Back to Basics: REINFORCE Style Optimization (RLOO)",
+      "url": "https://arxiv.org/abs/2402.14740",
+      "why": "Argues PPO machinery is unnecessary for LLM RL; RLOO is the leave one out baseline Dr. GRPO matches up to scale."
+    },
+    {
+      "title": "Measuring Mathematical Problem Solving With the MATH Dataset",
+      "url": "https://arxiv.org/abs/2103.03874",
+      "why": "The 12,500 problem competition math dataset behind the training questions and MATH500."
+    },
+    {
+      "title": "Let's Verify Step by Step",
+      "url": "https://arxiv.org/abs/2305.20050",
+      "why": "Outcome versus process supervision, and the representative MATH test subset commonly used as MATH500."
+    },
+    {
+      "title": "vLLM Automatic Prefix Caching",
+      "url": "https://docs.vllm.ai/en/stable/features/automatic_prefix_caching.html",
+      "why": "How prefix caching reuses KV for shared prompts, which is why it must be reset after a weight update."
+    },
+    {
+      "title": "PyTorch Automatic Mixed Precision",
+      "url": "https://docs.pytorch.org/docs/2.9/amp.html",
+      "why": "Why fp16 gradients underflow, how GradScaler works, and the warning that bf16 pretrained models can overflow in fp16."
+    }
+  ]
+}
