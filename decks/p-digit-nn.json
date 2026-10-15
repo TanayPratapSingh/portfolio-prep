@@ -1,0 +1,696 @@
+{
+  "deck_id": "p-digit-nn",
+  "title": "Digit Recognition Neural Network from Scratch",
+  "group": "Portfolio",
+  "repo": "",
+  "summary_easy": "Tanay built a neural network that reads handwritten digits using only Python and NumPy, writing the forward pass, backpropagation, and training loop by hand. It reached 94% on the held out MNIST test set, and the real output was hands on experience with the classic training failures: bouncing and stalling losses, underfitting, and vanishing gradients.",
+  "summary_deep": "A fully connected network on flattened 784 pixel MNIST inputs: explicit weighted sums and activations (sigmoid hidden layers first, ReLU once vanishing gradients appeared), softmax over ten classes, backpropagation by the chain rule with a hand written derivative per activation, and mini batch gradient descent with learning rate, batch size, and depth tuned manually. Recorded failure modes: a learning rate too high made the loss bounce, too low stalled it, too shallow could not capture digit structure, and too deep without proper initialization vanished the gradients. Final accuracy was 94% on the held out test set, between a linear model (about 92%) and a tuned MLP (about 97 to 98%), which the write up states is not state of the art. Interview depth: the softmax cross entropy gradient, the matrix backward recursion, sigmoid's 0.25 slope bound, Xavier and He initialization, learning rate stability, gradient checking, and validation protocol.",
+  "sheet": {
+    "easy": "## What it is\n- Deep learning project (Jan 2024 to May 2024): a handwritten digit classifier built **from scratch in Python and NumPy**, no ML frameworks.\n- Result: **94%** accuracy on the held out MNIST test set. Not state of the art, on purpose: the goal was understanding.\n\n## How it works\n1. Each image (28 x 28 pixels) becomes 784 numbers.\n2. Layers of weighted sums and activations (sigmoid first, then ReLU), softmax over 10 digits at the end.\n3. Backpropagation: the chain rule, layer by layer, with a hand written derivative for each activation.\n4. Mini batch gradient descent; learning rate, batch size, and depth tuned by hand.\n\n## What went wrong and what it taught\n| Symptom | Cause | Fix |\n|---|---|---|\n| Loss bounced | learning rate too high | smaller step, schedule, momentum |\n| Training stalled | learning rate too low | larger step |\n| Could not capture digit shapes | too shallow | more layers or units |\n| Early layers stopped learning | sigmoid plus depth, poor initialization | ReLU, He initialization |\n\n## Numbers for context\n- Linear model on MNIST: about 92%. Tuned two layer network: about 97 to 98%. CNNs: above 99%.\n\n## Next\n- Gradient check, validation split, He init with momentum, a linear baseline in the same code, then a CNN layer from scratch.\n",
+    "deep": "## As written\n- NumPy only. Forward: weighted sums plus activations; sigmoid hidden layers first, ReLU once vanishing gradients were visible; softmax over 10 classes.\n- Backward: chain rule layer by layer, explicit derivative per activation. Mini batch GD, tunable learning rate, batch size, depth; manual tuning.\n- 94% on the held out MNIST test set. Not recorded: widths, epochs, learning rate values, loss name, init scheme, validation split. Prepare these from the notebook.\n\n## Forward\n$Z_l = A_{l-1}W_l + b_l$, $A_l = g(Z_l)$, $A_0 = X \\in \\mathbb{R}^{m\\times784}$, $\\hat Y = \\mathrm{softmax}(Z_L)$.\n\nStable softmax: $\\mathrm{softmax}(z) = \\mathrm{softmax}(z - \\max z)$; log sum exp for the loss.\n\n## Loss and output gradient\n$L = -\\frac1m\\sum_i\\sum_k Y_{ik}\\log\\hat Y_{ik}$; $\\frac{\\partial\\hat y_j}{\\partial z_k} = \\hat y_j(\\delta_{jk}-\\hat y_k)$; $dZ_L = (\\hat Y - Y)/m$.\n\n## Backward recursion\n$dW_l = A_{l-1}^\\top dZ_l$, $db_l = \\mathbf 1^\\top dZ_l$, $dZ_{l-1} = (dZ_lW_l^\\top)\\odot g'(Z_{l-1})$. Update $W_l \\leftarrow W_l - \\eta\\,dW_l$.\n\n## Activations\n| g | g' | note |\n|---|---|---|\n| sigmoid | $\\sigma(1-\\sigma)$, max 0.25 | saturates; not zero centred |\n| tanh | $1-\\tanh^2$, max 1 | zero centred; saturates |\n| ReLU | 1 if z > 0 else 0 | no positive saturation; dying units |\n| Leaky ReLU | 1 or $\\alpha$ | fixes dying units |\n\n## Vanishing gradients\n$\\delta_l = (\\delta_{l+1}W_{l+1}^\\top)\\odot g'(Z_l)$; sigmoid gives roughly $0.25^L$ shrinkage. Diagnose with per layer $\\|dW_l\\|$ and update to weight ratios (about 1e-3 healthy).\n\n## Initialization\n$\\mathrm{Var}(z) = n_{in}\\mathrm{Var}(w)\\mathrm{Var}(x)$. LeCun $1/n_{in}$; Xavier $2/(n_{in}+n_{out})$; He $2/n_{in}$. N(0,1) on 784 inputs gives pre activation std near 28.\n\n## Learning rate and batches\n- Quadratic: converge iff $\\eta < 2/\\lambda_{\\max}(H)$. Bounce above, stall far below.\n- Mini batch gradient variance $\\propto 1/B$; epoch $= \\lceil N/B\\rceil$ steps; shuffle each epoch.\n- Momentum $v \\leftarrow \\mu v + g$; Adam with $\\beta_1=0.9$, $\\beta_2=0.999$, $\\epsilon=10^{-8}$.\n\n## Verification (to add)\n- Centered differences, $\\epsilon \\approx 10^{-5}$, relative error about $10^{-7}$ passes, $10^{-4}$ suspicious.\n- Initial loss about $\\ln 10 \\approx 2.30$; overfit 20 examples; dW shape equals W shape.\n\n## Regularization (known, not used per the write up)\n- L2 ($dW \\mathrel{+}= \\lambda W$), inverted dropout, early stopping, augmentation.\n\n## Context and caveats\n- 94% vs about 92% linear, 97 to 98% tuned MLP, above 99% CNN.\n- One run, no seeds, no recorded validation split: treat as an upper estimate if tuned on test.\n\n## Next\n1. Gradient check. 2. He init, momentum, schedule, standardized inputs. 3. Validation split and seeds. 4. Linear baseline in the same code. 5. Gradient norm plots. 6. From scratch conv layer. 7. Compare against PyTorch autograd.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "I built a handwritten digit classifier from scratch in NumPy, with no machine learning framework. I wrote the forward pass, backpropagation with an explicit derivative for each activation, and a mini batch gradient descent loop. It reached 94% on the held out MNIST test set, which isn't state of the art and wasn't meant to be. The point was hitting the classic failures myself, like vanishing gradients with sigmoid, which is why I switched to ReLU.",
+      "keypoints": [
+        "From scratch in NumPy, no framework",
+        "Forward, backprop, mini batch GD by hand",
+        "94% on held out MNIST test set",
+        "Not state of the art, by design",
+        "Sigmoid to ReLU after vanishing gradients"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "Frameworks hide the parts of a neural network most worth understanding: the shapes going forward, the gradients coming back, and how the optimizer moves the weights. I wanted to build all three once by hand. The data is MNIST: 28 by 28 grayscale digits, flattened to 784 inputs, with ten classes. The network is fully connected. Each layer is a weighted sum plus bias and an activation, and the output is a softmax over the ten digits. Backprop is the chain rule in matrix form. The output error is predicted minus true, divided by the batch size. Each layer's weight gradient is its input activations transposed times its error, and the error passes back through the weights transposed and the activation's derivative. I wrote an explicit derivative for each activation. Training is mini batch gradient descent, with the learning rate, batch size, and depth as knobs, and I tuned them by hand on purpose. Too high a learning rate and the loss bounced. Too low and it stalled. Too shallow and it couldn't capture digit structure. And with sigmoid in a deeper net without proper initialization, the gradients vanished, because sigmoid's slope is at most a quarter and backprop multiplies one slope per layer. Switching to ReLU fixed that. Final accuracy was 94% on the held out test set. That's above a linear model and below a tuned MLP, and I say so. If I did it again, I'd add a gradient check, He initialization with momentum, a proper validation split, and my own code with the hidden layers removed as a baseline.",
+      "keypoints": [
+        "Why: frameworks hide shapes, gradients, updates",
+        "MNIST flattened to 784; softmax over 10",
+        "Backprop recursion in matrix form",
+        "Manual tuning: bouncing, stalling, underfitting",
+        "Sigmoid slope 0.25 caused vanishing; ReLU fixed it",
+        "94%: above linear, below tuned MLP",
+        "Next: gradient check, He init, momentum, validation"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Take me through the math and the failures in depth.",
+      "script": "I'll go forward pass, loss, backward pass, then the failures and what each taught me. Forward pass. A batch X is m by 784. Layer one computes Z1 equals X W1 plus b1, where W1 is 784 by the hidden width, and the bias broadcasts across the batch. Then an activation, sigmoid in my first version and ReLU later. Repeat per hidden layer, and the last layer produces m by 10 logits. Softmax turns each row into probabilities. I subtract the row max before exponentiating, because softmax is shift invariant and that stops overflow. I cache every Z and A, since the backward pass needs them. Loss and the first gradient. Softmax pairs with cross entropy, negative log probability of the true class. The derivative is the cleanest fact in the whole project: the log cancels the exponential, and the gradient with respect to the logits is predicted minus true. For the batch mean, divide by m. That's also why squared error on softmax outputs trains worse; its gradient carries an extra p times one minus p factor that dies when the model is confidently wrong. Backward pass. Given the error at a layer, the weight gradient is the previous activations transposed times that error, which has exactly the shape of W. The bias gradient is the column sum. The error for the previous layer is the error times W transposed, multiplied elementwise by the activation derivative at that layer's Z. That recursion is the whole algorithm, and it costs about two forward passes, which is why reverse mode beats finite differences by a factor of the parameter count. First failure, learning rate. Too high and the loss bounced. On a quadratic, gradient descent diverges once the step exceeds two over the largest curvature, and the high curvature directions oscillate first. Too low and training stalled. Second failure, capacity. Too shallow and the model couldn't capture digit structure. With no hidden layer it's a linear classifier on raw pixels, and digits aren't linearly separable there. Third failure, the interesting one: depth with sigmoid. Sigmoid's derivative is sigma times one minus sigma, at most a quarter. The backward recursion multiplies one of those per layer, so the gradient reaching the first layer shrinks roughly by four times per layer, and saturated units make it worse. Early layers stopped learning. ReLU's slope is one where it's active, so the product depends on the weights, and initialization controls their scale. He initialization sets weight variance to two over fan in, because ReLU zeroes half its inputs and halves the variance. My write up records that deep nets without proper initialization vanished, and that's the mechanism. Result. 94% on the held out MNIST test set. Linear models land around 92% and a tuned two layer net around 97 to 98%, so mine works but wasn't pushed. What I'd add. A gradient check: centered finite differences against backprop on a tiny network, with relative error around one in ten million as a pass. A validation split, since my write up doesn't describe one, so I'd treat 94% as possibly a little optimistic. He init with momentum and a schedule. And per layer gradient norm plots for sigmoid versus ReLU, so the vanishing gradient story is a figure, not an anecdote.",
+      "keypoints": [
+        "Forward: shapes, broadcasting, stable softmax, caching",
+        "Softmax plus cross entropy gradient is predicted minus true",
+        "Backward recursion; about two forward passes of cost",
+        "Learning rate: bounce above 2 over max curvature, stall below",
+        "Shallow means linear on pixels",
+        "Sigmoid slope at most 0.25 per layer; ReLU and He init",
+        "94% versus 92% linear and 97 to 98% tuned MLP",
+        "Next: gradient check, validation split, gradient norm plots"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone who isn't technical.",
+      "script": "I built a program that learns to read handwritten digits, zero to nine, from thousands of examples. Most people build these with ready made tools that do the hard math automatically. I wrote that math myself, so I could see exactly how the program learns from its mistakes. Along the way I hit the classic problems: when it took steps that were too big while learning, it overshot; when the steps were too small, it barely moved; and when I stacked too many layers with the wrong settings, the early layers stopped learning entirely. Fixing each one taught me what the settings actually do. It ended up reading 94% of new digits correctly. That's not a record, and it wasn't meant to be; the point was understanding.",
+      "keypoints": [
+        "Program that learns to read digits",
+        "Wrote the learning math by hand",
+        "Hit and fixed the classic problems",
+        "94% on new digits",
+        "Goal was understanding, not a record"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the network and the gradient flow.",
+      "script": "First I draw the layers left to right as boxes: an input box labelled 784, two hidden boxes, and an output box labelled 10 with softmax written under it. Between them I write the weight shapes, 784 by h1, h1 by h2, h2 by 10, and above the first arrow I write Z equals X W plus b, then A equals g of Z. I say the batch dimension m runs through every box. Second, under the output box, I write the loss as minus the sum of y log y hat, and next to it the one line result: the gradient at the logits is y hat minus y, over m. I box that, because it's where backward starts. Third, I draw arrows going right to left under the network, and write the recursion once: dW equals A previous transposed times dZ, and dZ previous equals dZ times W transposed, elementwise times g prime. I point out that dW always has the shape of W, which is how I debugged shapes. Fourth, I draw a small sigmoid curve and its derivative bump peaking at 0.25, and under the backward arrows I write 0.25, 0.25, 0.25, and say this is why the first layer's gradient vanished. Next to it a ReLU with slope 1, and He init, variance two over fan in. Last, a small loss curve chart with three lines: one bouncing for a high learning rate, one flat for a low one, and one that drops cleanly, with 94% test accuracy written at the end.",
+      "keypoints": [
+        "Layers with weight shapes and batch dimension",
+        "Loss and the y hat minus y gradient, boxed",
+        "Backward recursion; dW matches W's shape",
+        "Sigmoid slope 0.25 per layer; ReLU and He init",
+        "Loss curves for learning rate failures",
+        "94% at the end"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Derive the gradient of cross entropy through softmax.",
+      "script": "Take one example with a one hot label. The loss is minus the sum over classes of y times log y hat. The softmax Jacobian is y hat j times delta jk minus y hat k. Multiply through: the y over y hat cancels the y hat, and you get minus y k plus y hat k times the sum of y, which is one. So the gradient with respect to logit k is y hat k minus y k. For a batch mean, divide by m. That cancellation is why softmax and cross entropy are paired: the gradient stays large when the model is confidently wrong.",
+      "keypoints": [
+        "Loss: minus sum y log y hat",
+        "Softmax Jacobian: y hat j (delta jk minus y hat k)",
+        "Cancellation leaves y hat minus y",
+        "Divide by m for the batch mean",
+        "Gradient stays large when confidently wrong"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why did sigmoid cause vanishing gradients, and why did ReLU fix it?",
+      "script": "Backprop multiplies one activation slope per layer on the way back. Sigmoid's slope is sigma times one minus sigma, which peaks at a quarter and is near zero when a unit saturates. So with several layers the gradient reaching the first layer shrinks by about four times or more per layer, and the early layers stop learning. ReLU's slope is exactly one wherever the unit is active, so the gradient passes through unchanged, and what's left is the weight scale, which He initialization keeps steady. The cost is dying units, where a ReLU never activates again.",
+      "keypoints": [
+        "Backprop multiplies slopes layer by layer",
+        "Sigmoid slope at most 0.25, near 0 when saturated",
+        "Shrinks about 4x or more per layer",
+        "ReLU slope 1 when active",
+        "He init handles weight scale; watch for dying ReLU"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you pick the learning rate more systematically than by hand?",
+      "script": "I'd do a learning rate range test: start tiny, multiply the rate a little every batch, and plot loss against rate. The loss falls, flattens, then shoots up; I'd pick a value somewhat below where it starts rising. Then I'd add a schedule, large steps early and smaller later, like step decay or cosine. Momentum or Adam would cut the bouncing I saw at high rates. And I'd choose everything on a validation split, not the test set, and run a few seeds so I know how much accuracy moves by chance.",
+      "keypoints": [
+        "Learning rate range test",
+        "Pick below where loss rises",
+        "Schedule: step decay or cosine",
+        "Momentum or Adam damps bouncing",
+        "Tune on validation; several seeds"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What does proper initialization look like, and why does it matter?",
+      "script": "Two jobs. Break symmetry, so units in a layer don't all compute the same thing; that's why weights are random while biases can start at zero. And keep variance steady from layer to layer. A weighted sum over n inputs has variance n times the weight variance times the input variance, so weight variance should be about one over fan in. Xavier uses two over fan in plus fan out for tanh and sigmoid. ReLU zeroes half its inputs, so He initialization doubles it to two over fan in. Without that, a deep net starts with activations shrinking or exploding.",
+      "keypoints": [
+        "Break symmetry with random weights",
+        "Var(z) = n Var(w) Var(x)",
+        "LeCun: 1 over fan in",
+        "Xavier: 2 over fan in plus fan out",
+        "He: 2 over fan in for ReLU"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "94% on MNIST is barely better than logistic regression. Why should I be impressed?",
+      "script": "You shouldn't be impressed by the number, and I don't lead with it. A linear model gets around 92% and a tuned two layer net around 97 to 98%, so mine works but wasn't pushed. The project was about writing every piece myself: the forward pass, the softmax cross entropy gradient, the backward recursion, and the update. What I'd point to is the failures I diagnosed, especially vanishing gradients with sigmoid. If I redid it, I'd run my code without hidden layers as the baseline, then add He init and momentum to close the gap.",
+      "keypoints": [
+        "Concede: 94% is modest",
+        "Linear about 92%, tuned MLP 97 to 98%",
+        "Goal was implementation and understanding",
+        "Value is the diagnosed failures",
+        "Fix: in code baseline, He init, momentum"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Writing backprop by hand is a homework exercise. What's the real world value?",
+      "script": "It is a classic exercise, and I wouldn't ship hand written backprop. The value shows up when a real model misbehaves. A bouncing loss means the step is too big; a flat loss from the start can mean saturated units or a vanished gradient; a NaN usually means overflow in exp or a log of zero. Knowing the initial loss should be about ln 10 for ten classes is a free sanity check. I use frameworks for everything since, and this is why I can read what they're doing when a run goes wrong.",
+      "keypoints": [
+        "Concede: classic exercise, never ship it",
+        "Bouncing loss: step too large",
+        "Flat loss: saturation or vanishing",
+        "NaN: overflow or log of zero",
+        "Initial loss about ln 10 as a check"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "dnn-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is this project?",
+      "easy": "Tanay built a neural network that reads handwritten digits using only Python and NumPy, with no machine learning framework: the forward pass, the gradient math, and the training loop were all written by hand. It reached 94% accuracy on the held out MNIST test set.",
+      "deep": "A deep learning project (Jan 2024 to May 2024). A fully connected network on MNIST: explicit weighted sums and activations in the forward pass (sigmoid hidden layers in the first iteration, switched to ReLU once vanishing gradients became visible), softmax over ten classes at the output, backpropagation by the chain rule with an explicit derivative per activation, and mini batch gradient descent with tunable learning rate, batch size, and depth. Tuning was iterative and manual on purpose. Result: 94% test accuracy, which the write up says plainly is not state of the art; the goal was understanding. The lessons it records are the classic failure modes: a learning rate too high makes the loss bounce, too low stalls it, too shallow underfits, and too deep without proper initialization vanishes the gradients.",
+      "say": "I built a digit classifier from scratch in NumPy, no frameworks: forward pass, backprop, and the training loop by hand. It got 94% on the MNIST test set, which isn't state of the art and wasn't meant to be. The useful part was hitting every classic failure myself, like vanishing gradients with sigmoid, which is why I switched to ReLU.",
+      "evidence": [
+        "portfolio: META: Deep Learning / Jan 2024 to May 2024",
+        "portfolio: 94% test accuracy on MNIST  |  No ML frameworks  |  Manual forward and backward passes",
+        "portfolio: Forward propagation is explicit weighted sums and activation functions: sigmoid in the hidden layers in the first iteration, then ReLU once vanishing gradients became visible, and softmax at the output for the ten class classification.",
+        "portfolio: Final accuracy was 94% on the held out MNIST test set.",
+        "portfolio: That is not state of the art; the goal was understanding rather than benchmark chasing."
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "mlp",
+        "numpy",
+        "mnist"
+      ]
+    },
+    {
+      "id": "dnn-02",
+      "type": "why",
+      "level": 1,
+      "q": "Why build it from scratch when PyTorch exists?",
+      "easy": "Frameworks hide the parts most worth understanding: the matrix shapes going forward, the gradients coming back, and how the optimizer changes the weights. Doing it once by hand means that when a real model quietly fails, you can reason about gradient flow instead of guessing.",
+      "deep": "What autograd hides: the shape bookkeeping (a (m, 784) batch times a (784, h) weight matrix), the local derivative of each operation and how they compose by the chain rule, the fact that a layer's weight gradient is the outer product of its input activations and its upstream error, and how the update size depends on the learning rate and the gradient scale. Debugging skills this builds: reading a flat loss curve as either a too small learning rate or saturated units; reading a NaN as overflow in exp or log of zero; checking per layer gradient norms to locate vanishing or exploding gradients; knowing why softmax with cross entropy gives the clean gradient predicted minus true. The write up's stated reason: when a production model later silently fails, you reason about gradient flow rather than swapping layers and hoping. The cost is accepted: slower, no GPU, and accuracy below what a framework model reaches with modern defaults.",
+      "evidence": [
+        "portfolio: Frameworks hide the parts of a neural network that are most useful to understand: the matrix shapes flowing forward, the gradient math flowing backward, and the way optimization changes the weights.",
+        "portfolio: Building all three by hand once gives you a working mental model of what the framework is doing underneath.",
+        "portfolio: When a production model later silently fails, you reason about gradient flow rather than swapping layers and hoping."
+      ],
+      "sources": [],
+      "tags": [
+        "motivation",
+        "autograd",
+        "debugging"
+      ]
+    },
+    {
+      "id": "dnn-03",
+      "type": "define",
+      "level": 1,
+      "q": "Describe MNIST and how the data enters the network.",
+      "easy": "MNIST is 70,000 small grayscale images of handwritten digits, 28 by 28 pixels, split into 60,000 for training and 10,000 for testing. Each image is flattened into 784 numbers, scaled to between 0 and 1, and the label becomes a vector of ten zeros with a single one.",
+      "deep": "Standard preprocessing for an MLP: flatten each 28x28 image to a 784 vector (this throws away the 2D layout, which is why CNNs do better); scale pixel values from 0 to 255 into [0, 1] or standardize with the training mean and standard deviation, since unscaled inputs push sigmoid units into saturation and make the learning rate hard to set; one hot encode labels into a (m, 10) matrix for the softmax output. Splits: the official test set is 10,000 images written by different writers from the training set; tuning hyperparameters should use a validation split carved from the 60,000 training images, so the test score stays an honest estimate. The write up reports 94% on the held out MNIST test set and does not describe a validation split or the exact preprocessing, so be ready to say what you did. Classes are roughly balanced, so accuracy is a reasonable headline metric; a confusion matrix shows the usual confusions (4 and 9, 3 and 5, 7 and 1).",
+      "evidence": [
+        "portfolio: Final accuracy was 94% on the held out MNIST test set."
+      ],
+      "sources": [],
+      "tags": [
+        "mnist",
+        "preprocessing",
+        "data-splits"
+      ]
+    },
+    {
+      "id": "dnn-04",
+      "type": "formula",
+      "level": 1,
+      "q": "Write the forward pass with matrix shapes.",
+      "easy": "Each layer multiplies its input by a weight matrix, adds a bias, and applies an activation. The last layer turns ten scores into ten probabilities with softmax.",
+      "deep": "For a batch $X \\in \\mathbb{R}^{m\\times 784}$ and two hidden layers of widths $h_1, h_2$: $Z_1 = XW_1 + b_1$ with $W_1 \\in \\mathbb{R}^{784\\times h_1}$; $A_1 = g(Z_1)$; $Z_2 = A_1W_2 + b_2$, $W_2 \\in \\mathbb{R}^{h_1\\times h_2}$; $A_2 = g(Z_2)$; $Z_3 = A_2W_3 + b_3$, $W_3 \\in \\mathbb{R}^{h_2\\times 10}$; $\\hat Y = \\mathrm{softmax}(Z_3)$ row wise. Biases broadcast across the batch dimension. $g$ was sigmoid $\\sigma(z) = 1/(1+e^{-z})$ in the first iteration and ReLU $\\max(0,z)$ later. Parameter count for layer $l$: $n_{in}n_{out} + n_{out}$, so a 784 to 128 layer alone has 100,480 parameters (illustrative width; the write up does not record the widths). Cache $Z_l$ and $A_l$ during the forward pass, because backprop needs them. Without a nonlinearity $g$, the stack collapses to one linear map $X W_1W_2W_3$, which is multinomial logistic regression.",
+      "evidence": [
+        "portfolio: Forward propagation is explicit weighted sums and activation functions: sigmoid in the hidden layers in the first iteration, then ReLU once vanishing gradients became visible, and softmax at the output for the ten class classification."
+      ],
+      "sources": [],
+      "tags": [
+        "forward-pass",
+        "shapes",
+        "mlp"
+      ]
+    },
+    {
+      "id": "dnn-05",
+      "type": "formula",
+      "level": 1,
+      "q": "Define softmax and explain how to compute it without overflow.",
+      "easy": "Softmax turns ten raw scores into ten positive numbers that add up to one, with bigger scores getting much bigger shares. Subtracting the largest score before exponentiating gives the same answer and avoids numbers too large for the computer to hold.",
+      "deep": "$\\mathrm{softmax}(z)_k = \\frac{e^{z_k}}{\\sum_j e^{z_j}}$. Properties: outputs in (0, 1) summing to 1; invariant to adding a constant to every logit, so $\\mathrm{softmax}(z) = \\mathrm{softmax}(z - \\max_j z_j)$, which keeps every exponent at or below 0 and prevents overflow (float64 overflows past about $e^{709}$). Log softmax via log sum exp: $\\log\\hat y_k = z_k - \\max z - \\log\\sum_j e^{z_j - \\max z}$, which also avoids $\\log 0$ in the loss. Sigmoid has the same problem for large negative $z$; compute it piecewise or clip. Softmax is the multiclass generalization of the sigmoid: with two classes, $\\mathrm{softmax}(z)_1 = \\sigma(z_1 - z_2)$. Temperature $T$: $e^{z_k/T}$ sharpens ($T<1$) or flattens ($T>1$) the distribution. Softmax outputs are often overconfident, so they are scores, not calibrated probabilities, unless checked.",
+      "evidence": [
+        "portfolio: Forward propagation is explicit weighted sums and activation functions: sigmoid in the hidden layers in the first iteration, then ReLU once vanishing gradients became visible, and softmax at the output for the ten class classification."
+      ],
+      "sources": [],
+      "tags": [
+        "softmax",
+        "numerical-stability",
+        "log-sum-exp"
+      ]
+    },
+    {
+      "id": "dnn-06",
+      "type": "formula",
+      "level": 1,
+      "q": "Derive the gradient of cross entropy loss through softmax.",
+      "easy": "With softmax at the output and cross entropy as the loss, the gradient with respect to the raw scores is just the predicted probabilities minus the true one hot label. That simple error signal is where backprop starts.",
+      "deep": "Loss for one example with one hot $y$: $L = -\\sum_j y_j\\log\\hat y_j$. Softmax Jacobian: $\\frac{\\partial\\hat y_j}{\\partial z_k} = \\hat y_j(\\delta_{jk} - \\hat y_k)$. Chain rule: $\\frac{\\partial L}{\\partial z_k} = -\\sum_j \\frac{y_j}{\\hat y_j}\\hat y_j(\\delta_{jk}-\\hat y_k) = -y_k + \\hat y_k\\sum_j y_j = \\hat y_k - y_k$, since $\\sum_j y_j = 1$. Batch mean loss: $dZ_3 = (\\hat Y - Y)/m$. Why this pairing: the log in cross entropy cancels the exponential in softmax, so the gradient does not vanish when the wrong class is confidently predicted, unlike squared error on softmax outputs, whose gradient carries a $\\hat y(1-\\hat y)$ factor that goes to zero at saturation. Cross entropy is also the negative log likelihood of a categorical model, so minimizing it is maximum likelihood. The write up names softmax at the output but not the loss; cross entropy is the standard pairing, so say which loss you implemented.",
+      "evidence": [
+        "portfolio: Forward propagation is explicit weighted sums and activation functions: sigmoid in the hidden layers in the first iteration, then ReLU once vanishing gradients became visible, and softmax at the output for the ten class classification.",
+        "portfolio: Backpropagation computes gradients with the chain rule, layer by layer, using an explicit derivative formula for each activation function."
+      ],
+      "sources": [],
+      "tags": [
+        "cross-entropy",
+        "softmax",
+        "gradient",
+        "derivation"
+      ]
+    },
+    {
+      "id": "dnn-07",
+      "type": "formula",
+      "level": 2,
+      "q": "Derive backpropagation for the whole network in matrix form.",
+      "easy": "Start with the output error (predicted minus true), then for each layer going backward: the weight gradient is the layer's input transposed times its error, and the error passed further back is the error times the weights transposed, multiplied by the activation's slope.",
+      "deep": "With the forward pass of dnn-04 and batch mean loss: $dZ_3 = (\\hat Y - Y)/m$; $dW_3 = A_2^\\top dZ_3$; $db_3 = \\mathbf{1}^\\top dZ_3$ (column sums); $dA_2 = dZ_3W_3^\\top$; $dZ_2 = dA_2 \\odot g'(Z_2)$; $dW_2 = A_1^\\top dZ_2$; $db_2 = \\mathbf{1}^\\top dZ_2$; $dA_1 = dZ_2W_2^\\top$; $dZ_1 = dA_1\\odot g'(Z_1)$; $dW_1 = X^\\top dZ_1$; $db_1 = \\mathbf{1}^\\top dZ_1$. Update: $W_l \\leftarrow W_l - \\eta\\, dW_l$. Shape check: $dW_l$ always matches $W_l$ ($A_{l-1}^\\top$ is $n_{in}\\times m$, $dZ_l$ is $m\\times n_{out}$). Why it is efficient: reverse mode reuses each $dZ_l$ for both the weight gradient and the next error, so the backward pass costs about two forward passes, versus one forward pass per parameter for finite differences. The general recursion $\\delta_l = (\\delta_{l+1}W_{l+1}^\\top)\\odot g'(Z_l)$ is where vanishing gradients come from (dnn-09). The write up describes exactly this: chain rule, layer by layer, explicit derivative per activation.",
+      "evidence": [
+        "portfolio: Backpropagation computes gradients with the chain rule, layer by layer, using an explicit derivative formula for each activation function."
+      ],
+      "sources": [],
+      "tags": [
+        "backpropagation",
+        "chain-rule",
+        "derivation"
+      ]
+    },
+    {
+      "id": "dnn-08",
+      "type": "formula",
+      "level": 1,
+      "q": "Give the derivatives of sigmoid, tanh, and ReLU, and explain dying ReLU.",
+      "easy": "Sigmoid's slope is at most 0.25 and nearly zero when the unit is saturated. Tanh's slope is at most 1. ReLU's slope is exactly 1 for positive inputs and 0 for negative ones, so it does not shrink gradients, but a unit stuck in the negative region stops learning.",
+      "deep": "Sigmoid: $\\sigma'(z) = \\sigma(z)(1-\\sigma(z))$, maximum 0.25 at $z=0$, near 0 for $|z| > 5$; outputs are not zero centred, so all weight gradients into a unit share a sign within one example, which zigzags updates. Tanh: $\\tanh'(z) = 1-\\tanh^2(z)$, maximum 1, zero centred, still saturates. ReLU: $g'(z) = 1$ for $z>0$, $0$ for $z<0$ (pick 0 or 1 at exactly 0); cheap, no saturation on the positive side, sparse activations. Dying ReLU: if a large update pushes a unit's bias and weights so that $z<0$ for every input, its gradient is 0 forever; causes are high learning rates and bad initialization. Remedies: He initialization, a smaller learning rate, a small positive bias, Leaky ReLU $\\max(\\alpha z, z)$ with $\\alpha \\approx 0.01$, or GELU and ELU variants. The project implemented an explicit derivative formula for each activation, sigmoid first and ReLU after vanishing gradients appeared.",
+      "evidence": [
+        "portfolio: Forward propagation is explicit weighted sums and activation functions: sigmoid in the hidden layers in the first iteration, then ReLU once vanishing gradients became visible, and softmax at the output for the ten class classification.",
+        "portfolio: Backpropagation computes gradients with the chain rule, layer by layer, using an explicit derivative formula for each activation function."
+      ],
+      "sources": [],
+      "tags": [
+        "activations",
+        "sigmoid",
+        "relu",
+        "dying-relu"
+      ]
+    },
+    {
+      "id": "dnn-09",
+      "type": "concept",
+      "level": 1,
+      "q": "What are vanishing gradients, why did sigmoid cause them, and why did ReLU help?",
+      "easy": "Backprop multiplies one slope per layer. Sigmoid's slope is at most 0.25, so after several layers the gradient reaching the early layers is tiny and they barely learn. ReLU's slope is 1 wherever the unit is active, so the gradient passes through without shrinking.",
+      "deep": "From $\\delta_l = (\\delta_{l+1}W_{l+1}^\\top)\\odot g'(Z_l)$, the error at layer $l$ is a product over later layers of weight matrices and activation slopes. With sigmoid, $g' \\le 0.25$, so with weights of order 1 the gradient shrinks by about 4x or more per layer: roughly $0.25^L$ after $L$ layers, and saturated units ($g'\\approx 0$) make it worse. Symptoms: first layer gradient norms orders of magnitude below last layer norms, early layer weights barely changing, training loss plateauing early. ReLU passes gradients with slope exactly 1 through active units, so the product depends mainly on the weights, which initialization can scale to keep variance constant (dnn-10). Exploding gradients are the mirror case (products of large weights), handled with careful initialization and gradient clipping. Other fixes in modern nets: batch or layer normalization and residual connections, which add an identity path so $\\partial x_{l+1}/\\partial x_l = I + \\ldots$. The project recorded exactly this sequence: sigmoid first, then ReLU once vanishing gradients became visible.",
+      "evidence": [
+        "portfolio: Forward propagation is explicit weighted sums and activation functions: sigmoid in the hidden layers in the first iteration, then ReLU once vanishing gradients became visible, and softmax at the output for the ten class classification.",
+        "portfolio: A network that was too shallow could not capture digit structure, and in one that was too deep without proper initialization the gradients vanished."
+      ],
+      "sources": [],
+      "tags": [
+        "vanishing-gradients",
+        "sigmoid",
+        "relu",
+        "deep-networks"
+      ]
+    },
+    {
+      "id": "dnn-10",
+      "type": "concept",
+      "level": 2,
+      "q": "What is proper initialization? Derive Xavier and He initialization.",
+      "easy": "Weights must start random so units learn different things, and at the right scale so signals and gradients neither shrink nor blow up from layer to layer. Xavier initialization suits sigmoid and tanh; He initialization suits ReLU and uses twice the variance.",
+      "deep": "Symmetry: if all weights start equal, every unit in a layer computes the same thing and gets the same gradient forever, so random initialization is required (biases can start at 0). Scale: for $z = \\sum_{i=1}^{n_{in}} w_ix_i$ with independent zero mean terms, $\\mathrm{Var}(z) = n_{in}\\mathrm{Var}(w)\\mathrm{Var}(x)$. Keeping $\\mathrm{Var}(z) = \\mathrm{Var}(x)$ needs $\\mathrm{Var}(w) = 1/n_{in}$ (LeCun); balancing the forward and backward passes gives Glorot/Xavier $\\mathrm{Var}(w) = 2/(n_{in}+n_{out})$, derived for activations that are roughly linear near 0 (tanh). ReLU zeroes half its inputs, halving the second moment, so He initialization uses $\\mathrm{Var}(w) = 2/n_{in}$, for example W = np.random.randn(n_in, n_out) * np.sqrt(2 / n_in). A naive N(0, 1) init on a 784 input layer gives pre activations with standard deviation near 28, saturating sigmoid immediately; tiny init (0.01) shrinks activations layer by layer to zero. The write up records that a network too deep without proper initialization had vanishing gradients, which is this effect; it does not say which scheme was used afterwards.",
+      "evidence": [
+        "portfolio: A network that was too shallow could not capture digit structure, and in one that was too deep without proper initialization the gradients vanished.",
+        "portfolio: The exercise made it intuitive why deeper networks, non linear activations, and proper initialization matter."
+      ],
+      "sources": [],
+      "tags": [
+        "initialization",
+        "xavier",
+        "he",
+        "variance"
+      ]
+    },
+    {
+      "id": "dnn-11",
+      "type": "concept",
+      "level": 1,
+      "q": "What does the learning rate control, and what did you see when it was wrong?",
+      "easy": "The learning rate is the step size for each weight update. Too high and the loss bounces around or blows up because each step overshoots; too low and training crawls or stalls. Tanay saw both while tuning by hand.",
+      "deep": "Update $w \\leftarrow w - \\eta\\nabla L$. On a quadratic loss $L = \\tfrac12 w^\\top Hw$, gradient descent converges only if $\\eta < 2/\\lambda_{\\max}(H)$, and the convergence rate is set by the condition number $\\lambda_{\\max}/\\lambda_{\\min}$; directions with large curvature oscillate when $\\eta$ is near the limit, which is the bouncing loss. Too small $\\eta$ makes progress along low curvature directions negligible, which looks like a stall. Mini batch noise adds a floor: the stationary spread of the weights grows with $\\eta/B$. Practical selection: a log scale sweep (1e-4 to 1), or a learning rate range test that raises $\\eta$ each step and picks a value below where the loss starts rising; then a schedule (step decay, cosine) to take large steps early and small steps late. Adaptive optimizers (Adam) reduce sensitivity but do not remove it. The write up: too high, the loss bounced; too low, training stalled.",
+      "evidence": [
+        "portfolio: With the learning rate too high the loss bounced, and with it too low, training stalled.",
+        "portfolio: Hyperparameter tuning was iterative and manual, which was the point."
+      ],
+      "sources": [],
+      "tags": [
+        "learning-rate",
+        "optimization",
+        "tuning"
+      ]
+    },
+    {
+      "id": "dnn-12",
+      "type": "compare",
+      "level": 2,
+      "q": "Compare full batch, mini batch, and stochastic gradient descent. What does batch size change?",
+      "easy": "Full batch uses all training images per step: smooth but slow per step. Stochastic uses one image: fast but very noisy. Mini batch, which this project used, takes a small random group per step, which is the usual compromise and uses vectorized math efficiently.",
+      "deep": "The mini batch gradient $\\hat g = \\frac1B\\sum_{i\\in\\mathcal{B}}\\nabla\\ell_i$ is an unbiased estimate of the full gradient with variance proportional to $1/B$. Small B: noisier steps, more updates per epoch, a mild regularizing effect, poor use of vectorized BLAS. Large B: smoother steps, fewer updates per epoch, better hardware use, and often needs a larger learning rate (the linear scaling heuristic: scale $\\eta$ with B, with warmup). One epoch is $\\lceil N/B\\rceil$ steps; shuffle every epoch so batches are not correlated (MNIST files are not ordered by class, but other datasets often are). In NumPy the batch is a matrix product, so going from B = 1 to B = 64 is far more than 64x cheaper per example. The project's loop was mini batch gradient descent with tunable learning rate, batch size, and depth; the chosen values are not recorded in the write up.",
+      "evidence": [
+        "portfolio: Training runs in a mini batch gradient descent loop with tunable learning rate, batch size, and network depth."
+      ],
+      "sources": [],
+      "tags": [
+        "sgd",
+        "mini-batch",
+        "batch-size"
+      ]
+    },
+    {
+      "id": "dnn-13",
+      "type": "code",
+      "level": 2,
+      "q": "Sketch the NumPy training loop.",
+      "easy": "Shuffle, slice a mini batch, run the forward pass, compute the loss, run the backward pass, update every weight, and track loss and accuracy each epoch.",
+      "deep": "Illustrative reimplementation of the loop the write up describes (not the original code):\n\n```python\nimport numpy as np\n\ndef relu(z): return np.maximum(0, z)\ndef softmax(z):\n    z = z - z.max(axis=1, keepdims=True)\n    e = np.exp(z); return e / e.sum(axis=1, keepdims=True)\n\nsizes = [784, 128, 64, 10]\nW = [np.random.randn(a, b) * np.sqrt(2 / a) for a, b in zip(sizes, sizes[1:])]\nb = [np.zeros((1, n)) for n in sizes[1:]]\n\nfor epoch in range(epochs):\n    idx = np.random.permutation(len(X))\n    for s in range(0, len(X), B):\n        xb, yb = X[idx[s:s+B]], Y[idx[s:s+B]]\n        A, Z = [xb], []\n        for l in range(len(W)):\n            Z.append(A[-1] @ W[l] + b[l])\n            A.append(softmax(Z[-1]) if l == len(W) - 1 else relu(Z[-1]))\n        dZ = (A[-1] - yb) / len(xb)\n        for l in reversed(range(len(W))):\n            dW, db = A[l].T @ dZ, dZ.sum(axis=0, keepdims=True)\n            if l > 0:\n                dZ = (dZ @ W[l].T) * (Z[l-1] > 0)\n            W[l] -= lr * dW; b[l] -= lr * db\n```\n\nDetails worth saying out loud: the upstream error is computed with W[l] before W[l] is updated; ReLU's derivative is the mask Z > 0; softmax subtracts the row max; He scaling sqrt(2 / fan_in).",
+      "evidence": [
+        "portfolio: Training runs in a mini batch gradient descent loop with tunable learning rate, batch size, and network depth.",
+        "portfolio: Backpropagation computes gradients with the chain rule, layer by layer, using an explicit derivative formula for each activation function."
+      ],
+      "sources": [],
+      "tags": [
+        "code",
+        "numpy",
+        "training-loop"
+      ]
+    },
+    {
+      "id": "dnn-14",
+      "type": "how",
+      "level": 2,
+      "q": "How do you verify a hand written backward pass is correct?",
+      "easy": "Gradient checking: nudge one weight up and down by a tiny amount, measure how the loss changes, and compare that slope with what backprop computed. If they agree to many decimal places, the derivative code is right.",
+      "deep": "Centered difference: $\\frac{\\partial L}{\\partial\\theta_i} \\approx \\frac{L(\\theta+\\epsilon e_i) - L(\\theta-\\epsilon e_i)}{2\\epsilon}$ with $\\epsilon \\approx 10^{-5}$ in float64; error is $O(\\epsilon^2)$ versus $O(\\epsilon)$ for one sided differences. Compare with relative error $\\frac{|g_a - g_n|}{\\max(|g_a|, |g_n|)}$: around $10^{-7}$ or below is a pass; around $10^{-4}$ or worse usually means a bug, though ReLU kinks at 0 can produce false alarms. Practice: check on a tiny network and a few examples, a random subset of parameters per layer, with regularization off, in float64, then turn checking off for training because it costs two forward passes per parameter. Other checks: initial loss near $\\ln 10 \\approx 2.30$ for ten balanced classes; the ability to overfit 20 examples to near zero loss; shapes of every gradient equal to its parameter. The write up does not describe gradient checking, so present this as how you would verify, not as something you did, unless you did.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "gradient-checking",
+        "testing",
+        "debugging"
+      ]
+    },
+    {
+      "id": "dnn-15",
+      "type": "concept",
+      "level": 2,
+      "q": "Why did a too shallow network fail, and why can a deeper one fail too?",
+      "easy": "Too few layers or units cannot represent the shapes that distinguish digits, so the model underfits. Too many layers without the right initialization make the gradient vanish before it reaches the early layers, so the extra depth never trains.",
+      "deep": "Capacity: a network with no hidden layer is a linear classifier on raw pixels, so classes that are not linearly separable in pixel space (a slanted 7 versus a 1) confuse it. Hidden layers build features: early units respond to strokes and edges, later units to combinations, and depth composes features with fewer parameters than width alone. The universal approximation theorem says one wide enough hidden layer can approximate any continuous function on a compact set, but it says nothing about how many units that takes or whether gradient descent finds them. Depth failure: each added layer multiplies the backward signal by another weight matrix and activation slope (dnn-09), so without variance preserving initialization, normalization, or residual connections, deep plain MLPs train worse than shallow ones even on training data, which is optimization failure rather than overfitting. The write up records both: too shallow could not capture digit structure, and too deep without proper initialization vanished the gradients.",
+      "evidence": [
+        "portfolio: A network that was too shallow could not capture digit structure, and in one that was too deep without proper initialization the gradients vanished.",
+        "portfolio: The exercise made it intuitive why deeper networks, non linear activations, and proper initialization matter."
+      ],
+      "sources": [],
+      "tags": [
+        "depth",
+        "capacity",
+        "underfitting",
+        "optimization"
+      ]
+    },
+    {
+      "id": "dnn-16",
+      "type": "number",
+      "level": 1,
+      "q": "What accuracy did the network reach, and how should an interviewer read it?",
+      "easy": "94% on the held out MNIST test set. For context, a plain linear model gets roughly 92%, a well tuned two layer network about 98%, and convolutional networks above 99%, so 94% shows a working network that was not pushed hard. The write up says the goal was understanding, not benchmark chasing.",
+      "deep": "What it was measured against: the official 10,000 image MNIST test set, held out from training. Context from widely reported results: multinomial logistic regression on raw pixels lands around 92%; a simple fully connected net with one or two hidden layers, cross entropy, sensible initialization, and enough epochs reaches roughly 97 to 98%; CNNs exceed 99%. So 94% sits between a linear model and a tuned MLP. Plausible reasons (none are recorded in the write up, so offer them as hypotheses): sigmoid in early iterations, initialization not matched to the activation, few epochs, plain SGD without momentum, no learning rate schedule, no input standardization. Caveats: one number, no error bars over seeds, and the write up does not describe a separate validation split, so if hyperparameters were chosen by test accuracy the figure is slightly optimistic.",
+      "evidence": [
+        "portfolio: Final accuracy was 94% on the held out MNIST test set.",
+        "portfolio: That is not state of the art; the goal was understanding rather than benchmark chasing.",
+        "portfolio: BADGE: 94% MNIST accuracy / built from scratch, no frameworks"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "accuracy",
+        "baselines"
+      ]
+    },
+    {
+      "id": "dnn-17",
+      "type": "concept",
+      "level": 2,
+      "q": "How would you control overfitting in this network?",
+      "easy": "Watch the gap between training and validation accuracy. If training keeps improving while validation stalls, add a penalty on large weights, randomly switch off units during training, or stop training at the best validation score.",
+      "deep": "L2 weight decay: add $\\frac{\\lambda}{2}\\sum\\|W\\|_F^2$ to the loss, so $dW \\mathrel{+}= \\lambda W$ and every step shrinks weights by $(1-\\eta\\lambda)$; biases are usually not decayed. Dropout: during training zero each hidden unit with probability $p$ and scale survivors by $1/(1-p)$ (inverted dropout), so no change is needed at test time; the backward pass reuses the same mask. Early stopping: keep the weights from the epoch with the best validation accuracy. Data augmentation: small shifts and rotations of digits. Diagnosis: high training and low validation accuracy means overfitting; both low means underfitting (the too shallow case in this project). The write up's issues were optimization and capacity (bouncing loss, stalling, vanishing gradients, too shallow), not overfitting, and it does not mention regularization; present these as tools you know rather than steps you took.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "regularization",
+        "dropout",
+        "weight-decay",
+        "overfitting"
+      ]
+    },
+    {
+      "id": "dnn-18",
+      "type": "compare",
+      "level": 2,
+      "q": "The project used plain mini batch gradient descent. How do momentum and Adam differ?",
+      "easy": "Momentum keeps a running direction so steps speed up along consistent slopes and damp side to side bouncing. Adam also scales each weight's step by how large its recent gradients were, so it needs less learning rate tuning.",
+      "deep": "SGD: $w \\leftarrow w - \\eta g$. Momentum: $v \\leftarrow \\mu v + g$, $w \\leftarrow w - \\eta v$ with $\\mu \\approx 0.9$; effective step along a consistent direction grows by about $1/(1-\\mu)$, and oscillations across a narrow valley cancel. Nesterov evaluates the gradient at the look ahead point. Adam: $m \\leftarrow \\beta_1 m + (1-\\beta_1)g$, $v \\leftarrow \\beta_2 v + (1-\\beta_2)g^2$, bias corrected $\\hat m = m/(1-\\beta_1^t)$, $\\hat v = v/(1-\\beta_2^t)$, update $w \\leftarrow w - \\eta\\,\\hat m/(\\sqrt{\\hat v}+\\epsilon)$, defaults $\\beta_1 = 0.9$, $\\beta_2 = 0.999$, $\\epsilon = 10^{-8}$, $\\eta = 10^{-3}$. AdamW decouples weight decay from the adaptive scaling. Relevance here: the bouncing loss at high learning rates is what momentum and Adam damp, so either would likely have raised accuracy above 94% with less manual tuning; the project deliberately kept plain gradient descent so every update was visible.",
+      "evidence": [
+        "portfolio: Training runs in a mini batch gradient descent loop with tunable learning rate, batch size, and network depth.",
+        "portfolio: With the learning rate too high the loss bounced, and with it too low, training stalled."
+      ],
+      "sources": [],
+      "tags": [
+        "optimizers",
+        "momentum",
+        "adam"
+      ]
+    },
+    {
+      "id": "dnn-19",
+      "type": "pushback",
+      "level": 2,
+      "q": "94% is about what logistic regression gets on MNIST. Did your network learn anything a linear model couldn't?",
+      "easy": "Partly fair. 94% is only a little above a linear model's roughly 92% and well below the 97 to 98% a tuned two layer network reaches. It shows the network works, not that it was tuned well, and the write up says so.",
+      "deep": "Concede: the margin over a linear baseline is small, and there is no recorded logistic regression run on the same preprocessing to make the comparison exact. Defend: the purpose was to implement and understand forward, backward, and optimization by hand, and the write up states that the result is not state of the art. Explain the likely gap with specifics: sigmoid early on, initialization not matched to ReLU, plain SGD without momentum or a schedule, limited epochs, and no input standardization; any one of these costs points on MNIST. What would show the network learned nonlinear features: the same code with hidden layers removed (a linear softmax model) as an explicit baseline, and a sweep that moves accuracy toward 97 to 98% with He init and momentum.",
+      "say": "Fair. 94% is only a bit above a linear model and below what a tuned two layer network gets. The goal was writing the forward pass, backprop, and the optimizer myself, and the write up says it isn't state of the art. If I redid it, I'd run my own code with the hidden layers removed as the baseline, then add He initialization and momentum and show the gap open up.",
+      "evidence": [
+        "portfolio: Final accuracy was 94% on the held out MNIST test set.",
+        "portfolio: That is not state of the art; the goal was understanding rather than benchmark chasing."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "baselines",
+        "accuracy"
+      ]
+    },
+    {
+      "id": "dnn-20",
+      "type": "pushback",
+      "level": 1,
+      "q": "Nobody writes backprop by hand in industry. Why should this matter to us?",
+      "easy": "Nobody should ship hand written backprop. The value is diagnostic: knowing what the framework computes lets you tell a learning rate problem from saturated units, read NaNs, and check gradient flow when a real model fails quietly.",
+      "deep": "Concrete payoffs: reading a training curve (bouncing loss means the step is too large; a flat curve from the start can mean saturated units or a vanished gradient); recognizing why log softmax plus negative log likelihood is numerically safer than softmax then log; knowing the initial loss should be about ln 10 for ten classes and checking it; inspecting per layer gradient norms to find where signal dies; understanding why normalization layers and residual connections exist. The write up's own reason: when a production model silently fails, you reason about gradient flow rather than swapping layers and hoping. Tanay's later projects use frameworks (TensorFlow and Keras appear in the skills list), which is the right division.",
+      "say": "Agreed, nobody should ship hand written backprop. I did it once so the framework isn't a black box. When a model's loss bounces or goes flat, I know whether to look at the learning rate, saturated units, or gradient flow, instead of swapping layers and hoping.",
+      "evidence": [
+        "portfolio: When a production model later silently fails, you reason about gradient flow rather than swapping layers and hoping.",
+        "portfolio: Frameworks hide the parts of a neural network that are most useful to understand: the matrix shapes flowing forward, the gradient math flowing backward, and the way optimization changes the weights."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "motivation"
+      ]
+    },
+    {
+      "id": "dnn-21",
+      "type": "pushback",
+      "level": 2,
+      "q": "You tuned by hand and report test accuracy. Did you tune on the test set?",
+      "easy": "The write up does not describe a separate validation split, so Tanay should answer from what they did. If hyperparameters were picked by watching test accuracy, the 94% is mildly optimistic, and the fix is a validation split from the training images.",
+      "deep": "Why it matters: every hyperparameter chosen by looking at a set turns that set into training data for the choice; with a handful of manual settings on MNIST the bias is small but nonzero, and the claim 'held out' requires that the test set was used once. Correct protocol: split the 60,000 training images into about 50,000 train and 10,000 validation (stratified by digit), tune on validation, retrain on all 60,000 with the chosen settings, evaluate once on the official test set. Also report variance: a few seeds give an interval, since a single run's accuracy can move by a few tenths of a point. The honest answer if the test set was used for tuning: say so, call 94% an upper estimate, and describe the protocol you would use now.",
+      "say": "My write up doesn't describe a separate validation split, so I'll be precise about it. If I picked settings by watching test accuracy, then 94% is slightly optimistic. The right protocol is tuning on a validation slice of the training set and touching the test set once, and that's what I'd do now.",
+      "evidence": [
+        "portfolio: Hyperparameter tuning was iterative and manual, which was the point.",
+        "portfolio: Final accuracy was 94% on the held out MNIST test set."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "validation",
+        "leakage",
+        "honesty"
+      ]
+    },
+    {
+      "id": "dnn-22",
+      "type": "pushback",
+      "level": 3,
+      "q": "How did you know the gradients were vanishing, rather than the learning rate being too low?",
+      "easy": "Both look like a stalled loss. The difference shows up per layer: with vanishing gradients the early layers' gradients are orders of magnitude smaller than the last layer's, while a too small learning rate shrinks every layer's update equally.",
+      "deep": "Diagnostics that separate them: (1) per layer gradient norms $\\|dW_l\\|$ each epoch; vanishing shows a steep decline toward the input layer; (2) the ratio of update size to weight size per layer, $\\eta\\|dW_l\\|/\\|W_l\\|$, with about 1e-3 a common healthy target; vanishing gives tiny ratios only in early layers; (3) activation statistics: sigmoid units with outputs piled near 0 or 1 are saturated; (4) the fix test: switching sigmoid to ReLU (as the project did) or using variance preserving init restores learning at the same learning rate, which a learning rate problem would not do; raising the learning rate instead speeds the last layers and destabilizes them while the early layers stay stuck. The write up says vanishing gradients became visible and that switching to ReLU followed; it does not record which diagnostic was used, so describe the one you used.",
+      "say": "Both look like a flat loss, so I'd look per layer. Vanishing gradients show up as early layer gradients orders of magnitude smaller than the last layer's, and saturated sigmoid outputs near 0 or 1. A small learning rate shrinks every layer equally. The tell in my case was that switching sigmoid to ReLU fixed it at the same learning rate.",
+      "evidence": [
+        "portfolio: Forward propagation is explicit weighted sums and activation functions: sigmoid in the hidden layers in the first iteration, then ReLU once vanishing gradients became visible, and softmax at the output for the ten class classification.",
+        "portfolio: A network that was too shallow could not capture digit structure, and in one that was too deep without proper initialization the gradients vanished."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "vanishing-gradients",
+        "diagnostics"
+      ]
+    },
+    {
+      "id": "dnn-23",
+      "type": "pushback",
+      "level": 2,
+      "q": "Why a fully connected network? Images call for a CNN.",
+      "easy": "For accuracy, yes. A CNN uses the fact that nearby pixels belong together and that a stroke means the same thing anywhere in the image. The project's goal was understanding backprop end to end, and a fully connected net is the smallest model where every gradient can be written and checked by hand.",
+      "deep": "What an MLP ignores: flattening to 784 values discards spatial locality, so the model must learn the same stroke detector separately for each position, and has no built in translation equivariance; shifting a digit by two pixels changes most inputs. A CNN shares weights across positions (a 3x3 kernel has 9 weights regardless of image size), builds local features, and pools for some translation invariance, reaching above 99% on MNIST with far fewer parameters than a wide MLP. Why the MLP was still right for this project: its backward pass is three matrix products per layer, so the derivation is fully transparent; a from scratch CNN needs convolution backward passes (im2col or explicit loops) that add bookkeeping without new concepts about gradient flow. The natural next step is a from scratch convolution layer with gradient checking.",
+      "say": "For accuracy, a CNN is the right model; it shares weights across positions and keeps the 2D structure. My goal was understanding gradient flow, and a fully connected net is the smallest model where every gradient is a few matrix products I can derive and check. A from scratch convolution layer is the obvious next step.",
+      "evidence": [
+        "portfolio: Frameworks hide the parts of a neural network that are most useful to understand: the matrix shapes flowing forward, the gradient math flowing backward, and the way optimization changes the weights."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "cnn",
+        "architecture"
+      ]
+    },
+    {
+      "id": "dnn-24",
+      "type": "pushback",
+      "level": 2,
+      "q": "What were your layer sizes, epochs, and learning rate?",
+      "easy": "The write up does not record them, so the honest answer comes from Tanay's own notebook; do not guess in an interview. What the write up does record is the tunable set (learning rate, batch size, depth) and what each failure looked like.",
+      "deep": "Prepare these from the original code before any interview: hidden layer widths and count for the final model, activation per layer, initialization scheme, loss, batch size, learning rate and any schedule, number of epochs, input scaling, and whether a validation split existed. If the code is lost, say so and describe the reasoning instead: widths of 64 to 256 are typical for MNIST MLPs, learning rates around 0.01 to 0.1 for plain SGD with ReLU and He init, and batch sizes of 32 to 128. Recorded facts: tunable learning rate, batch size, and network depth; loss bounced at high learning rate and stalled at low; too shallow could not capture digit structure; too deep without proper initialization vanished.",
+      "say": "I'd give you the exact values from my notebook rather than guess. What I can tell you is what I tuned and what each knob did: too high a learning rate and the loss bounced, too low and it stalled, too shallow and it underfit, and too deep without proper initialization the gradients vanished.",
+      "evidence": [
+        "portfolio: Training runs in a mini batch gradient descent loop with tunable learning rate, batch size, and network depth.",
+        "portfolio: With the learning rate too high the loss bounced, and with it too low, training stalled.",
+        "portfolio: A network that was too shallow could not capture digit structure, and in one that was too deep without proper initialization the gradients vanished."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "hyperparameters",
+        "honesty"
+      ]
+    },
+    {
+      "id": "dnn-25",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations, and what would change at 10x data or in production?",
+      "easy": "Single run, one accuracy number, CPU only, no recorded validation split or hyperparameters, plain gradient descent, and an architecture that ignores image structure. In production you would use a framework, a CNN, data augmentation, and monitoring.",
+      "deep": "Limitations: (1) one number with no seed variance; (2) validation protocol not recorded (dnn-21); (3) hyperparameters not recorded (dnn-24); (4) no gradient check described; (5) MLP on flattened pixels; (6) plain mini batch GD, no schedule. 10x data (for example EMNIST letters and digits): NumPy on CPU still works but epochs slow linearly; vectorize everything, use float32, stream batches from disk with memory mapped arrays, consider a GPU array library (CuPy has a NumPy compatible API). Production digit recognition: a framework with autograd and tested kernels, a small CNN, augmentation for real handwriting (rotation, thickness, noise), calibrated probabilities and a reject option for low confidence, monitoring of input drift (scanned forms differ from MNIST's centred digits), and an evaluation set from the target domain rather than MNIST alone.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "production",
+        "scaling"
+      ]
+    },
+    {
+      "id": "dnn-26",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next with this project?",
+      "easy": "Add gradient checking, switch to He initialization with momentum, tune on a validation split, compare against a linear baseline in the same code, then write a convolution layer from scratch.",
+      "deep": "In order: (1) gradient check every layer on a tiny network; (2) He init plus ReLU, momentum 0.9, a step or cosine schedule, and input standardization; target the 97 to 98% a tuned MLP reaches; (3) 50,000 and 10,000 train and validation split, test once, three seeds with a mean and spread; (4) the same code with hidden layers removed as the linear baseline, so the nonlinear gain is measured; (5) per layer gradient norm plots for sigmoid versus ReLU, turning the vanishing gradient story into a figure; (6) a from scratch convolution and pooling layer with gradient checks; (7) compare final weights and gradients against PyTorch autograd on the same initialization as a correctness test.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next-steps",
+        "gradient-checking",
+        "cnn"
+      ]
+    },
+    {
+      "id": "dnn-27",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager.",
+      "easy": "Lead with what was built and why it matters for debugging real models; one number; one honest caveat.",
+      "deep": "Hiring manager version: from scratch NumPy network on MNIST, 94% test accuracy, deliberately not a benchmark project; the payoff is diagnosing training failures in production models.",
+      "say": "I built a neural network for handwritten digits in plain NumPy, writing the forward pass, backprop, and the training loop myself. It reached 94% on the MNIST test set, which isn't state of the art and wasn't the goal. What it gave me is the ability to look at a failing training run and tell whether it's the learning rate, saturated units, or gradients dying in early layers.",
+      "evidence": [
+        "portfolio: Final accuracy was 94% on the held out MNIST test set.",
+        "portfolio: When a production model later silently fails, you reason about gradient flow rather than swapping layers and hoping."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "dnn-28",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the technical core to a staff ML engineer.",
+      "easy": "Shapes, the softmax cross entropy gradient, the backward recursion, the sigmoid to ReLU switch, and what you would add.",
+      "deep": "Staff version: matrix form forward and backward; $dZ_L = (\\hat Y - Y)/m$; $dW_l = A_{l-1}^\\top dZ_l$; $\\delta_l = (\\delta_{l+1}W^\\top)\\odot g'$; sigmoid's 0.25 slope bound; He init; plain SGD; what is missing (gradient check, validation protocol, seeds).",
+      "say": "Everything is matrix form. The output error is predicted minus true over the batch size, each weight gradient is the previous activations transposed times the error, and the error moves back through the weights transposed times the activation slope. With sigmoid that slope is at most a quarter, so depth killed the gradient, and ReLU fixed it. What I'd add now is a gradient check and a proper validation split.",
+      "evidence": [
+        "portfolio: Backpropagation computes gradients with the chain rule, layer by layer, using an explicit derivative formula for each activation function.",
+        "portfolio: Forward propagation is explicit weighted sums and activation functions: sigmoid in the hidden layers in the first iteration, then ReLU once vanishing gradients became visible, and softmax at the output for the ten class classification."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer"
+      ]
+    },
+    {
+      "id": "dnn-29",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain this project to a product manager.",
+      "easy": "No math: what the model does, how well, and why building it by hand makes Tanay faster at fixing models later.",
+      "deep": "PM version: it reads handwritten digits; 94% on a standard test; built without libraries to understand why models fail; translates to faster diagnosis when a model in a product misbehaves.",
+      "say": "It's a program that learns to read handwritten digits from examples, and it got 94% right on a standard test set. I built it without any machine learning library on purpose. For a product team the value is that when a model stops learning or behaves oddly, I can find the cause quickly instead of trying random changes.",
+      "evidence": [
+        "portfolio: Final accuracy was 94% on the held out MNIST test set."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "pm"
+      ]
+    },
+    {
+      "id": "dnn-30",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a recruiter.",
+      "easy": "Plain words, one number, and the skills.",
+      "deep": "Recruiter version: neural network from scratch in Python and NumPy, 94% on MNIST, skills are neural networks, backpropagation, Python, NumPy, and hyperparameter tuning.",
+      "say": "I built a neural network that reads handwritten digits, from scratch in Python and NumPy with no machine learning frameworks. It reached 94% accuracy on the standard test set. The skills are neural networks, backpropagation, and tuning a model by hand.",
+      "evidence": [
+        "portfolio: TAGS: Python, NumPy, Neural Networks, Backpropagation, From Scratch",
+        "portfolio: Final accuracy was 94% on the held out MNIST test set."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": []
+}
