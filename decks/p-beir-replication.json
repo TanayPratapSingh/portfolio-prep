@@ -1,0 +1,1236 @@
+{
+  "deck_id": "p-beir-replication",
+  "title": "Replicating BEIR",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/beir-replication",
+  "summary_easy": "Tanay rebuilt the main experiment of BEIR, a benchmark showing that neural search models trained on one dataset often lose to plain keyword search on new kinds of documents. On two scientific datasets every published number he checked came back, and a newer 2023 model beat keyword search on both. The one number that first missed led him to a library default that silently cut every document to 100 tokens; fixing it matched the paper exactly.",
+  "summary_deep": "An independent reproduction of Thakur et al. 2021 on SciFact (5,183 documents, 300 queries, binary, 1.1 relevant per query) and NFCorpus (3,633 documents, 323 queries, graded, 38.2 relevant per query) using the official BEIR release. BM25 is a Python reimplementation with Anserini's k1 = 0.9 and b = 0.4, Lucene idf, Porter stemming and the 33 word Lucene stopword list; TAS-B and DPR run through sentence-transformers with dot product, bge-small-en-v1.5 with cosine and its query instruction, and reciprocal rank fusion (k = 60) combines BM25 and TAS-B. Metrics come from pytrec_eval. The four dense cells land within 0.001 nDCG@10 of the paper (three exactly) and BM25 is off by +0.012 and -0.005, attributed to single field indexing and exact lengths. DPR on SciFact first scored 0.260 against 0.318; a TAS-B control cleared the pipeline, an encoding ablation showed title only equalled title plus text, and a length sweep showed the context encoder port's max_seq_length of 100 was truncating abstracts. At 512 word pieces, BEIR's own setting, it matched 0.318 nDCG@10 and 0.727 Recall@100. bge-small beats BM25 on both datasets, and the hybrid beats both inputs. The headline run takes 12 minutes on a MacBook.",
+  "sheet": {
+    "easy": "## What it is\nAn independent rebuild of BEIR's central experiment: do neural search models trained on one dataset lose to plain keyword search (BM25) on new kinds of documents? Two scientific datasets, run on one MacBook.\n\n## Data\n| | SciFact | NFCorpus |\n|---|---|---|\n| documents | 5,183 abstracts | 3,633 medical papers |\n| test queries | 300 scientific claims | 323 short health questions |\n| relevant per query | 1.1 (yes or no) | 38.2 (graded) |\n\n## Systems\n- BM25: keyword scoring, Python rewrite with the paper's settings.\n- TAS-B and DPR: the paper's neural models.\n- bge-small (2023, not in the paper) and a BM25 + TAS-B fusion (not in the paper).\n\n## Results (nDCG@10, published / reproduced)\n| | SciFact | NFCorpus |\n|---|---|---|\n| BM25 | 0.665 / 0.677 | 0.325 / 0.320 |\n| TAS-B | 0.643 / 0.643 | 0.319 / 0.319 |\n| DPR | 0.318 / 0.318 | 0.189 / 0.188 |\n| bge-small | 0.713 | 0.343 |\n| hybrid RRF | 0.687 | 0.341 |\n\n## The bug\nDPR on SciFact first scored 0.260. Its document model was set to read only 100 tokens, so most of every abstract was ignored, with no warning. Title only scored the same as title plus abstract, which gave it away. At 512 tokens it scored 0.318, exactly the paper. On NFCorpus the headline score hid the bug.\n\n## How to say it\n- Six of six published cells reproduced; three exact, a fourth within 0.001, BM25 off by +0.012 and -0.005.\n- The paper holds for its models; a 2023 model beats BM25 on both datasets.\n- Check document length against the model limit in any RAG system.\n\n## Next\nSignificance tests, BM25 + bge fusion, Java BM25, capped recall, more datasets.\n",
+    "deep": "## Claim under test\nBEIR (Thakur et al. 2021): dense retrievers trained on MS MARCO lose to BM25 zero shot. Published nDCG@10 for these datasets: SciFact BM25 0.665, DPR 0.318, ANCE 0.507, TAS-B 0.643, ColBERT 0.671, BM25+CE 0.688; NFCorpus 0.325, 0.189, 0.237, 0.319, 0.305, 0.350 (`published.json`).\n\n## Data (official BEIR zips, `src/beirdata.py`)\n| | SciFact | NFCorpus |\n|---|---|---|\n| corpus | 5,183 | 3,633 |\n| test queries | 300 | 323 |\n| relevance | binary | 3 level graded |\n| relevant per query | 1.1 | 38.2 |\n| avg query / doc words | 12.37 / 213.63 | 3.30 / 232.26 |\nOnly judged test queries are scored.\n\n## BM25 (`src/bm25.py`)\n$$\\mathrm{score}(q,d)=\\sum_{t\\in q}\\ln\\!\\Big(1+\\frac{N-df_t+0.5}{df_t+0.5}\\Big)\\frac{tf_{t,d}(k_1+1)}{tf_{t,d}+k_1(1-b+b\\,|d|/\\mathrm{avgdl})},\\quad k_1=0.9,\\ b=0.4$$\nTokens `[a-z0-9]+`, lowercase, 33 Lucene stopwords, Porter (PyStemmer), numpy postings, argpartition top 100, zero scores dropped. Deviations from Anserini: one concatenated field (Anserini: title and body separately), exact lengths (Lucene: one byte norms), regex tokeniser. Lucene's own defaults are $k_1=1.2$, $b=0.75$.\n\n## Dense (`src/dense.py`)\n| model | encoder(s) | pooling | similarity | doc text | limit |\n|---|---|---|---|---|---|\n| TAS-B | msmarco-distilbert-base-tas-b (6 layer) | CLS | dot | title + \" \" + text | 512 |\n| DPR Multi | separate question and ctx BERT base | CLS | dot | title + \" [SEP] \" + text | 512 (port ships 100) |\n| bge-small-en-v1.5 | one encoder, 33.4M, 384 dim | CLS | cosine (normalised) | title + \" \" + text; query instruction | 512 |\nExact search: query blocks of 64, `block @ doc_matrix.T`, argpartition top 100. Cost $O(QNd)$; encoding dominates.\n\n## Metrics (`src/evaluate.py`, pytrec_eval)\n$$\\mathrm{nDCG@10}=\\frac{1}{|Q|}\\sum_q\\frac{\\sum_{i=1}^{10} g_i/\\log_2(i+1)}{\\mathrm{IDCG@10}}\\quad\\text{(linear gain = qrels grade)}$$\n$$R@100=\\frac{1}{|Q|}\\sum_q\\frac{|\\mathrm{top}_{100}\\cap\\mathrm{Rel}_q|}{|\\mathrm{Rel}_q|},\\qquad R_{cap}@100:\\ \\text{denominator}\\ \\min(100,|\\mathrm{Rel}_q|)$$\nPlain equals capped on every SciFact query; capped is at least plain on NFCorpus.\n\n## RRF (`rrf`, Cormack et al. 2009)\n$$\\mathrm{RRF}(d)=\\sum_{r}\\frac{1}{60+r(d)}$$\nInputs: BM25 and TAS-B top 100; ties broken by doc id; output top 100. Rank based, so no score normalisation.\n\n## Results (`runs/final/report.json`)\n| system | SciFact nDCG@10 pub / mine | SciFact R@100 pub / mine | NFCorpus nDCG@10 pub / mine | NFCorpus R@100 pub / mine |\n|---|---|---|---|---|\n| BM25 | 0.665 / 0.677 (+0.012) | 0.908 / 0.929 | 0.325 / 0.320 (-0.005) | 0.25 / 0.246 |\n| TAS-B | 0.643 / 0.643 | 0.891 / 0.891 | 0.319 / 0.319 | 0.28 / 0.280 |\n| DPR (512) | 0.318 / 0.318 | 0.727 / 0.727 | 0.189 / 0.188 | 0.208 / 0.208 |\n| bge-small | n/a / 0.713 | n/a / 0.942 | n/a / 0.343 | n/a / 0.311 |\n| RRF BM25+TAS-B | n/a / 0.687 | n/a / 0.948 | n/a / 0.341 | n/a / 0.294 |\nExactness: three of six nDCG@10 cells exact at three decimals, DPR NFCorpus within 0.001, BM25 +0.012 / -0.005; four dense Recall@100 cells exact.\n\n## The truncation bug\nFirst full run: DPR SciFact 0.260 (R@100 0.584) against 0.318 (0.727). Control: TAS-B exact. Ablation at the shipped `max_seq_length = 100`: space 0.260, [SEP] 0.276, text only 0.171, title only 0.261 (the tell). Sweep with [SEP]:\n| limit | nDCG@10 | R@100 |\n|---|---|---|\n| 100 | 0.276 | 0.601 |\n| 256 | 0.298 | 0.687 |\n| 350 | 0.315 | 0.710 |\n| 512 | 0.318 | 0.727 |\nSpace join at 512: 0.310. Length worth +0.042 to +0.050; [SEP] worth +0.008 to +0.016. BEIR uses the first 512 word pieces for all neural models; DPR was trained on 100 word passages with title [SEP]. NFCorpus: nDCG@10 0.191 buggy vs 0.188 fixed (hidden), R@100 0.190 vs 0.208 (visible); encoding 45.7 s vs 181.3 s.\n\n## Verification\nOfficial data and counts; judged queries only; pytrec_eval; `published.json` with table sources; per cell deltas with a 5e-4 zero threshold; TAS-B as positive control; DPR fix matched on two metrics.\n\n## Runtime (MacBook, MPS)\nFinal run 19:48:02 to 19:59:55 UTC (about 12 minutes). SciFact / NFCorpus seconds: BM25 0.5 / 0.3, TAS-B 94.2 / 87.9, DPR 219.5 / 181.3, bge 70.4 / 58.6. DPR sweep about 20 minutes.\n\n## Limitations\n2 of 18 datasets; Python BM25; plain recall; no significance tests; single configurations for bge and RRF; bge contamination cannot be excluded.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "I rebuilt the central experiment from BEIR, the benchmark showing that dense retrievers trained on MS MARCO lose to BM25 on new domains. On SciFact and NFCorpus all six published cells reproduced, and the dense models land within 0.001 of the paper. The interesting part was the cell that didn't match: DPR on SciFact scored 0.260 against 0.318. A library default was silently truncating every document to 100 tokens. Fixing it gave 0.318 exactly. The whole run takes 12 minutes on a MacBook.",
+      "keypoints": [
+        "Names BEIR and its claim (BM25 beats MS MARCO dense models zero shot)",
+        "Six of six cells reproduced, dense within 0.001",
+        "DPR 0.260 against 0.318",
+        "Cause: 100 token truncation default",
+        "Fix matched exactly; 12 minutes on a laptop"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "BEIR's claim is that dense retrievers trained on MS MARCO look great in domain but lose to BM25 when you move them to a new domain with no training data. I rebuilt that on the two smallest scientific datasets, SciFact and NFCorpus, using the official data, and the document and query counts match the paper.\n\nI ran five systems. BM25 is my own Python version with Anserini's settings, k1 0.9 and b 0.4, Porter stemming and Lucene's stopwords. TAS-B and DPR are the paper's dense models, scored with dot product because that's how they were trained. Then two additions, labelled as such: bge-small from 2023, and reciprocal rank fusion of BM25 and TAS-B. Metrics come from pytrec_eval, the same trec_eval bindings the paper used.\n\nResults: the paper holds for its models. BM25 beats TAS-B and DPR on both datasets. TAS-B came back exactly, 0.643 and 0.319. BM25 was off by plus 0.012 and minus 0.005, which I attribute to indexing one field instead of two. bge-small beats BM25 on both datasets, so the gap has since closed. The hybrid beat both of its inputs.\n\nThe interesting part was DPR on SciFact: 0.260 against 0.318. TAS-B matching through the same code told me the pipeline was fine. I tried four document encodings, and title only scored the same as title plus abstract. That means the abstract wasn't being read. The DPR context encoder port ships with a 100 token limit. At 512, which is what BEIR used, DPR matched 0.318 and its recall matched too.\n\nOn NFCorpus the bug was invisible in nDCG, because each query has about 38 relevant documents. Next I'd add significance tests and a BM25 plus bge hybrid.",
+      "keypoints": [
+        "Claim and datasets, counts match the paper",
+        "Five systems with correct similarity per model, pytrec_eval",
+        "Numbers: TAS-B exact, BM25 +0.012 and -0.005, bge beats BM25",
+        "Debugging chain: control, ablation, the title only tell, 512 fix",
+        "NFCorpus hid the bug (38.2 vs 1.1 relevant per query)",
+        "Next steps"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "The target was the core result of BEIR, Thakur et al. 2021: dense retrievers trained on MS MARCO generalise badly zero shot, and BM25 stays a strong baseline. The paper evaluates on 18 datasets. I took the two smallest scientific ones so everything fits a laptop: SciFact, 5,183 abstracts and 300 claims with about one relevant abstract each, and NFCorpus, 3,633 medical documents and 323 short health questions with about 38 graded relevant documents each. I load the official BEIR zips and score only judged test queries, which is what BEIR does, and the counts match the paper.\n\nBM25 is my own Python implementation, because Anserini needs Java and the machine didn't have it. It matches the paper's parameters, k1 0.9 and b 0.4, Lucene's idf, Porter stemming and Lucene's 33 word stopword list. It differs in two ways I document: one concatenated field instead of separate title and body fields, and exact document lengths where Lucene quantises them to one byte. The dense side uses sentence-transformers with a per checkpoint spec. TAS-B and DPR use dot product and CLS pooling because that's how they were trained. bge-small uses cosine and its query instruction. Search is exact: a matrix product in blocks of 64 queries, then the top 100. Metrics come from pytrec_eval, so the metric implementation is the same as the paper's, and published values live in a JSON file with their table source so every cell prints a delta.\n\nFive of six paper cells came back on the first full run. TAS-B was exact on both datasets. BM25 was off by plus 0.012 and minus 0.005, opposite signs, which looks like implementation noise from the field and length differences. DPR on NFCorpus was fine. DPR on SciFact was 0.260 against 0.318, with recall 0.584 against 0.727.\n\nThe debugging went in order. TAS-B exact through the same loader, metrics and search code was a positive control, so the fault had to be DPR specific. I listed the candidates: the title and text join, the asymmetric encoders, and how much of each document the context encoder sees. Then I ablated four encodings at the shipped settings. Title only scored 0.261 and title plus text 0.260. If adding the abstract changes nothing, the abstract isn't being read. The ablation script logs max_seq_length at load: the DPR context encoder port ships with 100 tokens, while SciFact abstracts average over 200 words. Sweeping 100, 256, 350 and 512 with DPR's own title [SEP] format climbed to 0.318 and recall 0.727 at 512, matching both metrics to three decimals. BEIR's setup section says it feeds every neural model the first 512 word pieces, so that's the paper's real condition. Most of the gap was length; the separator token added about 0.008 to 0.016.\n\nWhy NFCorpus hid it: with about 38 relevant documents per query, the top 10 stays full of relevant hits even when the ranking is damaged, so nDCG@10 read 0.191 against 0.189. Recall@100 did show it, 0.190 against 0.208, which I'd now treat as an early warning.\n\nBeyond the paper, bge-small beats BM25 on both datasets, 0.713 and 0.343, so the gap the paper found has closed, with a contamination caveat I state. RRF over BM25 and TAS-B beat both inputs and gave the best SciFact recall, 0.948. The whole table runs in 12 minutes on a MacBook. Gaps I'd close next: per query significance tests, capped recall, Pyserini BM25, and a BM25 plus bge hybrid.",
+      "keypoints": [
+        "Claim, datasets with judgement density, official data and judged queries",
+        "BM25 implementation and its two documented deviations",
+        "Per checkpoint similarity and exact search; pytrec_eval and published.json deltas",
+        "Debugging chain: TAS-B control, hypotheses, the title only tell, sweep to 512",
+        "BEIR's 512 word piece setting explains the exact match on two metrics",
+        "NFCorpus masking, with the Recall@100 nuance",
+        "bge and RRF results with caveats; next steps"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone outside machine learning.",
+      "script": "Search engines can find documents in two ways: by matching keywords, or with neural models that try to understand meaning. A well known 2021 study found that neural models trained on web searches often did worse than plain keyword matching when moved to new kinds of documents, like scientific papers. I rebuilt that study myself on my laptop, on two collections of scientific and medical papers. Every published number I checked came back. One score first came out about 18% too low, and I tracked it down to a hidden setting that made one model read only the opening sentences of each paper, with no warning anywhere. Fixing it matched the original exactly. I also found that a newer, smaller model now beats keyword search on both collections.",
+      "keypoints": [
+        "Keyword versus neural search in plain words",
+        "The 2021 finding",
+        "Rebuilt on a laptop, numbers came back",
+        "The hidden truncation setting, found and fixed",
+        "A newer model now beats keyword search"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw it for me.",
+      "script": "First I draw the data on the left: two boxes, SciFact with 5,183 abstracts and 300 claims, and NFCorpus with 3,633 papers and 323 questions. Under each I write relevant documents per query, 1.1 and 38.2, and I circle those because they come back later. Second, I draw three retrieval paths fanning out to the right. The top one is BM25, with the formula's two knobs, k1 0.9 and b 0.4, and an inverted index. The middle one is a dual encoder: a query tower and a document tower, each producing a vector, with dot product for TAS-B and DPR and cosine for bge. The bottom one is RRF, merging BM25 and TAS-B with one over 60 plus rank. Third, all paths flow into one box, pytrec_eval, producing nDCG@10 and Recall@100, and next to it a small table of published against mine. Fourth, I zoom into DPR's document tower and draw a document as a long bar with a cut at 100 tokens, and I write the tell next to it: title only 0.261, title plus text 0.260. Then a short sweep table: 100, 256, 350, 512, ending at 0.318, which equals the paper. Fifth, I go back to the circled 1.1 and 38.2 and explain why one dataset exposed the bug and the other hid it: with one relevant document, nDCG depends on where that single document lands. I finish with the takeaway for any RAG system: measure chunk length in the model's own tokens.",
+      "keypoints": [
+        "Datasets with the 1.1 vs 38.2 density circled",
+        "BM25, dual encoder with per model similarity, and RRF",
+        "pytrec_eval and the published vs mine table",
+        "The 100 token cut, the title only tell, the sweep to 512",
+        "Why density hid the bug; RAG takeaway"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you know it was truncation and not something else about DPR?",
+      "script": "I had a positive control first. TAS-B went through the same loader, metrics and search code and matched the paper exactly, so the fault had to be DPR specific. Then I ablated four ways of building the document text at the shipped settings. Title only scored 0.261, title plus full text 0.260. If adding the abstract changes nothing, the abstract isn't being read. The script logs the encoder's max_seq_length at load, and it was 100. Raising it step by step moved the score up steadily to 0.318 at 512, and recall to 0.727, both exactly the published values. A monotone climb that lands on two metrics at once is hard to explain any other way.",
+      "keypoints": [
+        "Positive control (TAS-B exact)",
+        "Four encoding variants",
+        "The tell: title only equals title plus text",
+        "Logged max_seq_length of 100",
+        "Monotone sweep matching two metrics"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why exactly does nDCG@10 behave so differently on the two datasets?",
+      "script": "Because of how many relevant documents each query has. SciFact averages 1.1, so nDCG@10 is basically the position discount of one document: rank 1 scores 1, rank 3 scores 0.5, rank 11 scores nothing. Any damage that pushes it down shows immediately. NFCorpus averages 38.2 graded relevant documents, so the ideal top 10 is full, and if truncation knocks some out, others take their place. The headline barely moves. Recall@100 is less forgiving, and on NFCorpus it did show the bug, 0.190 against 0.208. So I'd check both metrics and at least two datasets with different judgement density.",
+      "keypoints": [
+        "nDCG@10 formula intuition with the discount",
+        "SciFact: one document's position",
+        "NFCorpus: many substitutes in the top 10",
+        "Recall@100 showed it on NFCorpus",
+        "Lesson: two datasets, two metrics"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why do you trust your BM25 if it isn't the paper's implementation?",
+      "script": "I trust it for the conclusion, and I don't claim it's exact. It matches the paper's parameters, k1 0.9 and b 0.4, the Lucene idf, Porter stemming and Lucene's stopwords. It differs in fields and length encoding: one concatenated field instead of two, and exact lengths instead of Lucene's one byte norms. The result is plus 0.012 on SciFact and minus 0.005 on NFCorpus, opposite signs, which looks like implementation noise. The ordering against TAS-B and DPR is unchanged on both datasets, so the paper's conclusion doesn't depend on it. Running Pyserini would close the gap; it needs Java, which I didn't have.",
+      "keypoints": [
+        "Same parameters, idf, stemmer and stopwords",
+        "Two documented differences",
+        "+0.012 and -0.005, opposite signs",
+        "Conclusion unchanged",
+        "Pyserini as the fix"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What does this mean for a production RAG system?",
+      "script": "Most RAG pipelines chunk by characters or words, then embed with a model that silently truncates at its token limit. If chunks run past the limit, the end of every chunk is invisible to retrieval, and nothing errors. You just see weaker retrieval and blame the model. I'd add three guards. Tokenise every chunk with the embedding model's own tokenizer at index time and fail the build if more than a small share exceed the limit. Log the loaded max_seq_length instead of trusting the model card. And keep a cheap canary like mine: on a labelled sample, full text retrieval should beat title only, and if it doesn't, something is cutting text.",
+      "keypoints": [
+        "Chunking by characters versus a token limit",
+        "Silent quality loss, no error",
+        "Tokenise and check at index time",
+        "Log the loaded limit",
+        "Title only versus full text canary"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Isn't this just you misconfiguring a model and then fixing your own mistake?",
+      "script": "Partly, and I say so: the fix is one line. But the 100 was the public port's shipped default, so anyone who loads that model by name gets it. There was no error and no warning, and the output looks like a weak model rather than a broken pipeline. On NFCorpus the headline metric hid it completely, so a single dataset replication would have certified the wrong configuration. What I'd defend is the process: a positive control, a hypothesis list, an ablation that found the tell, and a sweep that matched both metrics to three decimals at the setting the paper says it used.",
+      "keypoints": [
+        "Concedes the one line fix",
+        "Shipped default, no warning",
+        "Hidden on NFCorpus",
+        "Defends the diagnostic process",
+        "Matches the paper's stated 512 setting"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Two datasets out of 18 and no significance tests. Why should I trust any conclusion?",
+      "script": "Trust the narrow conclusion and not more. Two datasets can't stand in for BEIR's 18, and I don't claim they do. For the reproduction itself, significance testing matters less than it sounds: fixed checkpoints and exact search are deterministic, so the right configuration should land on the published number, and the four dense cells do, within 0.001. Where I would want tests is the additions, the hybrid's 0.010 gain over BM25 on SciFact and bge's lead. pytrec_eval already computes per query scores, so a paired bootstrap is a small change, and it's first on my list.",
+      "keypoints": [
+        "Concedes scope: 2 of 18",
+        "Deterministic systems should land exactly",
+        "Dense cells within 0.001",
+        "Tests needed for the additions",
+        "Paired bootstrap is a small change"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "beir-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is this project, in two sentences?",
+      "easy": "Tanay rebuilt, from scratch on a laptop, the central experiment of BEIR, a well known benchmark showing that search models trained on one dataset often lose to a simple keyword method on new kinds of documents. Every published number he checked came back, and the one that first refused to match led him to a library setting that was silently cutting every document short.",
+      "deep": "A replication of Thakur et al. 2021 (BEIR, NeurIPS Datasets and Benchmarks) on its two smallest scientific datasets, SciFact (5,183 documents, 300 queries) and NFCorpus (3,633 documents, 323 queries), with document and query counts matching the paper. Systems: a Python BM25 with Anserini's parameters, TAS-B and DPR through sentence-transformers, plus two labelled additions, bge-small-en-v1.5 (2023) and reciprocal rank fusion of BM25 and TAS-B. Metrics come from pytrec_eval. All six published nDCG@10 cells reproduced: the four dense cells within 0.001, BM25 at +0.012 and -0.005. DPR on SciFact first scored 0.260 against 0.318; the cause was the DPR context encoder port's max_seq_length of 100, and at 512 tokens it matched 0.318 exactly. The headline table runs in 12 minutes on one MacBook.",
+      "say": "I rebuilt the core BEIR experiment on SciFact and NFCorpus. All six published cells reproduced. The one that first missed was DPR on SciFact, 0.260 against 0.318. A library default was truncating every document to 100 tokens, and fixing it gave 0.318 exactly.",
+      "evidence": [
+        "portfolio: DPR on SciFact recovered from 0.260 to a published 0.318",
+        "portfolio: SciFact (5,183 documents, 300 queries) and NFCorpus (3,633 documents, 323 queries). Both counts match the paper exactly.",
+        "portfolio: 12 minutes on a laptop, no GPU"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2104.08663"
+      ],
+      "tags": [
+        "beir",
+        "replication",
+        "overview"
+      ]
+    },
+    {
+      "id": "beir-02",
+      "type": "why",
+      "level": 1,
+      "q": "Why does this question matter? One plain sentence, then the technical version.",
+      "easy": "Teams pick between keyword search and neural search all the time, and BEIR is the result most people cite to say neural search trained on one domain does not transfer; knowing whether that still holds, and where it breaks, changes real design choices.",
+      "deep": "BEIR's claim is about zero shot generalisation: dense retrievers trained on MS MARCO look strong in domain but, evaluated on 18 heterogeneous datasets with no target domain training, often fall behind BM25. Practitioners use that result to justify BM25 baselines, hybrid search, or domain adaptation. Rebuilding it tests three things a reader cannot get from the paper: whether the numbers survive a different machine and implementation, which defaults the paper relied on implicitly, and whether the conclusion still holds for newer models. Here the answer was yes for the paper's models, no for a 2023 embedder (bge-small beats BM25 on both datasets), and the disagreement in one cell exposed a truncation default that applies to almost any retrieval system whose chunks exceed an embedding model's configured limit.",
+      "evidence": [
+        "portfolio: The paper holds for the models the paper tested. It does not survive a 2023 embedder: bge-small-en-v1.5, at 33M parameters, beats BM25 on both datasets."
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2104.08663",
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "motivation",
+        "zeroshot",
+        "dense-retrieval"
+      ]
+    },
+    {
+      "id": "beir-03",
+      "type": "concept",
+      "level": 1,
+      "q": "How is the BEIR benchmark designed?",
+      "easy": "BEIR collects 18 retrieval datasets from very different domains, takes search models that were trained on one large web search dataset, and tests them on all 18 without any further training. Every dataset is converted to the same simple file format and scored with the same metric.",
+      "deep": "Design choices: (1) zero shot evaluation: most models are trained on MS MARCO (passage retrieval, 8.8M passages) and evaluated out of domain with no target training; MS MARCO results are reported but excluded from the zero shot comparison. (2) Heterogeneity: 18 English datasets across 9 tasks (fact checking, biomedical IR, QA, argument retrieval, duplicate questions, citation prediction, and others), deliberately varied in domain, query length, document length and judgement density. (3) One format: corpus.jsonl, queries.jsonl and qrels/<split>.tsv. (4) One metric: nDCG@10, because rank unaware metrics (precision, recall) and binary rank aware metrics (MRR, MAP) do not handle graded relevance; computed with the Python bindings of trec_eval. (5) Model families: lexical (BM25 via Anserini), sparse (DeepCT, SPARTA, docT5query), dense (DPR, ANCE, TAS-B, GenQ), late interaction (ColBERT), reranking (BM25 plus a cross encoder). (6) Neural models see only the first 512 word pieces of each document. The paper's finding: BM25 remains a strong zero shot baseline; reranking and late interaction score best on average at high compute cost.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/pdf/2104.08663",
+        "https://arxiv.org/abs/2104.08663"
+      ],
+      "tags": [
+        "beir",
+        "benchmark-design",
+        "zeroshot"
+      ]
+    },
+    {
+      "id": "beir-04",
+      "type": "how",
+      "level": 1,
+      "q": "Describe SciFact and NFCorpus: sizes, queries, relevance judgements, and quirks.",
+      "easy": "SciFact pairs scientific claims with the research abstracts that support or refute them; each claim has about one correct abstract. NFCorpus pairs short health questions from a nutrition website with medical papers, and each question has dozens of relevant papers at different strengths.",
+      "deep": "SciFact (BEIR test split): 5,183 abstracts, 300 queries (expert written claims), binary relevance, 1.1 relevant documents per query, average query 12.37 words, document 213.63 words. NFCorpus: 3,633 documents (mostly PubMed), 323 test queries harvested from NutritionFacts.org, 3 level graded relevance derived automatically from the site's links (direct citation, citation via another article, shared topic tag), 38.2 relevant documents per query, average query only 3.30 words against documents of 232.26 words. Consequences: SciFact's nDCG@10 hinges on where one document lands, so it is sensitive to any ranking damage; NFCorpus queries are short lay phrases against technical text, a vocabulary mismatch that hurts lexical matching, and its many relevant documents per query make capped and plain Recall@100 diverge. Loading: beirdata.py downloads the official zips from public.ukp.informatik.tu-darmstadt.de, reads corpus.jsonl (title, text), queries.jsonl and qrels/test.tsv (skipping the header, keeping the integer grade), and keeps only queries the split judges, which is what BEIR does.",
+      "evidence": [
+        "repo:beir-replication/README.md: because NFCorpus has 38.2 judged documents per query against",
+        "repo:beir-replication/README.md: SciFact's 1.1 and therefore absorbs ranking damage that SciFact exposes. A",
+        "repo:beir-replication/src/beirdata.py: query_id, doc_id, score = parts[0], parts[1], int(parts[2])",
+        "repo:beir-replication/src/beirdata.py: BASE_URL = \"https://public.ukp.informatik.tu-darmstadt.de/thakur/BEIR/datasets\""
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2104.08663",
+        "https://www.cl.uni-heidelberg.de/statnlpgroup/nfcorpus/",
+        "https://arxiv.org/abs/2004.14974"
+      ],
+      "tags": [
+        "data",
+        "scifact",
+        "nfcorpus",
+        "qrels"
+      ]
+    },
+    {
+      "id": "beir-05",
+      "type": "why",
+      "level": 2,
+      "q": "Why these two datasets, and what did choosing two buy you?",
+      "easy": "They are the two smallest scientific text datasets in BEIR, so the whole experiment fits on a laptop in minutes. Having two very different ones turned out to matter: the truncation bug showed up on one and hid on the other.",
+      "deep": "Practical reason: corpora of 5,183 and 3,633 documents can be encoded by three dense models on a laptop GPU in minutes, and exact brute force search over them is trivial, so no ANN index or cluster is needed. Scientific reason, discovered rather than planned: the two datasets sit at opposite ends of judgement density, 1.1 against 38.2 relevant documents per query. A sparse judgement set like SciFact punishes any change in where the one relevant document lands; a dense one like NFCorpus spreads nDCG@10 over many relevant documents and barely moves. DPR's 0.058 nDCG@10 gap on SciFact, most of it truncation, had no measurable counterpart in NFCorpus nDCG@10. The portfolio's lesson: run on NFCorpus alone and the replication would have looked clean while being wrong.",
+      "evidence": [
+        "repo:beir-replication/README.md: SciFact and NFCorpus are the two smallest scientific text datasets in the",
+        "portfolio: Run on NFCorpus alone, this replication would have hidden the bug entirely. A benchmark with one dataset cannot tell you when you are wrong."
+      ],
+      "sources": [],
+      "tags": [
+        "dataset-choice",
+        "design-decision"
+      ]
+    },
+    {
+      "id": "beir-06",
+      "type": "formula",
+      "level": 1,
+      "q": "Write the BM25 scoring function and explain k1 and b.",
+      "easy": "BM25 scores a document by adding up, for each query word it contains, how rare the word is across the collection times a count term that grows with repetitions but levels off, adjusted so long documents do not win just by being long. k1 controls how fast repeats stop helping; b controls how strongly length is penalised.",
+      "deep": "$\\mathrm{score}(q,d)=\\sum_{t\\in q}\\mathrm{idf}(t)\\cdot\\frac{tf_{t,d}\\,(k_1+1)}{tf_{t,d}+k_1\\left(1-b+b\\,\\frac{|d|}{\\mathrm{avgdl}}\\right)}$, with Lucene's $\\mathrm{idf}(t)=\\ln\\!\\left(1+\\frac{N-df_t+0.5}{df_t+0.5}\\right)$, which stays positive even for terms in more than half the documents. The tf term saturates at $(k_1+1)$ as $tf\\to\\infty$; small $k_1$ (0.9 here) means the second and third occurrence add little. $b\\in[0,1]$ interpolates between no length normalisation ($b=0$) and full normalisation by $|d|/\\mathrm{avgdl}$ ($b=1$); 0.4 is mild. BEIR uses Anserini's defaults $k_1=0.9$, $b=0.4$; Lucene's own BM25Similarity defaults are 1.2 and 0.75, which is a common source of silent mismatch between toolkits. The $(k_1+1)$ factor is a per term constant and does not change rankings, which is why some implementations drop it. Assumptions: term independence (a bag of words), and relevance signalled by exact term overlap after normalisation, which is what fails when queries and documents use different vocabularies.",
+      "evidence": [
+        "repo:beir-replication/src/bm25.py: idf = math.log(1.0 + (n_docs - df + 0.5) / (df + 0.5))",
+        "repo:beir-replication/src/bm25.py: def __init__(self, k1: float = 0.9, b: float = 0.4) -> None:"
+      ],
+      "sources": [
+        "https://lucene.apache.org/core/9_0_0/core/org/apache/lucene/search/similarities/BM25Similarity.html",
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "bm25",
+        "lexical",
+        "formula"
+      ]
+    },
+    {
+      "id": "beir-07",
+      "type": "how",
+      "level": 2,
+      "q": "How is BM25 implemented in this repo, and how fast is it?",
+      "easy": "A short Python file lowercases and splits text into words, drops 33 common words, reduces words to their stems, builds an index from each word to the documents containing it, and scores a query by adding up contributions from those lists. Indexing and searching all of SciFact took half a second.",
+      "deep": "src/bm25.py: analyze() lowercases, tokenises with the regex [a-z0-9]+, removes the 33 word Lucene EnglishAnalyzer stopword set, and Porter stems with PyStemmer. index() builds postings token -> (doc ids, term frequencies) as numpy arrays with a precomputed idf, plus exact document lengths and avgdl. search() keeps a dense score vector of size N, adds idf * tf(k1+1)/(tf + k1(1-b+b|d|/avgdl)) for each query token's postings (vectorised numpy indexing), then np.argpartition for the top 100 and a stable sort, and drops zero score documents. Title and body are concatenated with a space into one field. Cost: indexing is linear in corpus tokens; a query costs the sum of its terms' posting lengths plus O(N) for the partition. Measured: 0.5 s on SciFact and 0.3 s on NFCorpus for indexing plus all queries, against 94.2 s for TAS-B on SciFact.",
+      "evidence": [
+        "portfolio: BM25 is reimplemented in Python with the same k1 of 0.9 and b of 0.4, the same Porter stemming and the same 33 word Lucene English stopword list",
+        "repo:beir-replication/src/bm25.py: TOKEN = re.compile(r\"[a-z0-9]+\")",
+        "repo:beir-replication/runs/final/report.json: \"seconds\": 0.5",
+        "repo:beir-replication/runs/final/report.json: \"seconds\": 94.2"
+      ],
+      "sources": [],
+      "tags": [
+        "bm25",
+        "implementation",
+        "inverted-index"
+      ]
+    },
+    {
+      "id": "beir-08",
+      "type": "compare",
+      "level": 2,
+      "q": "How does your BM25 differ from the paper's Anserini BM25, and what did that cost?",
+      "easy": "The paper used a Java search toolkit; this machine had no Java, so Tanay wrote BM25 in Python with the same settings. Two internal details differ, and they are the most likely reason the two BM25 numbers are slightly off: +0.012 on SciFact and -0.005 on NFCorpus.",
+      "deep": "Same: k1 = 0.9, b = 0.4, Lucene idf, Porter stemming, the Lucene English stopword list. Different: (1) fields: Anserini in BEIR indexes title and body as two separate fields, while this repo concatenates them into one, which changes term frequencies and length normalisation per field; (2) lengths: Lucene stores document length as a lossy one byte norm, while this repo uses exact token counts, which shifts the |d|/avgdl term slightly for every document; (3) tokenisation details of Lucene's StandardTokenizer versus a simple [a-z0-9]+ regex. Effect: SciFact 0.677 against 0.665 (+0.012), NFCorpus 0.320 against 0.325 (-0.005); Recall@100 0.929 against 0.908 and 0.246 against 0.25. Opposite signs on the two datasets are what implementation noise looks like, rather than one systematically better variant. Pyserini would remove the deviation but needs a Java runtime; Tanay chose to document the deviation rather than install a JVM, and the README names it as the likely source of both inexact cells.",
+      "evidence": [
+        "repo:beir-replication/README.md: concatenates title and body into one field and uses exact document lengths",
+        "repo:beir-replication/README.md: | bm25 | 0.665 | 0.677 | +0.012 | 0.908 | 0.929 |",
+        "repo:beir-replication/README.md: | bm25 | 0.325 | 0.320 | -0.005 | 0.25 | 0.246 |",
+        "portfolio: This is the likely source of the only two inexact cells, +0.012 and -0.005."
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2104.08663",
+        "https://lucene.apache.org/core/9_0_0/core/org/apache/lucene/search/similarities/BM25Similarity.html"
+      ],
+      "tags": [
+        "bm25",
+        "anserini",
+        "deviation"
+      ]
+    },
+    {
+      "id": "beir-09",
+      "type": "concept",
+      "level": 1,
+      "q": "How does dense retrieval with a dual encoder work, and how does it differ from a cross encoder?",
+      "easy": "A dual encoder turns the query and every document into a vector separately, ahead of time for the documents, and ranks documents by how closely their vectors match the query's. A cross encoder reads the query and document together, which is more accurate but has to run once per pair, so it is used to rerank a short list.",
+      "deep": "Dual (two tower) encoder: $s(q,d)=E_Q(q)^\\top E_D(d)$ (dot) or $\\cos(E_Q(q),E_D(d))$. Document vectors are computed once and indexed; a query costs one encoder pass plus a nearest neighbour search, exact ($O(Nd)$ per query) or approximate (FAISS, HNSW). Pooling turns token states into one vector: CLS pooling (TAS-B, DPR) takes the first token's state; mean pooling averages tokens. Symmetric models share one encoder (TAS-B, bge); asymmetric ones use separate question and passage encoders (DPR). A cross encoder scores $f([q;d])$ with full attention between query and document tokens, which captures exact interactions but cannot precompute anything, so it reranks the top k of a first stage; BEIR's BM25 plus cross encoder row (0.688 SciFact, 0.350 NFCorpus) is the strongest in its table for these datasets. Failure modes of dual encoders: one vector must summarise a whole document (truncated at max_seq_length), domain shift from the training distribution, and rare terms or exact identifiers that lexical matching handles better.",
+      "evidence": [
+        "repo:beir-replication/published.json: \"scifact\":  {\"bm25\": 0.665, \"dpr\": 0.318, \"ance\": 0.507, \"tas-b\": 0.643, \"colbert\": 0.671, \"bm25+ce\": 0.688},"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2004.04906",
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "dense-retrieval",
+        "dual-encoder",
+        "cross-encoder"
+      ]
+    },
+    {
+      "id": "beir-10",
+      "type": "concept",
+      "level": 2,
+      "q": "What is DPR, how was it trained, and what does that imply for how you encode documents?",
+      "easy": "DPR is a 2020 question answering retriever with one network for questions and one for passages, trained to put a question's vector close to the passage containing its answer. It was trained on short Wikipedia passages written as title, a separator token, then text, so documents should be fed to it the same way.",
+      "deep": "Karpukhin et al. 2020: two independent BERT base uncased encoders, CLS representation, $d=768$, similarity = dot product $E_Q(q)^\\top E_P(p)$. Loss: negative log likelihood of the positive passage against negatives, $-\\log\\frac{e^{s(q,p^+)}}{e^{s(q,p^+)}+\\sum_j e^{s(q,p_j^-)}}$. Negatives: in batch (the other questions' positives, so a batch of B gives B squared pairs) plus one BM25 hard negative per question. Passages: Wikipedia split into disjoint 100 word blocks, each prepended with the article title and a [SEP] token. BEIR uses the Multi checkpoint, trained on NQ, TriviaQA, WebQuestions and CuratedTREC, the weakest dense model in its table (0.318 SciFact, 0.189 NFCorpus). Implications Tanay used: encode documents as 'title [SEP] text' (doc_join in DenseSpec), score with dot product, and use separate query and context models (doc_model set). The 100 word training passages are a plausible reason the sentence-transformers port of the context encoder ships with a 100 token limit; that link is an inference, not documented in the port.",
+      "evidence": [
+        "repo:beir-replication/src/dense.py: doc_join=\" [SEP] \",",
+        "repo:beir-replication/src/dense.py: doc_model=\"sentence-transformers/facebook-dpr-ctx_encoder-multiset-base\","
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2004.04906",
+        "https://arxiv.org/pdf/2004.04906",
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "dpr",
+        "dense-retrieval",
+        "training"
+      ]
+    },
+    {
+      "id": "beir-11",
+      "type": "concept",
+      "level": 2,
+      "q": "What is TAS-B, and why does it generalise better than DPR?",
+      "easy": "TAS-B is a small, fast dense retriever trained on Microsoft's web search dataset with two teacher models guiding it and a clever way of building training batches. In BEIR it was the best dense model, close to BM25 on these two datasets.",
+      "deep": "Hofstatter et al. 2021: a 6 layer DistilBERT dual encoder, CLS pooling, dot product, 512 token limit (sentence-transformers/msmarco-distilbert-base-tas-b). Training on MS MARCO combines (1) topic aware sampling: queries are clustered once and each batch is drawn from one cluster, so in batch negatives are on topic and therefore harder; (2) balanced margin sampling of passage pairs; (3) dual teacher distillation: a pairwise Margin-MSE loss from a cross encoder teacher plus an in batch negative loss from a ColBERT teacher. Trainable on one consumer GPU in under 48 hours. BEIR reports it beats DPR on 17 of 18 datasets and speculates the distillation loss is why; it also notes TAS-B prefers short documents. In this replication TAS-B reproduced exactly on both datasets (0.643 and 0.319), which made it the control that cleared the pipeline when DPR missed.",
+      "evidence": [
+        "repo:beir-replication/README.md: | tas-b | 0.643 | 0.643 | 0.000 | 0.891 | 0.891 |",
+        "repo:beir-replication/README.md: | tas-b | 0.319 | 0.319 | 0.000 | 0.28 | 0.280 |"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2104.06967",
+        "https://huggingface.co/sentence-transformers/msmarco-distilbert-base-tas-b",
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "tas-b",
+        "distillation",
+        "dense-retrieval"
+      ]
+    },
+    {
+      "id": "beir-12",
+      "type": "concept",
+      "level": 2,
+      "q": "What is bge-small-en-v1.5, and how is it used here?",
+      "easy": "bge-small is a small 2023 text embedding model from the Beijing Academy of AI, about 33 million parameters. It wants a short instruction in front of search queries and is compared with cosine similarity. It is not in the 2021 paper; Tanay added it to see how far the field had moved.",
+      "deep": "BAAI/bge-small-en-v1.5: 33.4M parameters, 384 dimensional embeddings, 512 token limit, from the C-Pack / FlagEmbedding family trained with large scale contrastive learning. Retrieval usage: prefix queries with 'Represent this sentence for searching relevant passages: ' (the v1.5 card says the instruction is optional with slight degradation without it, and recommends it for short queries against long passages), no prefix on passages, normalise embeddings and rank by cosine. In dense.py: similarity='cosine' sets normalize_embeddings=True, then the same dot product search gives cosine; in_paper=False labels it everywhere. Result: 0.713 SciFact and 0.343 NFCorpus, above BM25 (0.677, 0.320) and every model the paper tested on these two datasets, at a smaller parameter count than TAS-B's DistilBERT. Caveat Tanay states in pushback: 2023 embedders are trained on far broader data, so in domain exposure to these corpora cannot be ruled out.",
+      "evidence": [
+        "repo:beir-replication/src/dense.py: query_prefix=\"Represent this sentence for searching relevant passages: \",",
+        "repo:beir-replication/README.md: | bge-small | not in paper | 0.713 | n/a | not in paper | 0.942 |",
+        "repo:beir-replication/README.md: | bge-small | not in paper | 0.343 | n/a | not in paper | 0.311 |"
+      ],
+      "sources": [
+        "https://huggingface.co/BAAI/bge-small-en-v1.5",
+        "https://arxiv.org/abs/2309.07597"
+      ],
+      "tags": [
+        "bge",
+        "embeddings",
+        "extension"
+      ]
+    },
+    {
+      "id": "beir-13",
+      "type": "why",
+      "level": 1,
+      "q": "Why score TAS-B and DPR with dot product but bge with cosine? What goes wrong if you mix them up?",
+      "easy": "Each model was trained with one way of comparing vectors, and it only ranks well when used the same way. Using the wrong one can make a good model look bad, which is an easy way to fake a negative result about neural search.",
+      "deep": "Dot product $q^\\top d=\\|q\\|\\|d\\|\\cos\\theta$ lets the document vector's norm carry signal; a model trained with dot product (TAS-B, DPR) can encode something like confidence or document salience in $\\|d\\|$. Normalising those vectors (cosine) throws that away and changes rankings. A cosine trained model like bge produces vectors whose norms are not meaningful, so raw dot product would let arbitrary norm differences reorder results. The rule in dense.py is per checkpoint: DenseSpec.similarity is 'dot' for TAS-B and DPR and 'cosine' for bge, and cosine is implemented by normalize_embeddings=True followed by the same matrix product. The README calls getting this wrong the easiest way to manufacture a fake negative result about dense retrieval. The same care applies to query instructions (bge) and to asymmetric encoders (DPR's separate question and context models).",
+      "evidence": [
+        "repo:beir-replication/README.md: - TAS-B and DPR are scored with dot product, bge with cosine and its retrieval"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2004.04906",
+        "https://huggingface.co/BAAI/bge-small-en-v1.5",
+        "https://huggingface.co/sentence-transformers/msmarco-distilbert-base-tas-b"
+      ],
+      "tags": [
+        "similarity",
+        "dot-product",
+        "cosine"
+      ]
+    },
+    {
+      "id": "beir-14",
+      "type": "how",
+      "level": 2,
+      "q": "How is dense search implemented, and what is its cost?",
+      "easy": "Every document is turned into a vector once, every query is turned into a vector, and each query's vector is compared with all document vectors at once using a matrix multiply. The 100 best are kept. With a few thousand documents this exact search is fast enough that no special index is needed.",
+      "deep": "src/dense.py: a frozen DenseSpec per model (query_model, optional doc_model for asymmetric DPR, similarity, query_prefix, doc_join, max_doc_len override, in_paper flag). search() loads SentenceTransformer models on the chosen device (MPS on the MacBook), optionally overrides doc_encoder.max_seq_length, builds document text as title + doc_join + text (text alone if no title), encodes with batch size 64, then scores query blocks of 64 against the whole document matrix (block @ doc_matrix.T) so the score matrix stays small, takes np.argpartition top 100, and stable sorts. Exact search costs O(Q N d): for SciFact, 300 x 5,183 x 768 multiply adds, trivial next to encoding. Encoding dominates: TAS-B took 94.2 s on SciFact and DPR at 512 tokens 219.5 s. The same code path serves all three models, so a difference between models cannot come from different search code.",
+      "evidence": [
+        "repo:beir-replication/src/dense.py: max_doc_len: int | None = None    # override the checkpoint's shipped limit",
+        "repo:beir-replication/runs/final/report.json: \"seconds\": 219.5",
+        "repo:beir-replication/runs/final/report.json: \"device\": \"mps\","
+      ],
+      "sources": [],
+      "tags": [
+        "dense-retrieval",
+        "implementation",
+        "complexity"
+      ]
+    },
+    {
+      "id": "beir-15",
+      "type": "formula",
+      "level": 1,
+      "q": "Define nDCG@10 precisely, including gain and discount, and work an example.",
+      "easy": "nDCG@10 looks at the top 10 results, gives credit for each relevant one, gives less credit the further down it appears, and divides by the best score possible for that query so every query lands between 0 and 1. The final number is the average over queries.",
+      "deep": "$\\mathrm{DCG@10}=\\sum_{i=1}^{10}\\frac{g_i}{\\log_2(i+1)}$, where $g_i$ is the qrels grade of the document at rank $i$ (0 if unjudged). trec_eval uses the grade itself as the gain (linear gain, no $2^{g}-1$) and the discount $\\log_2(\\text{rank}+1)$. $\\mathrm{IDCG@10}$ is the DCG of the ideal ordering of all judged relevant documents, and $\\mathrm{nDCG@10}=\\mathrm{DCG@10}/\\mathrm{IDCG@10}$, averaged over queries. SciFact example, one relevant document: rank 1 gives 1.0, rank 2 gives $1/\\log_2 3=0.631$, rank 3 gives 0.5, rank 10 gives 0.289, rank 11 or worse gives 0. So SciFact nDCG@10 is close to the mean discount of one document's position, which is why it reacts sharply to ranking damage. NFCorpus, about 38 graded relevant documents: IDCG fills all 10 slots, and losing one relevant document from the top 10 moves the score by a fraction of that. Why BEIR chose it: it handles graded and binary relevance with one metric, unlike MRR and MAP.",
+      "evidence": [
+        "repo:beir-replication/src/evaluate.py: LABELS = {\"ndcg_cut.10\": \"ndcg@10\", \"recall.100\": \"recall@100\"}"
+      ],
+      "sources": [
+        "https://raw.githubusercontent.com/usnistgov/trec_eval/main/m_ndcg_cut.c",
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "ndcg",
+        "metrics",
+        "formula"
+      ]
+    },
+    {
+      "id": "beir-16",
+      "type": "formula",
+      "level": 2,
+      "q": "Define Recall@100, plain and capped, and why the difference matters on NFCorpus.",
+      "easy": "Recall@100 asks what share of the relevant documents appear in the top 100 results. The capped version stops penalising a query that has more than 100 relevant documents, since no system could return them all in 100 slots.",
+      "deep": "Plain: $R@100=\\frac{1}{|Q|}\\sum_i\\frac{|\\mathrm{top}_{100}(A_i)\\cap A_i^\\star|}{|A_i^\\star|}$. Capped (BEIR Appendix G): denominator $\\min(100,|A_i^\\star|)$, so a query with 500 relevant documents can still reach 1.0 instead of being stuck at 0.2. They agree whenever a query has at most 100 relevant documents, which is every SciFact query (1.1 per query on average) but not every NFCorpus query. Capped is always at least plain, so on NFCorpus a plain number below the published capped one is expected even for an identical ranking. Here BM25 NFCorpus recall is 0.246 against a published 0.25, while TAS-B and DPR match 0.280 and 0.208 exactly, so the capping effect is small. Recall@100 matters as a first stage metric: it bounds what a reranker over the top 100 could ever achieve.",
+      "evidence": [
+        "portfolio: The paper reports capped Recall@100. The two agree for every SciFact query but not for every NFCorpus query.",
+        "repo:beir-replication/README.md: | dpr | 0.189 | 0.188 | -0.001 | 0.208 | 0.208 |"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "recall",
+        "metrics",
+        "capped-recall"
+      ]
+    },
+    {
+      "id": "beir-17",
+      "type": "how",
+      "level": 2,
+      "q": "How are metrics computed, and why use pytrec_eval instead of your own code?",
+      "easy": "Scoring uses a Python wrapper around trec_eval, the standard search evaluation tool the paper also used. Using the same tool removes one whole category of possible disagreement with the paper.",
+      "deep": "src/evaluate.py: converts each system's results to a run dict {qid: {doc_id: score}}, builds pytrec_eval.RelevanceEvaluator(qrels, {'ndcg_cut.10', 'recall.100'}), calls evaluate(run) for per query values, and averages them over the queries returned; it raises if no query was scored, which catches query ID mismatches between run and qrels instead of silently reporting 0. Why not hand rolled: nDCG has several variants (exponential versus linear gain, how ties and unjudged documents are handled, whether IDCG uses all judged documents), and any of them would shift a third decimal and muddy a replication. BEIR computes nDCG@10 with the Python interface of the official TREC tool, so this makes the metric an exact control. Caveat worth knowing: trec_eval orders by score and breaks ties by document ID, so systems with many tied scores can shift slightly between tools.",
+      "evidence": [
+        "repo:beir-replication/src/evaluate.py: raise RuntimeError(\"no queries were scored; check that run ids match qrels ids\")",
+        "repo:beir-replication/README.md: - Metrics come from `pytrec_eval`, the same trec_eval bindings BEIR reports"
+      ],
+      "sources": [
+        "https://github.com/cvangysel/pytrec_eval",
+        "https://raw.githubusercontent.com/usnistgov/trec_eval/main/m_ndcg_cut.c",
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "pytrec_eval",
+        "evaluation",
+        "trec_eval"
+      ]
+    },
+    {
+      "id": "beir-18",
+      "type": "formula",
+      "level": 1,
+      "q": "What is Reciprocal Rank Fusion, why k = 60, and work an example.",
+      "easy": "RRF merges several ranked lists by giving each document points based only on its position in each list, more for higher positions, and adding the points up. Documents that several systems agree on rise to the top. The constant 60 keeps any single list's top pick from dominating.",
+      "deep": "$\\mathrm{RRF}(d)=\\sum_{r\\in R}\\frac{1}{k+r(d)}$ with $k=60$ (Cormack, Clarke and Buettcher, SIGIR 2009). Example: a document ranked 1 by BM25 and 5 by TAS-B scores $1/61+1/65=0.0318$; one ranked 3 by both scores $2/63=0.0317$; one ranked 1 by BM25 and absent from TAS-B's top 100 scores $1/61=0.0164$. Agreement beats a single strong vote. With $k=60$ the gap between rank 1 and rank 10 is only $1/61$ against $1/70$, so the fusion is flat near the top and lower ranks still count; Cormack et al. fixed 60 in a pilot, found it near optimal, and found the choice not critical (pilot MAP 0.2072 at $k=0$, 0.2145 at 60). Why rank based: BM25 scores (unbounded, query dependent) and dense dot products live on incomparable scales, and RRF needs no normalisation, weights or training data. Failure modes: it ignores score margins, so a confident system and an unsure one count equally, and if one input is much weaker it can drag the fusion down.",
+      "evidence": [
+        "repo:beir-replication/src/evaluate.py: Reciprocal rank fusion. k=60 is the value from Cormack et al. 2009."
+      ],
+      "sources": [
+        "http://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf"
+      ],
+      "tags": [
+        "rrf",
+        "fusion",
+        "hybrid-search"
+      ]
+    },
+    {
+      "id": "beir-19",
+      "type": "how",
+      "level": 2,
+      "q": "How is the hybrid implemented?",
+      "easy": "Take the top 100 from BM25 and the top 100 from TAS-B for each query, give every document points for its rank in each list it appears in, add them up, sort, and keep the best 100.",
+      "deep": "src/evaluate.py rrf(runs, top_k, k=60): for each query ID in the union of runs, iterate each run's ranked list with rank starting at 1, add 1/(k + rank) to the document's total, sort by descending total with document ID as the tiebreak (deterministic output), and truncate to top_k = 100. A document missing from one list simply gets no contribution from it, which is equivalent to an infinite rank. run.py picks the dense partner as the first available of tas-b, bge-small, dpr, so the reported hybrid is BM25 + TAS-B, the paper's two strongest single models on these datasets. No scores are combined, so no normalisation is needed. Cost is negligible: two lists of 100 per query. It is evaluated with the same pytrec_eval call as every other system.",
+      "evidence": [
+        "repo:beir-replication/src/evaluate.py: ordered = sorted(totals.items(), key=lambda kv: (-kv[1], kv[0]))",
+        "repo:beir-replication/src/run.py: partner = next((s for s in (\"tas-b\", \"bge-small\", \"dpr\") if s in runs), None)"
+      ],
+      "sources": [
+        "http://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf"
+      ],
+      "tags": [
+        "rrf",
+        "implementation",
+        "hybrid-search"
+      ]
+    },
+    {
+      "id": "beir-20",
+      "type": "number",
+      "level": 1,
+      "q": "What did the hybrid achieve?",
+      "easy": "Fusing BM25 and TAS-B beat both of them on both datasets, and gave the best recall of any system on SciFact. It did not beat the 2023 bge-small model on ranking quality.",
+      "deep": "nDCG@10, SciFact: hybrid 0.687 against BM25 0.677 and TAS-B 0.643. NFCorpus: 0.341 against 0.320 and 0.319. Recall@100: SciFact 0.948, the best of all five systems (bge-small 0.942, BM25 0.929); NFCorpus 0.294, below bge-small's 0.311. bge-small alone (0.713, 0.343) still beats the hybrid on nDCG@10. Reading: lexical and dense errors are partly independent, so rank fusion recovers relevant documents either system alone misses, which shows most clearly in recall; the obvious next experiment is BM25 + bge-small. Caveat: RRF is not in the paper and is labelled as an addition, and these are single runs with no significance test.",
+      "say": "Fusing BM25 and TAS-B with RRF beat both inputs on both datasets, 0.687 on SciFact. It also had the best Recall@100 on SciFact, 0.948. bge-small on its own still ranked better, so the next thing I'd try is BM25 plus bge.",
+      "evidence": [
+        "repo:beir-replication/README.md: | hybrid-rrf(bm25+tas-b) | not in paper | 0.687 | n/a | not in paper | 0.948 |",
+        "repo:beir-replication/README.md: | hybrid-rrf(bm25+tas-b) | not in paper | 0.341 | n/a | not in paper | 0.294 |",
+        "portfolio: Reciprocal rank fusion over BM25 and TAS-B also beat both of its own inputs on both datasets, and took the best Recall@100 on SciFact at 0.948."
+      ],
+      "sources": [],
+      "tags": [
+        "rrf",
+        "result",
+        "hybrid-search"
+      ]
+    },
+    {
+      "id": "beir-21",
+      "type": "number",
+      "level": 1,
+      "q": "Give me the headline reproduction table.",
+      "easy": "On both datasets, BM25 still beats the two older neural models the paper tested, as the paper said, and the neural numbers came back almost exactly. A newer 2023 model beats BM25 on both.",
+      "deep": "nDCG@10, published against reproduced. SciFact: BM25 0.665 / 0.677 (+0.012), TAS-B 0.643 / 0.643, DPR 0.318 / 0.318 (after the fix), bge-small not in paper / 0.713, hybrid not in paper / 0.687. NFCorpus: BM25 0.325 / 0.320 (-0.005), TAS-B 0.319 / 0.319, DPR 0.189 / 0.188, bge-small 0.343, hybrid 0.341. Recall@100 SciFact: BM25 0.908 / 0.929, TAS-B 0.891 / 0.891, DPR 0.727 / 0.727. All numbers from runs/final/report.json, generated by src/run.py on one MacBook. Ordering among the paper's models is preserved on both datasets (BM25 > TAS-B > DPR), so the paper's conclusion holds for its models.",
+      "say": "BM25 still beats TAS-B and DPR on both datasets, which is the paper's claim. TAS-B came back at 0.643 and 0.319, exactly the published numbers. BM25 was off by plus 0.012 and minus 0.005, which I attribute to my Python BM25. bge-small, which isn't in the paper, beats BM25 on both.",
+      "evidence": [
+        "repo:beir-replication/README.md: | tas-b | 0.643 | 0.643 | 0.000 | 0.891 | 0.891 |",
+        "repo:beir-replication/README.md: | dpr | 0.318 | 0.318 | 0.000 | 0.727 | 0.727 |",
+        "repo:beir-replication/README.md: | bm25 | 0.665 | 0.677 | +0.012 | 0.908 | 0.929 |",
+        "repo:beir-replication/README.md: | bm25 | 0.325 | 0.320 | -0.005 | 0.25 | 0.246 |",
+        "repo:beir-replication/README.md: | dpr | 0.189 | 0.188 | -0.001 | 0.208 | 0.208 |"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "reproduction"
+      ]
+    },
+    {
+      "id": "beir-22",
+      "type": "case",
+      "level": 1,
+      "q": "How many cells matched exactly? Say it precisely.",
+      "easy": "Three of the six published ranking scores match to three decimals, a fourth is 0.001 off, and the two keyword search scores are a little off in opposite directions. On the recall metric, all four neural cells match exactly.",
+      "deep": "nDCG@10 at three decimals: exact for TAS-B SciFact (0.643), TAS-B NFCorpus (0.319) and DPR SciFact (0.318, after the fix). DPR NFCorpus is 0.188 against 0.189 (unrounded 0.1881). BM25 is +0.012 and -0.005. The portfolio badge reads '4 exact', which counts DPR NFCorpus as a match; the precise statement is that the four dense cells land within 0.001 of the paper on nDCG@10, three exactly, and all four match exactly on Recall@100 (0.891, 0.280, 0.727, 0.208). 'Six of six reproduced' means every published cell is within 0.012. In an interview, give the precise version unprompted; it costs nothing and it is the kind of detail that makes the rest believable.",
+      "say": "Three of the six nDCG cells match to three decimals. DPR on NFCorpus is off by 0.001. BM25 is off by plus 0.012 and minus 0.005, which I put down to my Python BM25. On Recall@100 all four dense cells match exactly.",
+      "evidence": [
+        "portfolio: 6 of 6 published cells reproduced  |  4 exact to three decimals",
+        "repo:beir-replication/README.md: | dpr | 0.189 | 0.188 | -0.001 | 0.208 | 0.208 |",
+        "repo:beir-replication/runs/final/report.json: \"ndcg@10\": 0.1881047494191774,"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "metric-honesty"
+      ]
+    },
+    {
+      "id": "beir-23",
+      "type": "number",
+      "level": 1,
+      "q": "What does the bge-small result say about the paper?",
+      "easy": "A small 2023 model beats BM25 on both datasets, so the gap the paper found between keyword search and neural search on new domains has closed for at least these two datasets. The paper was right about the models it tested.",
+      "deep": "bge-small-en-v1.5: SciFact 0.713 against BM25 0.677 and the paper's best dense model TAS-B 0.643; NFCorpus 0.343 against 0.320 and 0.319. Recall@100 0.942 and 0.311, the best on NFCorpus. It does this with 33M parameters, fewer than TAS-B's 6 layer DistilBERT. Reading Tanay gives: the paper was right in 2021, and embedding models trained since on far larger and more varied data have closed the zero shot gap on these datasets. Limits of that reading: two datasets out of 18; one run; and modern embedders are trained on broad web and academic data, so exposure to SciFact or NFCorpus style text (or the BEIR collections themselves) cannot be ruled out, which would make this less zero shot than it looks. It is labelled not in the paper wherever it appears.",
+      "say": "bge-small, a 33 million parameter model from 2023, beats BM25 on both datasets, 0.713 on SciFact. So the paper was right about its models, and the gap has since closed. I flag that newer embedders may have seen similar data in training, so it's less clean as zero shot.",
+      "evidence": [
+        "portfolio: bge-small-en-v1.5, at 33M parameters, beats BM25 on both datasets.",
+        "repo:beir-replication/README.md: | bge-small | not in paper | 0.713 | n/a | not in paper | 0.942 |",
+        "repo:beir-replication/README.md: | bge-small | not in paper | 0.343 | n/a | not in paper | 0.311 |"
+      ],
+      "sources": [
+        "https://huggingface.co/BAAI/bge-small-en-v1.5"
+      ],
+      "tags": [
+        "bge",
+        "results",
+        "extension"
+      ]
+    },
+    {
+      "id": "beir-24",
+      "type": "number",
+      "level": 1,
+      "q": "What was the cell that disagreed, and how big was the miss?",
+      "easy": "DPR on SciFact scored 0.260 when the paper says 0.318, and its recall was 0.584 against 0.727. That is far too large to be rounding or randomness.",
+      "deep": "First full run (runs/full): DPR SciFact nDCG@10 0.260 against 0.318, delta -0.058; Recall@100 0.584 against 0.727. Every other paper model was within 0.012 in the same run, and TAS-B was exact. Dense retrieval with fixed checkpoints and exact search is deterministic up to floating point, so a 0.058 gap is a configuration difference, not variance. The size relative to DPR's own score (an 18% relative drop) ruled out implementation noise of the kind seen in BM25.",
+      "evidence": [
+        "repo:beir-replication/runs/full/comparison.md: | dpr | 0.318 | 0.260 | -0.058 | 0.727 | 0.584 |",
+        "portfolio: DPR on SciFact came in at 0.260 against a published 0.318. Not a rounding difference."
+      ],
+      "sources": [],
+      "tags": [
+        "truncation-bug",
+        "dpr",
+        "result"
+      ]
+    },
+    {
+      "id": "beir-25",
+      "type": "how",
+      "level": 1,
+      "q": "How did you diagnose it?",
+      "easy": "Tanay first ruled out his own scoring code, because another neural model run through the same code matched the paper exactly. Then he tried four ways of feeding documents to DPR. The clue was that giving it only the title scored the same as giving it the title plus the whole abstract, which only makes sense if the abstract was being thrown away.",
+      "deep": "Step 1, isolate: TAS-B reproduced exactly on both datasets through the same loader, metrics and search code, so the pipeline was cleared and the fault had to be DPR specific. Step 2, enumerate DPR specific hypotheses: the join between title and text, asymmetric encoders, and how much of the document the context encoder sees. Step 3, ablate: src/ablate_dpr.py encodes SciFact four ways (space join, [SEP] join, text only, title only) and logs the encoders' max_seq_length at load. At the shipped limit of 100 tokens: space 0.260, [SEP] 0.276, text only 0.171, title only 0.261. Title only matching title plus text means the body contributed nothing measurable, the signature of truncation. Step 4, confirm: sweep max_seq_length (100, 256, 350, 512) and watch both metrics climb to the published values at 512. Total sweep cost about 20 minutes on the laptop.",
+      "say": "TAS-B matched exactly through the same code, so my loader and metrics were fine; it had to be something about how DPR sees a document. I tried four encodings. Title only scored 0.261 and title plus full text scored 0.260. That only happens if the body is being thrown away, and it was: the encoder was capped at 100 tokens.",
+      "evidence": [
+        "portfolio: The tell was that searching with only the title scored 0.261 against title plus full text at 0.260. That only makes sense if the body was being discarded.",
+        "repo:beir-replication/runs/dpr-ablation-scifact-len100/report.json: \"doc_max_seq_length\": 100,",
+        "repo:beir-replication/runs/dpr-ablation-scifact-len100/report.json: \"ndcg@10\": 0.17129852390676262,",
+        "repo:beir-replication/README.md: The headline table is 12 minutes of retrieval across five systems and two datasets; the DPR sweep adds about 20 minutes on top."
+      ],
+      "sources": [],
+      "tags": [
+        "debugging",
+        "truncation-bug",
+        "ablation"
+      ]
+    },
+    {
+      "id": "beir-26",
+      "type": "concept",
+      "level": 1,
+      "q": "What does max_seq_length actually do, and why was the truncation silent?",
+      "easy": "Every embedding model reads at most a fixed number of word pieces; anything longer is cut off, and the library does it without complaint. The DPR document model was set to 100 pieces, while a typical SciFact abstract is a couple of hundred words, so most of each abstract was never read.",
+      "deep": "In sentence-transformers, inputs longer than model.max_seq_length are truncated to the first max_seq_length tokens at tokenisation; there is no warning because truncation is the intended behaviour for long inputs. The limit is per checkpoint configuration and can be lowered or raised up to the transformer's positional limit (512 for BERT base). Tokens are WordPiece units, so 100 tokens is fewer than 100 words; the docs put 512 tokens at roughly 300 to 400 English words. SciFact abstracts average 213.63 words in BEIR's statistics, so a 100 token cap keeps roughly the title and the first sentences. The port of DPR's context encoder shipped with 100; TAS-B and bge ship with 512, which is why they were unaffected. Why it is dangerous: the output is a perfectly normal ranked list with plausible scores, and the metric drop looks like a weak model rather than a broken pipeline.",
+      "evidence": [
+        "repo:beir-replication/src/dense.py: \"sentence-transformers port of the context encoder ships with \"",
+        "repo:beir-replication/src/dense.py: \"max_seq_length=100, which truncates SciFact abstracts and costs \""
+      ],
+      "sources": [
+        "https://www.sbert.net/examples/sentence_transformer/applications/computing-embeddings/README.html",
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "truncation-bug",
+        "tokenisation",
+        "sentence-transformers"
+      ]
+    },
+    {
+      "id": "beir-27",
+      "type": "number",
+      "level": 1,
+      "q": "Show the sweep. How much of the gap was length, and how much was the join token?",
+      "easy": "Raising the document limit from 100 to 512 tokens, with titles joined by DPR's separator token, moved DPR on SciFact from 0.276 to 0.318, exactly the published number, and recall from 0.601 to 0.727, also exact. Using the separator instead of a space was worth a further 0.008 to 0.016.",
+      "deep": "SciFact, [SEP] join: 100 tokens 0.276 / Recall@100 0.601; 256: 0.298 / 0.687; 350: 0.315 / 0.710; 512: 0.318 / 0.727, published 0.318 / 0.727. Space join: 0.260 at 100, 0.287 at 256, 0.302 at 350, 0.310 at 512. Decomposition of the original 0.058 gap (space at 100 to [SEP] at 512): length alone is worth +0.050 with a space join or +0.042 with [SEP]; the join is worth +0.016 at 100 tokens and +0.008 at 512. So truncation is the dominant cause and the separator is a smaller, real second cause, consistent with DPR's training format of title [SEP] passage. dense.py's note attributes the whole 0.058 to truncation, which is slightly generous; the precise split is above. Matching on two metrics at once, nDCG@10 and Recall@100 to three decimals, is much stronger evidence of the right configuration than matching one.",
+      "say": "At 100 tokens with the separator, DPR scored 0.276. At 512 it scored 0.318, exactly the paper, and recall matched too, 0.727. Most of the gap was length; the separator token was worth about 0.008 to 0.016 on top.",
+      "evidence": [
+        "repo:beir-replication/README.md: | 100 (the shipped default) | 0.276 | 0.601 |",
+        "repo:beir-replication/README.md: | 256 | 0.298 | 0.687 |",
+        "repo:beir-replication/README.md: | 350 | 0.315 | 0.710 |",
+        "repo:beir-replication/README.md: | 512 | **0.318** | **0.727** |",
+        "repo:beir-replication/runs/dpr-ablation-scifact-len100/report.json: \"ndcg@10\": 0.27563151114798823,",
+        "repo:beir-replication/runs/dpr-ablation-scifact-len256/report.json: \"ndcg@10\": 0.2873411286990948,",
+        "repo:beir-replication/runs/dpr-ablation-scifact-len350/report.json: \"ndcg@10\": 0.3018969374103202,",
+        "repo:beir-replication/runs/dpr-ablation-scifact-len512/report.json: \"ndcg@10\": 0.309633644723685,",
+        "repo:beir-replication/runs/dpr-ablation-scifact-len512/report.json: \"ndcg@10\": 0.31775486370103145,"
+      ],
+      "sources": [],
+      "tags": [
+        "truncation-bug",
+        "ablation",
+        "result"
+      ]
+    },
+    {
+      "id": "beir-28",
+      "type": "why",
+      "level": 2,
+      "q": "Why does 512 reproduce the paper exactly, and why might the port ship with 100?",
+      "easy": "The BEIR authors fed every neural model the first 512 word pieces of each document, so setting DPR to 512 recreates their setup. The 100 likely comes from how DPR was originally trained, on 100 word passages, though that is an inference.",
+      "deep": "BEIR's experimental setup states that, because of transformer length limits, it uses only the first 512 word pieces of every document for all neural architectures. So the published 0.318 was computed at 512, and the shipped 100 silently changed the experimental condition. DPR itself was trained on Wikipedia split into 100 word blocks, each prefixed with the title and [SEP]; a port that sets max_seq_length = 100 is consistent with that training regime, which works for 100 word Wikipedia passages and fails for 200 word scientific abstracts. Tanay labels the origin of the 100 as plausible, not documented. The general lesson: a model's shipped inference configuration encodes assumptions from its training data, and those assumptions do not travel with the model to a new corpus.",
+      "evidence": [
+        "repo:beir-replication/README.md: `max_seq_length = 100`, which silently truncates SciFact abstracts. Sweeping"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2104.08663",
+        "https://arxiv.org/pdf/2004.04906",
+        "https://huggingface.co/sentence-transformers/facebook-dpr-ctx_encoder-multiset-base"
+      ],
+      "tags": [
+        "truncation-bug",
+        "dpr",
+        "defaults"
+      ]
+    },
+    {
+      "id": "beir-29",
+      "type": "why",
+      "level": 1,
+      "q": "Why was the bug invisible on NFCorpus? Was it entirely invisible?",
+      "easy": "NFCorpus questions each have dozens of relevant papers, so damaging the ranking a bit still leaves plenty of relevant papers in the top 10, and the headline score barely moved. The recall number did show the damage, in hindsight.",
+      "deep": "nDCG@10 for DPR on NFCorpus was 0.191 with the bug and 0.188 after the fix, against a published 0.189: indistinguishable. Mechanism: with 38.2 relevant documents per query (graded), IDCG@10 is computed over many candidates and many different documents can fill the top 10, so losing some relevant documents from the top 10 is partly replaced by others; with SciFact's 1.1, nDCG@10 is essentially the discount at one document's rank, so any displacement shows. Nuance the write up glosses: Recall@100 on NFCorpus was 0.190 with the bug against a published 0.208, and 0.208 exactly after the fix, so the second metric did carry the signal. The bug also made DPR look cheaper: NFCorpus encoding took 45.7 s at 100 tokens and 181.3 s at 512. The lesson: dense judgement sets absorb ranking damage that sparse ones expose, so check more than one dataset and more than one metric.",
+      "say": "NFCorpus has about 38 relevant documents per query, so the top 10 stays full of relevant hits even when the ranking is damaged. nDCG came out 0.191 with the bug against 0.189 published. In hindsight Recall@100 did show it, 0.190 against 0.208, so I'd watch both metrics next time.",
+      "evidence": [
+        "repo:beir-replication/runs/full/comparison.md: | dpr | 0.189 | 0.191 | +0.002 | 0.208 | 0.190 |",
+        "repo:beir-replication/README.md: | dpr | 0.189 | 0.188 | -0.001 | 0.208 | 0.208 |",
+        "repo:beir-replication/runs/full/report.json: \"seconds\": 45.7",
+        "repo:beir-replication/runs/final/report.json: \"seconds\": 181.3",
+        "repo:beir-replication/README.md: because NFCorpus has 38.2 judged documents per query against"
+      ],
+      "sources": [],
+      "tags": [
+        "truncation-bug",
+        "nfcorpus",
+        "metrics"
+      ]
+    },
+    {
+      "id": "beir-30",
+      "type": "case",
+      "level": 2,
+      "q": "Where else does this failure mode show up, and how would you guard against it in a production RAG system?",
+      "easy": "Any search system that splits documents into chunks and embeds them can hit the same problem: if a chunk is longer than the model's limit, the end of the chunk is never seen, with no error. The guard is to measure chunk lengths in the model's own tokens and alert when they exceed the limit.",
+      "deep": "Where it bites: RAG pipelines that chunk by characters or words (say 1,000 characters or 300 words) and embed with a model whose max_seq_length is 256 or 512 tokens; long titles plus body; non English text, which tokenises into more pieces; code and tables. The retrieval still works, so the symptom is a quality loss that looks like a weak model. Guards: (1) tokenise every chunk with the embedding model's tokenizer at index time and log the share over the limit; fail the build above a threshold; (2) log the loaded max_seq_length per model, as ablate_dpr.py does, instead of trusting a model card; (3) chunk by tokens with the model's limit minus a margin; (4) a cheap canary like the one that caught this: compare title only against full text retrieval on a labelled sample, and expect full text to win; (5) evaluate on at least two datasets with different judgement density and track two metrics. Tanay's portfolio states the same failure is waiting in most retrieval systems whose chunks exceed the configured limit.",
+      "evidence": [
+        "portfolio: The same failure mode is waiting in any retrieval system whose chunks are longer than an embedding model’s configured limit, which is most of them.",
+        "repo:beir-replication/src/ablate_dpr.py: print(f\"doc model   max_seq_length: {doc_encoder.max_seq_length}\")"
+      ],
+      "sources": [
+        "https://www.sbert.net/examples/sentence_transformer/applications/computing-embeddings/README.html"
+      ],
+      "tags": [
+        "rag",
+        "production",
+        "truncation-bug",
+        "monitoring"
+      ]
+    },
+    {
+      "id": "beir-31",
+      "type": "how",
+      "level": 1,
+      "q": "How did you verify that your numbers match the published ones, rather than just look close?",
+      "easy": "Tanay typed the paper's numbers into a file with their source, had the code print the difference for every cell, used the official data and the paper's own scoring tool, and checked that document and query counts matched the paper. The final DPR fix matched on two different metrics at once.",
+      "deep": "Controls, each removing one source of disagreement: (1) data: the official BEIR zips, canonical layout, with 5,183 / 300 and 3,633 / 323 documents and queries matching the paper; (2) query set: only judged test queries, as BEIR does, and every report records the count of scored queries (300 and 323); (3) metric: pytrec_eval, the trec_eval bindings BEIR used; (4) reference: published.json holds the paper's nDCG@10 and capped Recall@100 values with the table and citation they came from; (5) comparison: run.py's render_table prints published, reproduced and delta for every cell, writing 0.000 when the gap is under 5e-4 (an earlier run printed -0.000, fixed); (6) a positive control: TAS-B matching exactly on both datasets showed the pipeline was right before DPR was debugged; (7) the DPR fix had to match nDCG@10 and Recall@100 simultaneously, 0.318 and 0.727, which a coincidental setting is unlikely to do. Every README number is regenerated from runs/<stamp>/report.json.",
+      "evidence": [
+        "repo:beir-replication/src/run.py: delta = \"0.000\" if abs(gap) < 5e-4 else f\"{gap:+.3f}\"",
+        "repo:beir-replication/runs/full/comparison.md: | tas-b | 0.643 | 0.643 | -0.000 | 0.891 | 0.891 |",
+        "repo:beir-replication/published.json: \"recall@100\": \"Table 12 (capped recall)\"",
+        "repo:beir-replication/runs/final/report.json: \"queries\": 300.0,"
+      ],
+      "sources": [],
+      "tags": [
+        "verification",
+        "reproducibility"
+      ]
+    },
+    {
+      "id": "beir-32",
+      "type": "number",
+      "level": 2,
+      "q": "How long does it take to run, and on what?",
+      "easy": "The full five system, two dataset comparison takes about 12 minutes on one MacBook with no separate graphics card. The keyword search part takes under a second; the neural models take a minute or a few each.",
+      "deep": "runs/final/report.json: started 19:48:02, finished 19:59:55 UTC on macOS arm64, Python 3.12.7, device MPS (the integrated Apple GPU through PyTorch). Per system, SciFact / NFCorpus: BM25 0.5 s / 0.3 s (index plus all queries), TAS-B 94.2 / 87.9 s, DPR at 512 tokens 219.5 / 181.3 s, bge-small 70.4 / 58.6 s; RRF adds negligible time. The DPR sweep adds about 20 minutes. Encoding dominates and scales with tokens per document: DPR at 100 tokens took 124.5 s on SciFact in the buggy run against 219.5 s at 512. Each run writes report.json and comparison.md with device, machine and timings.",
+      "evidence": [
+        "repo:beir-replication/runs/final/report.json: \"started\": \"2026-09-23T19:48:02.133196+00:00\",",
+        "repo:beir-replication/runs/final/report.json: \"finished\": \"2026-09-23T19:59:55.144114+00:00\"",
+        "repo:beir-replication/runs/final/report.json: \"machine\": \"macOS-27.0-arm64-arm-64bit python 3.12.7\",",
+        "repo:beir-replication/runs/final/report.json: \"seconds\": 70.4",
+        "repo:beir-replication/runs/final/report.json: \"seconds\": 58.6",
+        "repo:beir-replication/runs/final/report.json: \"seconds\": 87.9",
+        "repo:beir-replication/runs/final/report.json: \"seconds\": 94.2",
+        "repo:beir-replication/runs/final/report.json: \"seconds\": 181.3",
+        "repo:beir-replication/runs/final/report.json: \"seconds\": 219.5",
+        "repo:beir-replication/runs/final/report.json: \"seconds\": 0.3",
+        "repo:beir-replication/runs/full/report.json: \"seconds\": 124.5",
+        "portfolio: 12 minutes on a laptop, no GPU"
+      ],
+      "sources": [],
+      "tags": [
+        "runtime",
+        "cost",
+        "laptop"
+      ]
+    },
+    {
+      "id": "beir-33",
+      "type": "how",
+      "level": 2,
+      "q": "What does a run produce, and how would someone reproduce it?",
+      "easy": "Two commands: one runs every system on both datasets, the other runs the DPR sweep. Each writes a folder with a machine readable report and a comparison table, and the README's numbers are copied from those files.",
+      "deep": "Setup: python3 -m venv .venv, pip install -r requirements.txt (sentence-transformers>=3.0, pytrec_eval-terrier, PyStemmer, numpy<3). Main: python -m src.run --datasets scifact nfcorpus --systems bm25 tas-b dpr bge-small hybrid writes runs/<UTC stamp>/report.json (start and finish times, device, machine, top_k 100, per dataset corpus and query counts, per system nDCG@10, Recall@100, scored query count, seconds) and comparison.md. Sweep: python -m src.ablate_dpr --dataset scifact (all four variants at the shipped length), then sweep_dpr.sh repeats 256, 350 and 512 with the two joins still in contention, writing runs/dpr-ablation-scifact-len<L>/report.json. Committed runs: smoke and demo (BM25 only), full (the buggy DPR), final (the fixed table), and five ablation reports. Data is downloaded on first use and git ignored. Determinism: BM25 and exact dense search have no randomness; MPS floating point could move a fourth decimal across machines.",
+      "evidence": [
+        "repo:beir-replication/requirements.txt: pytrec_eval-terrier",
+        "repo:beir-replication/sweep_dpr.sh: .venv/bin/python -m src.ablate_dpr --dataset scifact --max-doc-len \"$L\" --variants space sep_token"
+      ],
+      "sources": [],
+      "tags": [
+        "reproducibility",
+        "artifacts",
+        "cli"
+      ]
+    },
+    {
+      "id": "beir-34",
+      "type": "pushback",
+      "level": 1,
+      "q": "Two datasets out of 18. What does this actually tell us about BEIR?",
+      "easy": "It tells us the paper's numbers reproduce on the two datasets tested and the conclusion holds there for its models. It says nothing directly about the other 16, and Tanay says so.",
+      "deep": "Concede: two scientific datasets, both small, both biomedical or scientific text; no QA, argument, news, or entity retrieval; the paper's average over 18 is out of reach, and the bge result in particular could differ on other domains. Defend: the claim being checked is per dataset (published cells), and six cells is a clean test of whether an independent implementation recovers them; the two datasets differ sharply in judgement density, which is exactly what exposed the truncation bug; and the method (official data, same metric tool, published values in a file, per cell deltas) scales to the rest. Next: add the next smallest datasets (ArguAna, SCIDOCS, FiQA) where laptop encoding is feasible, then the large ones on a GPU with an ANN index.",
+      "say": "It's two of 18, and I don't claim more than that. What I can say is that six published cells came back, through an independent implementation. And the two datasets differ a lot in how many relevant documents each query has, which is exactly what exposed the bug. The method extends; the compute for the big datasets doesn't fit a laptop.",
+      "evidence": [
+        "repo:beir-replication/README.md: SciFact and NFCorpus are the two smallest scientific text datasets in the"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "scope"
+      ]
+    },
+    {
+      "id": "beir-35",
+      "type": "pushback",
+      "level": 2,
+      "q": "Your BM25 is not Anserini. How can you call those cells reproduced?",
+      "easy": "Tanay calls them reproduced within 0.012 and explains the gap, rather than calling them exact. The settings match; two internal details of the search engine do not.",
+      "deep": "Concede: the BM25 cells are the only ones off by more than 0.001, and the implementation differs in fields (one concatenated field against two) and length encoding (exact against Lucene's one byte norms). Defend: the parameters (k1 0.9, b 0.4), idf, stemmer and stopwords match; the deltas go in opposite directions on the two datasets (+0.012, -0.005), which looks like implementation noise rather than a systematic advantage; and the BM25 versus dense ordering the paper reports is unchanged on both datasets. The deviation is listed first in the README rather than discovered by a reader. A fully faithful run needs Pyserini with Java, which the machine lacked; that is the obvious fix if the BM25 cells ever matter for a conclusion.",
+      "say": "Fair. My BM25 matches the parameters, stemmer and stopwords, but it uses one field instead of two and exact lengths instead of Lucene's quantised ones. That's my best explanation for plus 0.012 and minus 0.005. The ordering against the dense models doesn't change, and I list the deviation first in the README.",
+      "evidence": [
+        "repo:beir-replication/README.md: 1. **BM25 is not Anserini.** The paper scores BM25 with Anserini, which is"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "pushback",
+        "bm25",
+        "deviation"
+      ]
+    },
+    {
+      "id": "beir-36",
+      "type": "pushback",
+      "level": 2,
+      "q": "Isn't the truncation bug just you misconfiguring the model? Why call it a finding?",
+      "easy": "It was a configuration problem, and Tanay says so. The finding is that the library's own default was wrong for this data, nothing warned about it, and one of the two datasets hid it completely.",
+      "deep": "Concede: the fix is one line (doc_encoder.max_seq_length = 512), and with hindsight a careful setup would have checked every model's limit. Defend: (1) the value was the shipped default of the public port that BEIR style evaluations load by name, so anyone following the obvious path gets 0.260; (2) there is no error or warning, and the output looks like a weak model; (3) the bug was invisible in NFCorpus nDCG@10, so a single dataset replication would have certified a wrong configuration; (4) diagnosing it needed a control (TAS-B), a hypothesis list, an ablation, and a sweep that matched two metrics at once. That chain is the transferable skill. If someone checks the model card today they may see a different limit listed; the number that matters is the one the run loaded, which the ablation report records as 100.",
+      "say": "Yes, it was configuration, and the fix is one line. But it was the port's shipped default, with no warning, and it was invisible on one of my two datasets. The finding is the failure mode: anyone who loads that model by name gets the truncated version and a plausible looking score.",
+      "evidence": [
+        "repo:beir-replication/runs/dpr-ablation-scifact-len100/report.json: \"doc_max_seq_length\": 100,",
+        "repo:beir-replication/src/dense.py: max_doc_len=512,"
+      ],
+      "sources": [
+        "https://huggingface.co/sentence-transformers/facebook-dpr-ctx_encoder-multiset-base",
+        "https://www.sbert.net/examples/sentence_transformer/applications/computing-embeddings/README.html"
+      ],
+      "tags": [
+        "pushback",
+        "truncation-bug"
+      ]
+    },
+    {
+      "id": "beir-37",
+      "type": "pushback",
+      "level": 2,
+      "q": "bge-small beating BM25 could just be training data contamination. How do you know it is zero shot?",
+      "easy": "Tanay does not know, and says the result is less clean as zero shot than the paper's models were. What it shows is that a model available today beats BM25 on these two datasets, whatever the reason.",
+      "deep": "Concede: BEIR's datasets became standard evaluation sets after 2021 and appear in MTEB's retrieval suite; 2023 embedders are trained on very large mixtures of web, academic and QA pairs, and their exact training data is not fully documented, so exposure to SciFact or NFCorpus documents, or to similar scientific claim data, cannot be excluded. Defend: the result is labelled as not in the paper and as an extension; it is a statement about the practical choice (a 33M model beats BM25 on these corpora today) rather than a clean zero shot claim. Better tests: evaluate on a dataset created after the model's release, or on a private corpus, and compare bge against BM25 there.",
+      "say": "I can't rule out contamination, and I say the bge result is less clean as zero shot than the paper's models. What I can say is the practical part: a 33 million parameter model available today beats BM25 on these two corpora. The clean test is a dataset built after the model was released.",
+      "evidence": [
+        "portfolio: bge-small is an additionA 2023 model the paper could not have tested, included to measure how far the field moved, and labelled as not in the paper wherever it appears."
+      ],
+      "sources": [
+        "https://huggingface.co/BAAI/bge-small-en-v1.5"
+      ],
+      "tags": [
+        "pushback",
+        "contamination",
+        "bge"
+      ]
+    },
+    {
+      "id": "beir-38",
+      "type": "pushback",
+      "level": 2,
+      "q": "There is no significance testing. How do you know +0.012 or the hybrid gain is not noise?",
+      "easy": "Tanay does not test significance, and says the BM25 deltas are explained by implementation differences rather than claimed as findings. For the hybrid, a per query paired test is the next thing to add.",
+      "deep": "Concede: report.json stores only averages, not per query scores, so no paired test was run; the hybrid's +0.010 over BM25 on SciFact (0.687 against 0.677) and +0.021 on NFCorpus (0.341 against 0.320) are point estimates over 300 and 323 queries. Defend: the reproduction claim does not need a significance test, because deterministic systems with fixed checkpoints should land on the published value, and four dense cells within 0.001 do; the 0.058 DPR gap was large and fully explained by a controlled sweep. Next: save per query nDCG from pytrec_eval (it already computes them), then a paired bootstrap or paired t test per comparison, and report intervals for the hybrid and bge gains. With 300 SciFact queries and a sparse metric, differences around 0.01 may well not separate.",
+      "say": "You're right, I didn't run significance tests, and pytrec_eval already gives per query scores, so that's an easy add. For the reproduction it matters less: fixed checkpoints should land on the published number, and four dense cells do. For the hybrid gain I'd want a paired bootstrap before calling it real.",
+      "evidence": [
+        "repo:beir-replication/README.md: | hybrid-rrf(bm25+tas-b) | not in paper | 0.687 | n/a | not in paper | 0.948 |"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "statistics",
+        "significance"
+      ]
+    },
+    {
+      "id": "beir-39",
+      "type": "pushback",
+      "level": 3,
+      "q": "Your Recall@100 is plain and the paper's is capped. Aren't you comparing different metrics?",
+      "easy": "On SciFact the two are identical by construction. On NFCorpus they can differ, and Tanay states that deviation up front; the dense cells still match exactly, and BM25's small recall gap is partly explained by it.",
+      "deep": "Capped recall divides by min(100, |relevant|); plain divides by |relevant|. For any query with at most 100 relevant documents they are equal, which covers every SciFact query, so SciFact recall comparisons are exact comparisons. On NFCorpus some queries exceed 100 relevant documents, where capped is higher, so a plain number at or slightly below the published one is expected. Observed: TAS-B 0.280 and DPR 0.208 match the published capped values exactly, BM25 is 0.246 against 0.25. Implementing capped recall is a few lines over the per query output, and the README lists the difference as deviation 2. Concede it should simply be implemented to remove the caveat.",
+      "say": "On SciFact they're identical, since no query has more than 100 relevant documents. On NFCorpus they can differ, and capped is always higher, so I list it as a deviation. TAS-B and DPR still match exactly on recall. Honestly, capped recall is a few lines and I should just add it.",
+      "evidence": [
+        "repo:beir-replication/README.md: fewer than 100 relevant documents, which is every SciFact query but not"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "pushback",
+        "recall",
+        "metrics"
+      ]
+    },
+    {
+      "id": "beir-40",
+      "type": "pushback",
+      "level": 2,
+      "q": "The hybrid did not beat bge-small. Why bother with RRF at all?",
+      "easy": "Because it beat both of its own inputs on both datasets and gave the best recall on SciFact, which is what a first stage feeding a reranker needs. The fair comparison for bge is a BM25 plus bge hybrid, which Tanay has not run yet.",
+      "deep": "Concede: on nDCG@10 bge-small alone (0.713, 0.343) beats the BM25 + TAS-B hybrid (0.687, 0.341), so if you can only run one model on these corpora, bge wins. Defend: RRF's job is to combine complementary signals without training; it lifted both inputs on both datasets and produced the highest SciFact Recall@100 (0.948), the quantity that bounds a reranker's ceiling. Lexical matching also protects against embedding failure modes (rare identifiers, truncation like DPR's). The hybrid was pinned to the paper's own models on purpose so it stays a statement about 2021 systems. Next: BM25 + bge-small, a weighted RRF or tuned k, and a cross encoder reranking the fused top 100, compared against the paper's BM25 + CE (0.688, 0.350).",
+      "say": "On ranking, bge alone beats my hybrid. But RRF beat both of its inputs on both datasets and gave the best recall on SciFact, 0.948, which is what you want feeding a reranker. The fair next test is BM25 plus bge.",
+      "evidence": [
+        "portfolio: Reciprocal rank fusion over BM25 and TAS-B also beat both of its own inputs on both datasets, and took the best Recall@100 on SciFact at 0.948."
+      ],
+      "sources": [
+        "http://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf"
+      ],
+      "tags": [
+        "pushback",
+        "rrf",
+        "hybrid-search"
+      ]
+    },
+    {
+      "id": "beir-41",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations, and what breaks at 10x and 100x scale?",
+      "easy": "The limits are two small datasets, single runs without significance tests, a substitute BM25, and plain rather than capped recall. At bigger scale the laptop runs out: encoding millions of documents needs GPUs, the score matrix needs an approximate index, and the Python keyword index needs a real search engine.",
+      "deep": "Limitations: 2 of 18 datasets; BM25 not Anserini (one field, exact lengths); plain Recall@100; no per query statistics; additions (bge, RRF) are single configurations. At 10x (around 50,000 documents, still small): exact search stays fine, encoding grows linearly (DPR at 512 tokens would take roughly 35 to 40 minutes on this laptop by linear extrapolation from 219.5 s), and BM25's dict of numpy postings still fits memory. At 100x and beyond (BEIR's large corpora reach millions of documents; MS MARCO has 8.8M passages): 8.8M x 768 float32 vectors is about 27 GB, beyond a laptop, so vectors need fp16 or product quantisation and an ANN index (FAISS IVF or HNSW), which turns exact recall into approximate recall that must itself be measured; encoding needs GPUs and batching by length; BM25 needs Lucene or another compiled engine with on disk postings; and evaluation needs per query outputs stored for significance testing. Production retrieval would add query latency budgets, index refresh, and the chunk length guard from the truncation lesson.",
+      "evidence": [
+        "repo:beir-replication/README.md: Everything here ran on one MacBook (macOS arm64, MPS, no discrete GPU). The headline table is 12 minutes of retrieval across five systems and two datasets; the DPR sweep adds about 20 minutes on top."
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "limitations",
+        "scaling",
+        "ann"
+      ]
+    },
+    {
+      "id": "beir-42",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next, in order?",
+      "easy": "Add significance tests, try BM25 plus bge, run the exact Java based BM25, compute the paper's capped recall, and extend to more datasets, including the bigger ones on a GPU.",
+      "deep": "1) Save per query nDCG@10 and Recall@100 and add paired bootstrap intervals for every comparison (hybrid and bge gains especially). 2) BM25 + bge-small RRF, a weighted RRF and a k sweep, and a cross encoder reranking the fused top 100, compared with the paper's BM25 + CE row (0.688 SciFact, 0.350 NFCorpus). 3) Pyserini multifield BM25 to close the +0.012 / -0.005 cells and confirm the attribution. 4) Capped Recall@100 to remove deviation 2. 5) More datasets: ArguAna, SCIDOCS, FiQA on the laptop, then TREC-COVID and larger ones on a GPU with FAISS. 6) The remaining paper models (ANCE, ColBERT) to cover the dense and late interaction rows. 7) A chunk length audit tool that reports the share of documents over each model's max_seq_length, packaged from the lesson here.",
+      "evidence": [
+        "repo:beir-replication/published.json: \"nfcorpus\": {\"bm25\": 0.325, \"dpr\": 0.189, \"ance\": 0.237, \"tas-b\": 0.319, \"colbert\": 0.305, \"bm25+ce\": 0.350}"
+      ],
+      "sources": [],
+      "tags": [
+        "next-steps"
+      ]
+    },
+    {
+      "id": "beir-43",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager.",
+      "easy": "Lead with the outcome and the bug: a published benchmark rebuilt independently, every number accounted for, and a silent default found by chasing the one number that did not match.",
+      "deep": "Three beats: what was rebuilt (BEIR's comparison of keyword and neural search on new domains), what came back (all six published cells, the neural ones within 0.001), and what the miss taught (a library default silently truncating documents, invisible on one of two datasets). Close with the transferable point: the same failure hides in most RAG systems.",
+      "say": "I rebuilt a well known search benchmark from scratch on my laptop and got all six published numbers back. One of them first came in 18% low. I traced it to a library default that was silently cutting every document to 100 tokens, with no warning. Fixing it matched the paper exactly. That exact failure sits in a lot of production RAG systems, so it's the part of the project I'd talk about first.",
+      "evidence": [
+        "portfolio: DPR on SciFact recovered from 0.260 to a published 0.318"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "beir-44",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the debugging story to a staff engineer.",
+      "easy": "Control, hypotheses, ablation, sweep, double metric confirmation.",
+      "deep": "Positive control (TAS-B exact through the same pipeline) rules out data, metrics and search. DPR specific hypotheses: join convention, asymmetric encoders, document length seen. Ablation at the shipped limit finds the tell (title only equals title plus text). Sweep shows monotone recovery to the published value at 512, on two metrics at once, matching BEIR's stated 512 word piece setup. Side finding: NFCorpus nDCG@10 hid it, Recall@100 did not.",
+      "say": "TAS-B matched exactly through the same loader, metrics and search code, so the pipeline was cleared. That left DPR specific causes: the join token, the two encoders, or how much text the context encoder sees. At the shipped limit, title only scored the same as title plus abstract, which means the abstract wasn't being read. Sweeping the limit to 512 matched both nDCG@10 and Recall@100 to three decimals, and 512 is what the paper says it used.",
+      "evidence": [
+        "portfolio: TAS-B had already reproduced exactly on both datasets, so the loader, the metrics and the scoring were not at fault, which left something specific to how DPR sees a document."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer",
+        "debugging"
+      ]
+    },
+    {
+      "id": "beir-45",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain what this means for a product manager choosing search for a document product.",
+      "easy": "Translate into a decision: keyword search is a strong, cheap baseline; a small modern embedding model beats it on these datasets; combining both is safer; and whatever you pick, check that documents are not being silently cut short.",
+      "deep": "Decision framing: cost and latency (BM25 indexed and searched SciFact in half a second; neural models took one to four minutes to encode on a laptop), quality (bge-small beat BM25 on both datasets; the 2021 neural models did not), risk (hybrid fusion beat both its inputs and had the best SciFact recall), and an operational check that costs nothing (document length against model limit).",
+      "say": "Keyword search is cheap and still strong; on these datasets it beat the older neural models. A small modern embedding model beat it on both. Combining keyword and neural results was safer than either alone. And one check I'd insist on: make sure your documents fit the model's length limit, because if they don't, quality drops with no error anywhere.",
+      "evidence": [
+        "repo:beir-replication/README.md: | bge-small | not in paper | 0.713 | n/a | not in paper | 0.942 |"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "pm"
+      ]
+    },
+    {
+      "id": "beir-46",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain the project to a recruiter in thirty seconds.",
+      "easy": "One line on what, one on the result, one on the habit it shows.",
+      "deep": "Name the recognisable pieces (Python, information retrieval, BEIR, BM25, dense retrieval, sentence-transformers) and the outcome (published numbers reproduced, a silent bug found and fixed), and the habit (chasing the one result that does not match).",
+      "say": "I took a widely cited search benchmark and rebuilt it myself in Python, on a laptop. Every published number I checked came back. The one that didn't match at first led me to a hidden setting that was cutting documents short, and fixing it matched the paper exactly.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    },
+    {
+      "id": "beir-47",
+      "type": "define",
+      "level": 1,
+      "q": "Define zero shot retrieval, in domain versus out of domain, and MS MARCO.",
+      "easy": "Zero shot retrieval means using a search model on a new kind of collection without training it on that collection. In domain means testing on data like the training data; out of domain means testing on something different. MS MARCO is a large Microsoft dataset of real Bing questions and web passages that most neural search models are trained on.",
+      "deep": "Zero shot (in BEIR's sense): the model receives no training examples from the target dataset; its parameters come from other data, typically MS MARCO passage ranking (about 8.8M passages, 532,761 training pairs, binary judgements, about one relevant passage per query). In domain: evaluation on MS MARCO dev, which BEIR reports but excludes from the zero shot comparison. Out of domain: the 18 BEIR datasets, which differ in domain (biomedical, finance, scientific claims), query style (questions, claims, short titles), document length and judgement density. The gap between in domain and out of domain scores is the generalisation gap BEIR measures. DPR is a special case here: it was trained on open domain QA datasets, not MS MARCO.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "define",
+        "zeroshot",
+        "ms-marco"
+      ]
+    },
+    {
+      "id": "beir-48",
+      "type": "define",
+      "level": 2,
+      "q": "Define word pieces, max_seq_length, CLS pooling and embedding normalisation.",
+      "easy": "Word pieces are the sub word units a model reads; long or rare words split into several. max_seq_length is how many of them the model will read. CLS pooling uses the model's summary token as the document's vector. Normalising scales every vector to length 1 so dot product becomes cosine similarity.",
+      "deep": "WordPiece (BERT family) splits text into a 30k unit vocabulary; 'microstructure' may become several pieces, so token counts exceed word counts, especially for technical text. max_seq_length: the sentence-transformers truncation limit, at most the model's positional limit (512 for BERT and DistilBERT); inputs beyond it are cut without warning. CLS pooling: the final hidden state of the [CLS] token, which models like DPR and TAS-B were trained to make a sequence summary; mean pooling averages token states instead and is used by many other embedders. Normalisation: $\\hat v=v/\\|v\\|_2$, after which $\\hat q^\\top\\hat d=\\cos(q,d)$; dense.py sets normalize_embeddings only for cosine models.",
+      "evidence": [
+        "repo:beir-replication/src/dense.py: normalize = spec.similarity == \"cosine\""
+      ],
+      "sources": [
+        "https://www.sbert.net/examples/sentence_transformer/applications/computing-embeddings/README.html",
+        "https://huggingface.co/sentence-transformers/msmarco-distilbert-base-tas-b",
+        "https://huggingface.co/sentence-transformers/facebook-dpr-ctx_encoder-multiset-base"
+      ],
+      "tags": [
+        "define",
+        "tokenisation",
+        "pooling"
+      ]
+    },
+    {
+      "id": "beir-49",
+      "type": "define",
+      "level": 2,
+      "q": "Define an inverted index, Porter stemming and stopwords.",
+      "easy": "An inverted index maps each word to the list of documents containing it, so a query only touches documents that share a word with it. Stemming cuts words to a common root, so 'treatments' and 'treated' can match. Stopwords are very common words like 'the' that are dropped because they carry little meaning.",
+      "deep": "Inverted index: term -> postings list of (doc id, term frequency), plus document lengths; query cost is proportional to the posting lengths of the query terms, not the corpus size. bm25.py stores postings as numpy arrays for vectorised scoring. Porter stemmer (1980): rule based suffix stripping in steps ('caresses' to 'caress', 'ponies' to 'poni', 'relational' to 'relate'); it raises recall and occasionally conflates unrelated words. Here it comes from PyStemmer's Snowball implementation of Porter, matching Anserini's Porter setting. Stopwords: the 33 word Lucene EnglishAnalyzer list (a, an, and, are, as, at, be, but, by, for, if, in, into, is, it, no, not, of, on, or, such, that, the, their, then, there, these, they, this, to, was, will, with). Note 'no' and 'not' are dropped, which matters for claims like SciFact's, where negation flips meaning; BM25 cannot see it either way.",
+      "evidence": [
+        "repo:beir-replication/src/bm25.py: # Lucene EnglishAnalyzer default stopword set, which Anserini uses at index time.",
+        "repo:beir-replication/src/bm25.py: _stemmer = Stemmer.Stemmer(\"porter\")"
+      ],
+      "sources": [],
+      "tags": [
+        "define",
+        "bm25",
+        "text-processing"
+      ]
+    },
+    {
+      "id": "beir-50",
+      "type": "define",
+      "level": 2,
+      "q": "Define qrels, a run, and judged queries, in BEIR's format.",
+      "easy": "Qrels are the answer key: for each query, which documents are relevant and how strongly. A run is a system's output: for each query, a ranked list of documents with scores. A judged query is one that has at least one entry in the answer key.",
+      "deep": "BEIR layout: corpus.jsonl rows {_id, title, text}; queries.jsonl rows {_id, text}; qrels/test.tsv with a header and columns query-id, corpus-id, score (an integer grade; binary 1 for SciFact, graded for NFCorpus). pytrec_eval expects qrels as {qid: {doc_id: int}} and a run as {qid: {doc_id: float}}. Only queries present in the test qrels are scored, so queries.jsonl entries without judgements (training queries, for example) are dropped by beirdata.load. Unjudged documents in a run count as non relevant, a known bias against systems that retrieve good documents the original judges never saw, which matters more for new models than old ones.",
+      "evidence": [
+        "repo:beir-replication/src/beirdata.py: queries = {qid: all_queries[qid] for qid in qrels if qid in all_queries}"
+      ],
+      "sources": [
+        "https://github.com/cvangysel/pytrec_eval",
+        "https://arxiv.org/pdf/2104.08663"
+      ],
+      "tags": [
+        "define",
+        "qrels",
+        "evaluation"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "BEIR (arXiv abstract)",
+      "url": "https://arxiv.org/abs/2104.08663",
+      "why": "The paper under test: 18 datasets, ten systems, BM25 as a strong zero shot baseline."
+    },
+    {
+      "title": "BEIR (PDF)",
+      "url": "https://arxiv.org/pdf/2104.08663",
+      "why": "Dataset statistics (Table 1), the nDCG@10 rationale, Anserini BM25 settings, the 512 word piece limit, and capped recall (Appendix G)."
+    },
+    {
+      "title": "Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods",
+      "url": "http://cormack.uwaterloo.ca/cormacksigir09-rrf.pdf",
+      "why": "The RRF formula and why k = 60 was fixed in a pilot and found near optimal."
+    },
+    {
+      "title": "Efficiently Teaching an Effective Dense Retriever with Balanced Topic Aware Sampling (TAS-B)",
+      "url": "https://arxiv.org/abs/2104.06967",
+      "why": "TAS-B's topic aware sampling and dual teacher distillation."
+    },
+    {
+      "title": "TAS-B sentence-transformers model card",
+      "url": "https://huggingface.co/sentence-transformers/msmarco-distilbert-base-tas-b",
+      "why": "CLS pooling, dot product scoring, 512 token limit for the checkpoint used."
+    },
+    {
+      "title": "Dense Passage Retrieval for Open-Domain Question Answering (abstract)",
+      "url": "https://arxiv.org/abs/2004.04906",
+      "why": "DPR's dual encoder and its gains over BM25 on open domain QA."
+    },
+    {
+      "title": "Dense Passage Retrieval (PDF)",
+      "url": "https://arxiv.org/pdf/2004.04906",
+      "why": "Dot product similarity, CLS encoders, in batch negatives, and 100 word passages prefixed with title and [SEP]."
+    },
+    {
+      "title": "DPR context encoder sentence-transformers port",
+      "url": "https://huggingface.co/sentence-transformers/facebook-dpr-ctx_encoder-multiset-base",
+      "why": "The checkpoint whose configured token limit caused the truncation."
+    },
+    {
+      "title": "C-Pack: Packaged Resources To Advance General Chinese Embedding",
+      "url": "https://arxiv.org/abs/2309.07597",
+      "why": "The BGE family's paper and training resources."
+    },
+    {
+      "title": "BAAI/bge-small-en-v1.5 model card",
+      "url": "https://huggingface.co/BAAI/bge-small-en-v1.5",
+      "why": "33.4M parameters, 384 dimensions, 512 tokens, the query instruction, normalised embeddings."
+    },
+    {
+      "title": "pytrec_eval",
+      "url": "https://github.com/cvangysel/pytrec_eval",
+      "why": "Python bindings to trec_eval used for every metric here."
+    },
+    {
+      "title": "trec_eval m_ndcg_cut.c",
+      "url": "https://raw.githubusercontent.com/usnistgov/trec_eval/main/m_ndcg_cut.c",
+      "why": "Confirms linear gain from qrels grades and the log2(rank + 1) discount."
+    },
+    {
+      "title": "NFCorpus",
+      "url": "https://www.cl.uni-heidelberg.de/statnlpgroup/nfcorpus/",
+      "why": "Source of the queries and documents and how the three relevance levels were derived from links."
+    },
+    {
+      "title": "Fact or Fiction: Verifying Scientific Claims (SciFact)",
+      "url": "https://arxiv.org/abs/2004.14974",
+      "why": "SciFact's expert written claims and supporting or refuting abstracts."
+    },
+    {
+      "title": "Lucene BM25Similarity",
+      "url": "https://lucene.apache.org/core/9_0_0/core/org/apache/lucene/search/similarities/BM25Similarity.html",
+      "why": "Lucene's idf formula and its own default k1 = 1.2 and b = 0.75, unlike Anserini's 0.9 and 0.4."
+    },
+    {
+      "title": "sentence-transformers: Input Sequence Length",
+      "url": "https://www.sbert.net/examples/sentence_transformer/applications/computing-embeddings/README.html",
+      "why": "Inputs longer than max_seq_length are truncated; how to change the limit."
+    }
+  ]
+}
