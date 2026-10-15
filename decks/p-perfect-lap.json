@@ -1,0 +1,1035 @@
+{
+  "deck_id": "p-perfect-lap",
+  "title": "The Perfect Lap: F1 Pit Stop Strategy",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/the-perfect-lap",
+  "summary_easy": "A five person class project (IST 707, Team Omega) that predicts the lap on which a Formula 1 driver makes their first pit stop, from race length, circuit traits, grid slot, team, and year. A Random Forest landed about 2.78 laps from what teams actually did on a random holdout of driver race rows, and a Streamlit app wraps a lighter version of the model. The strongest interview material is what the evaluation missed and where the write up and the repo disagree.",
+  "summary_deep": "The data is the Ergast style Formula 1 relational dump, filtered to races from 2000 on, with first_pit_lap computed as the minimum pit lap per driver and race and pit_stop_count as the number of stops; drivers with more than two stops and early retirements were dropped, and a hand built track_features table added tire degradation level, pit lane loss, track length, and race distance per circuit. The pit stop table only starts in 2011, so a Random Forest imputer filled 4,012 of 8,091 first pit laps, with a held out MAE near 6 laps. Four tree ensembles were trained on 12 features with one hot circuit, driver, and constructor IDs and a single random 80/20 row split: Random Forest test MAE 2.78 and R² 0.591, Extra Trees 2.91 and 0.551, CatBoost 3.10 and 0.584, Gradient Boosting 3.55 and 0.488. SHAP on the Random Forest ranked laps, pit_stop_count, year, grid, and round highest. Nothing optimizes a strategy; the label is the realized first stop. The split is by row rather than by race, half the labels are imputer outputs, and two top features are only known after the race, so the test score is optimistic. The app serves a different, shallower forest (MAE 3.48, R² 0.453) that uses fastestLapSpeed, a value measured during the race.",
+  "cards": [
+    {
+      "id": "f1-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What problem does The Perfect Lap address, in one plain sentence and then technically?",
+      "easy": "It predicts the lap on which a Formula 1 driver will make their first pit stop, so a race engineer has a data based reference point to check their own call against.",
+      "deep": "Pit timing is one of the few levers a strategist controls during a race, and the write up frames a wrong call as costing places and prize money. Technically, the project is supervised regression on historical driver race rows: the label first_pit_lap is the minimum lap in the pit_stops table per (raceId, driverId), and the inputs describe the race (year, round, scheduled length, circuit), the entrant (driver, constructor, grid slot), and a hand built per circuit table (tire degradation level, pit lane time loss, track length, race distance). The team compared four tree ensembles and served a Random Forest in a Streamlit app. It was a five person IST 707 group project (Team Omega), July to December 2025. Despite the word optimization in the title, nothing in the repo optimizes a strategy: the model learns what teams actually did.",
+      "say": "We predicted the lap a Formula 1 driver first pits on, from race length, circuit traits, grid slot, team, and year. The idea was a reference point an engineer checks their call against. I'd be clear that it learns what teams did, which is different from what was optimal.",
+      "evidence": [
+        "repo:the-perfect-lap/README.md: Built as a group project for IST 707 at Syracuse University by Team Omega.",
+        "portfolio: META: Machine Learning / Jul 2025 to Dec 2025",
+        "repo:the-perfect-lap/code/datacleaning.ipynb: Compute first pit lap"
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "problem framing",
+        "f1"
+      ]
+    },
+    {
+      "id": "f1-02",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager in under a minute.",
+      "easy": "Tanay's team built a model that predicts which lap a Formula 1 driver will first pit on, from race length, circuit, grid slot, team, and year, and wrapped it in a Streamlit app. The best model was about three laps off on held out rows.",
+      "deep": "The target is first_pit_lap from the pit stop table, restricted to races from 2000 on, drivers with at most two stops, and no early retirements. Missing pre 2011 pit laps were imputed with a Random Forest, then four tree ensembles were compared on 12 features. Random Forest won on test MAE (2.78 laps) and R² (0.591) on a random 80/20 row split. SHAP showed race structure features (laps, stop count, year, round, grid) ahead of driver and team identity. The follow ups to expect: the split is by row rather than by race, half the targets are imputed, and the target is what teams did rather than what was optimal.",
+      "say": "We predicted the lap a Formula 1 driver first pits on, using race length, circuit, grid slot, team, and year. Our Random Forest was about 2.78 laps off on a random holdout. The fun part is what it learned: race structure mattered more than who was driving. I'd also say up front that the evaluation was optimistic, and I can explain exactly why.",
+      "evidence": [
+        "portfolio: Random Forest reached a Test MAE of 2.78 laps",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Test R2: 0.5910970211277607",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: X, y, test_size=0.2, random_state=42"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring manager"
+      ]
+    },
+    {
+      "id": "f1-03",
+      "type": "pushback",
+      "level": 1,
+      "q": "You call it the optimal pit lap. Isn't the model just predicting what teams already did?",
+      "easy": "Yes. The label is the lap each driver actually pitted on, so the model imitates historical team decisions, good and bad. It tells an engineer what is normal for this setup, which is different from what is best.",
+      "deep": "first_pit_lap is the minimum lap in pit_stops per raceId and driverId, so the label is the realized decision. Learning it is behavioral cloning of race engineers: the ceiling is the average historical policy, including stops forced by safety cars or damage that the filters did not catch. Calling an output optimal needs a counterfactual: the race time or finishing position a different stop lap would have produced. That requires a lap time model (degradation, fuel, pit loss) plus simulation, or an outcome model conditioned on the stop lap. The repo has neither, although lap_times.csv is sitting in data/. The defensible framing is a historical prior: a predicted lap with a window of 2 laps either side, which is how the app displays it, that a strategist checks against.",
+      "say": "Fair challenge. The label is the lap teams actually pitted, so the model learns the average historical policy. I'd call it a baseline a strategist checks against. Calling it optimal would need a lap time simulation, and we didn't build one.",
+      "evidence": [
+        "repo:the-perfect-lap/code/datacleaning.ipynb: Compute first pit lap",
+        "repo:the-perfect-lap/code/team_omega_rf_app.py: {predicted_lap-2:.0f}"
+      ],
+      "sources": [],
+      "tags": [
+        "problem framing",
+        "imitation",
+        "counterfactual"
+      ]
+    },
+    {
+      "id": "f1-04",
+      "type": "formula",
+      "level": 2,
+      "q": "What physics decides when to pit, and how do the features map onto it?",
+      "easy": "An aging tire gets slower every lap, and stopping costs a fixed chunk of time in the pit lane. The best lap balances the two, and the number of stops depends on how fast tires wear compared with the pit lane penalty.",
+      "deep": "This is the theory the features stand in for; the repo does not implement it. Model lap time as $t = t_0 + d\\,a$ with tire age $a$ and degradation rate $d$ per lap; fuel burn speeds every lap the same way whatever the strategy, so it cancels when comparing stop laps in the no refueling era. A one stop race of $N$ laps stopping at lap $k$ loses about $d_1 k^2/2 + d_2 (N-k)^2/2 + L$, with pit loss $L$. Setting the derivative to zero gives $k^* = N d_2/(d_1+d_2)$, which is $N/2$ for equal compounds, earlier if the first compound wears faster. Two equal stints cost $dN^2/4$ in degradation and three cost $dN^2/6$, so a second stop pays when $dN^2/12 > L$. That is why laps ($N$), tyre_deg_level ($d$), pit_lane_loss ($L$), and pit_stop_count belong in the model. Real races add the undercut (fresh tire pace gains time on a rival who stays out), traffic, and safety cars that shrink the effective pit loss, none of which the table encodes.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "tire degradation",
+        "pit loss",
+        "strategy",
+        "formula"
+      ]
+    },
+    {
+      "id": "f1-05",
+      "type": "concept",
+      "level": 1,
+      "q": "What was the data source, and which years did the models actually use?",
+      "easy": "The Ergast style Formula 1 relational dump (the Kaggle Formula 1 World Championship dataset): races, results, pit stops, lap times, drivers, constructors, and more, as CSVs. The team kept races from 2000 on.",
+      "deep": "The repo's data/ folder holds 15 CSVs: 14 from the dump plus the team's track_features.csv. The write up describes the source as covering 1950 to 2020 with 250,000+ records in thirteen tables; the races.csv in the repo actually runs from 1950 to 2024, and the final modeling table spans 2000 to 2024. datacleaning.ipynb keeps races with year at least 2000. The quirk that matters most is that the pit_stops table in the repo has no race before 2011 (checked by joining raceId to races.csv), so every 2000 to 2010 driver race has no real first pit lap. The final modeling table is 7,984 driver race rows. The large table in the dump, lap_times.csv, is never used by the models.",
+      "evidence": [
+        "portfolio: The source is the Formula 1 World Championship dataset on Kaggle (1950 to 2020), with 250,000+ records across thirteen interconnected tables",
+        "repo:the-perfect-lap/code/datacleaning.ipynb: races_clean = races[races[",
+        "repo:the-perfect-lap/code/createFinalData.ipynb: Total rows: 7984"
+      ],
+      "sources": [],
+      "tags": [
+        "data",
+        "ergast",
+        "f1"
+      ]
+    },
+    {
+      "id": "f1-06",
+      "type": "how",
+      "level": 1,
+      "q": "How was the modeling table built, step by step?",
+      "easy": "Raw Formula 1 tables were filtered to 2000 onward, each driver's first pit lap and stop count were computed, unusual races were dropped, and per circuit track features were joined. The final file has 7,984 driver race rows.",
+      "deep": "datacleaning.ipynb keeps races with year at least 2000, computes first_pit_lap as the min pit lap and pit_stop_count as the count per (raceId, driverId), fills missing stop counts with 0, drops drivers with more than two stops, and drops zero stop drivers who completed fewer than 3 laps. mergeData.ipynb left joins results to races, drivers, and constructors into master_planA.csv. impute_pits.ipynb joins track_features on circuitId and fills missing pit laps (4,079 known plus 4,012 missing gives 8,091 rows). createFinalData.ipynb removes first pit laps below 1 or above 40, leaving 7,984 rows. The models use 12 columns: year, round, circuitId, driverId, constructorId, grid, laps, pit_stop_count, track_length_km, race_distance_km, tyre_deg_level, pit_lane_loss.",
+      "evidence": [
+        "repo:the-perfect-lap/code/createFinalData.ipynb: Before filtering: 8091",
+        "repo:the-perfect-lap/code/createFinalData.ipynb: After filtering weird pits: 7984",
+        "repo:the-perfect-lap/code/datacleaning.ipynb: Fill missing pit_stop_count as 0",
+        "repo:the-perfect-lap/code/impute_pits.ipynb: Known pit rows: 4079",
+        "repo:the-perfect-lap/code/impute_pits.ipynb: Missing pit rows: 4012"
+      ],
+      "sources": [],
+      "tags": [
+        "data pipeline",
+        "pandas",
+        "feature engineering"
+      ]
+    },
+    {
+      "id": "f1-07",
+      "type": "how",
+      "level": 2,
+      "q": "What is in the hand built track_features table, and did it help?",
+      "easy": "One row per circuit with a tire wear rating from 1 to 3, the seconds lost driving through the pit lane, track length, and race distance. It was meant to add physics the raw tables lack, and it barely moved the imputer's error.",
+      "deep": "data/track_features.csv has columns circuitId, name, tyre_deg_level, pit_lane_loss, track_length_km, race_distance_km, one row per circuit (77 circuits). tyre_deg_level is an ordinal 1 to 3 and most circuits sit at 2; pit_lane_loss is an integer number of seconds between 18 and 24; example row: Albert Park, level 3, 22 s, 5.278 km, 307 km. In verify_imputer.ipynb adding the four track columns took the imputer from MAE 6.046 to 5.984 laps on the same holdout. In the Random Forest SHAP plot (output.png), tyre_deg_level and pit_lane_loss sit below laps, pit_stop_count, year, grid, round, and track length. Coarse, low variance, hand set values cannot carry much signal, and circuitId already identifies the circuit, so the table mostly duplicates what the one hot circuit columns know.",
+      "evidence": [
+        "repo:the-perfect-lap/data/track_features.csv: circuitId,name,tyre_deg_level,pit_lane_loss,track_length_km,race_distance_km",
+        "repo:the-perfect-lap/data/track_features.csv: 1,Albert Park Grand Prix Circuit,3,22,5.278,307",
+        "repo:the-perfect-lap/code/verify_imputer.ipynb: MAE (mean absolute error): 6.046",
+        "repo:the-perfect-lap/code/verify_imputer.ipynb: MAE: 5.984"
+      ],
+      "sources": [],
+      "tags": [
+        "feature engineering",
+        "domain features"
+      ]
+    },
+    {
+      "id": "f1-08",
+      "type": "concept",
+      "level": 2,
+      "q": "Which strategy features exist in the data, and which do not: compounds, degradation, pit loss, safety cars?",
+      "easy": "Present: a per circuit tire wear rating and pit lane time loss, race length, grid slot, and the number of stops each driver made. Absent: which tire compound was used, tire age, safety car periods, weather, and gaps to rivals.",
+      "deep": "The Ergast style dump has no tire compound or stint table, so compound choice cannot be modeled; degradation enters only as the circuit level ordinal tyre_deg_level, identical for every car and every year at that circuit. Pit loss is the circuit constant pit_lane_loss rather than measured stop durations, although pit_stops.csv does carry a duration per stop that the models do not use. There is no safety car, virtual safety car, or weather field anywhere in the pipeline, which the write up lists as its first limitation. Rival positions and gaps are also absent, so undercut and overcut behavior is invisible. The app's inputs are driver, circuit, and grid; the write up's mention of planned stops and weather as app inputs does not match the code.",
+      "evidence": [
+        "portfolio: No live race signals. Safety car deployments, sudden weather changes, and real time tire telemetry are absent.",
+        "repo:the-perfect-lap/data/track_features.csv: circuitId,name,tyre_deg_level,pit_lane_loss,track_length_km,race_distance_km"
+      ],
+      "sources": [],
+      "tags": [
+        "features",
+        "domain",
+        "limitations"
+      ]
+    },
+    {
+      "id": "f1-09",
+      "type": "define",
+      "level": 2,
+      "q": "Define tire degradation, pit lane loss, undercut, overcut, and safety car as they relate to pit strategy.",
+      "easy": "Degradation: tires lose grip and lap time as they age. Pit lane loss: time lost driving through the pit lane and stopping. Undercut: pit first to gain time on fresh tires. Overcut: stay out and gain while the rival is on cold new tires or in traffic. Safety car: a slow neutralized period that makes stopping cheap.",
+      "deep": "Degradation rate $d$ is seconds lost per lap of tire age; it varies by compound, circuit abrasiveness, temperature, and driving style. Pit lane loss $L$ is the race time cost of a stop versus staying on track, set by pit lane length and speed limit plus stationary time, typically 18 to 24 s in the team's table. Undercut: if fresh tires are $\\Delta$ s per lap faster than worn ones, pitting one lap before a rival gains about $\\Delta$ on the out lap, enough to pass through the stops if $\\Delta$ exceeds the gap. Overcut works when new tires take time to warm up or the early stopper rejoins in traffic. Under a safety car the field slows, so the relative pit loss shrinks, and many teams stop at once. None of the last three are encoded in the model; they explain the noise in first stop laps.",
+      "evidence": [
+        "repo:the-perfect-lap/data/track_features.csv: 1,Albert Park Grand Prix Circuit,3,22,5.278,307"
+      ],
+      "sources": [],
+      "tags": [
+        "define",
+        "domain",
+        "strategy"
+      ]
+    },
+    {
+      "id": "f1-10",
+      "type": "why",
+      "level": 2,
+      "q": "Why filter to 2000 onward, and is the stated reason right?",
+      "easy": "The write up says the cut keeps the modern tire era, because earlier strategy was driven by fuel weight. But refueling was allowed until 2009, and the repo has no pit data before 2011, so the 2000 to 2010 rows carry no real first stop at all.",
+      "deep": "The stated rationale is that pre 2000 strategy was driven by fuel weight rather than tire compounds. In fact in race refueling ran through the 2009 season, so first stops from 2000 to 2009 were set largely by fuel load, a different decision process from the tire driven 2010 onward era. More decisive for this dataset: pit_stops.csv starts in 2011, so every 2000 to 2010 row gets an imputed first_pit_lap and a stop count of 0. The year filter therefore mixes two regimes and two label sources, and year becomes partly a flag for imputed versus real labels, which helps explain why year ranks third in SHAP. A cleaner cut would be 2011 onward with real labels only, or 2010 onward if refueling era behavior is the concern.",
+      "evidence": [
+        "portfolio: The data was filtered to post 2000 races to focus on the modern tire era, since pre 2000 strategy was driven by fuel weight rather than tire compounds."
+      ],
+      "sources": [],
+      "tags": [
+        "data",
+        "regime change",
+        "pushback"
+      ]
+    },
+    {
+      "id": "f1-11",
+      "type": "how",
+      "level": 2,
+      "q": "Exactly how are the label and the stop count computed, and what side effect does fillna(0) have?",
+      "easy": "The first pit lap is the smallest lap number among a driver's pit stops in a race, and the stop count is how many stops they made. Drivers with no stop record get a count of 0, which ends up marking exactly the rows whose label was imputed.",
+      "deep": "first_pit_lap = pit_stops.groupby([raceId, driverId]).lap.min(); pit_stop_count = the same groupby .count(); both are left joined to results, and missing pit_stop_count is filled with 0. Every row without a pit record (all 2000 to 2010 rows, plus post 2011 drivers who never stopped) therefore has pit_stop_count = 0 and a missing first_pit_lap, which the imputer later fills. So pit_stop_count = 0 identifies exactly the imputed rows, and a tree can split on it to learn \"predict like the imputer here\". Worse, a post 2011 driver who retired mid race without stopping now has an invented first stop lap. Fixes: keep a was_imputed flag, exclude never stopped drivers from the label, and evaluate on real labels only.",
+      "evidence": [
+        "repo:the-perfect-lap/code/datacleaning.ipynb: Fill missing pit_stop_count as 0",
+        "repo:the-perfect-lap/code/datacleaning.ipynb: Compute first pit lap"
+      ],
+      "sources": [],
+      "tags": [
+        "label construction",
+        "data quality",
+        "pandas"
+      ]
+    },
+    {
+      "id": "f1-12",
+      "type": "why",
+      "level": 3,
+      "q": "What did the cleaning filters do to the sample?",
+      "easy": "They removed real races along with bad records. Cutting first stops after lap 40 drops legitimate late stops on long races, and dropping drivers with more than two stops removes wet and chaotic races, so the model only knows calm ones.",
+      "deep": "createFinalData keeps first pit laps between 1 and 40 and calls the rest data entry errors (8,091 rows before, 7,984 after); because it runs after imputation, it also trims imputed predictions. A fixed lap cutoff ignores race length: on a 78 lap race such as Monaco a one stopper can legitimately pit after lap 40, so the filter truncates the label on long races; a race fraction rule would target true anomalies. Dropping drivers with more than two stops removes the wet, safety car, and damage races where strategy matters most, which is selection bias: the evaluation covers calm races only, and the model will be overconfident when conditions change. Dropping zero stop drivers who retired before lap 3 is sound.",
+      "evidence": [
+        "repo:the-perfect-lap/code/createFinalData.ipynb: Before filtering: 8091",
+        "repo:the-perfect-lap/code/createFinalData.ipynb: After filtering weird pits: 7984",
+        "repo:the-perfect-lap/code/team_omega_rf_app.py: 'Monaco': {'circuitId': 6, 'round': 6, 'laps': 78"
+      ],
+      "sources": [],
+      "tags": [
+        "selection bias",
+        "data cleaning",
+        "domain knowledge"
+      ]
+    },
+    {
+      "id": "f1-13",
+      "type": "why",
+      "level": 2,
+      "q": "Why impute the target, and how good was the imputer?",
+      "easy": "The pit stop table has no records before 2011, so about half the driver races had no first pit lap. Two teammates trained a Random Forest on rows that had one and filled the rest, with an average error of about 6 laps.",
+      "deep": "impute_pits.ipynb finds 4,079 known and 4,012 missing first pit laps, fits RandomForestRegressor(n_estimators=300) on year, circuitId, grid, constructorId, driverId, round, laps plus the four track features, and writes predictions into every missing row. verify_imputer.ipynb holds out 25% of known rows (3,059 train, 1,020 test): MAE 6.046 laps (RMSE 8.478) with the 7 race features and 200 trees, and 5.984 (RMSE 8.469) with all 11 features and 300 trees. The write up justifies 6 laps against pit windows of 10 to 15 laps. The deeper problem: downstream models then learn targets that are a smooth function of nearly the same features, which makes imputed rows easy to fit and inflates test R². Imputed rows are also not real decisions, so on them the model learns the imputer.",
+      "say": "Half our labels didn't exist, because the pit stop table starts in 2011. We imputed them with a Random Forest that was about 6 laps off. In hindsight I'd train and score only on real pit laps, because the downstream model was partly learning the imputer.",
+      "evidence": [
+        "repo:the-perfect-lap/code/impute_pits.ipynb: Known pit rows: 4079",
+        "repo:the-perfect-lap/code/impute_pits.ipynb: Missing pit rows: 4012",
+        "repo:the-perfect-lap/code/verify_imputer.ipynb: MAE (mean absolute error): 6.046",
+        "repo:the-perfect-lap/code/verify_imputer.ipynb: MAE: 5.984",
+        "repo:the-perfect-lap/code/verify_imputer.ipynb: RMSE: 8.478",
+        "repo:the-perfect-lap/code/verify_imputer.ipynb: Train size: 3059",
+        "portfolio: Imputation MAE was about six laps on a held out validation set, which is tolerable given pit windows typically span ten to fifteen laps."
+      ],
+      "sources": [],
+      "tags": [
+        "imputation",
+        "label quality",
+        "missing data"
+      ]
+    },
+    {
+      "id": "f1-14",
+      "type": "pushback",
+      "level": 2,
+      "q": "The write up says the imputer used six predictors and recovered roughly 70% of missing first pit laps. Does the code agree?",
+      "easy": "No on both counts. The imputer that filled the data used eleven inputs (seven race fields plus four track fields), and it filled every missing row, about half the table, rather than 70% of the missing ones.",
+      "deep": "The write up lists six predictors: driver, constructor, year, grid, total laps, circuit. verify_imputer's first test uses seven (it adds round), and the production imputer in impute_pits.ipynb uses those seven plus tyre_deg_level, pit_lane_loss, track_length_km, and race_distance_km. The notebook prints 4,079 known and 4,012 missing and concatenates all of them back, so 100% of missing rows were filled and about 50% of the final rows carry imputed labels. The 70% figure appears to come from the course report's statement that dropping missing rows would lose about 70% of the data, itself based on a 10,000 to 3,000 framing that the notebooks do not show. In an interview, quote the notebook figures and say the write up compressed them.",
+      "say": "Our write up says six predictors and about 70% recovered. The notebooks say eleven predictors, and every one of the 4,012 missing rows got filled, so about half the training labels are imputed. I'd quote the notebook and own the mismatch.",
+      "evidence": [
+        "portfolio: I trained a dedicated Random Forest imputer that recovered roughly 70% of missing first pit laps using six predictors",
+        "repo:the-perfect-lap/code/impute_pits.ipynb: Missing pit rows: 4012",
+        "repo:the-perfect-lap/final/final.md: Without it, we would have lost approximately 70% of our data"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "imputation",
+        "metric honesty"
+      ]
+    },
+    {
+      "id": "f1-15",
+      "type": "number",
+      "level": 1,
+      "q": "Recall the model comparison, with the caveat.",
+      "easy": "On one random 80/20 split: Random Forest MAE 2.78 laps and R² 0.591, Extra Trees 2.91 and 0.551, CatBoost 3.10 and 0.584, Gradient Boosting 3.55 and 0.488. Random Forest won both metrics, narrowly over CatBoost on R².",
+      "deep": "Notebook outputs: Random Forest (300 trees, defaults) train MAE 1.007, test MAE 2.782, train R² 0.943, test R² 0.591, test RMSE 4.91. Extra Trees (400 trees) train MAE about 4e-14 and train R² 1.0, test MAE 2.909, test R² 0.551, test RMSE 5.14. CatBoost (500 iterations, depth 8, learning rate 0.05, native categoricals) train MAE 2.540, test MAE 3.099, train R² 0.702, test R² 0.584. Gradient Boosting (300 trees, depth 3, learning rate 0.05) train MAE 3.234, test MAE 3.549, test R² 0.488, test RMSE 5.50. The portfolio table shows CatBoost at 3.02 and 0.523 and Gradient Boosting at 3.15; the notebooks and README say 3.10, 0.584, and 3.55, so quote those. All four share one split with random_state=42, no cross validation, and no naive baseline, so gaps of a tenth of a lap are inside the noise.",
+      "evidence": [
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Test MAE: 2.781642983371599",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Test RMSE: 4.9094504303624795",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Train R2: 0.943022919246365",
+        "repo:the-perfect-lap/code/model_ET.ipynb: Test MAE: 2.909478010853684",
+        "repo:the-perfect-lap/code/model_ET.ipynb: Test R2: 0.5514935366656242",
+        "repo:the-perfect-lap/code/model_catboost.ipynb: Test MAE: 3.0985577032102536",
+        "repo:the-perfect-lap/code/model_catboost.ipynb: Test R2: 0.5836385980894527",
+        "repo:the-perfect-lap/code/model_gbr.ipynb: Test MAE: 3.5488862189924597",
+        "repo:the-perfect-lap/code/model_gbr.ipynb: Test R2: 0.48765793377030253",
+        "repo:the-perfect-lap/README.md: | CatBoost | 3.10 | 0.584 |",
+        "portfolio: CatBoost2.5403.020.7020.5232nd best"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "model comparison",
+        "mae"
+      ]
+    },
+    {
+      "id": "f1-16",
+      "type": "formula",
+      "level": 1,
+      "q": "Define MAE, RMSE, and R², and read the Random Forest's three numbers together.",
+      "easy": "MAE is the average size of a miss. RMSE punishes big misses more. R² is the share of the variation in first stop laps the model explains. The forest missed by 2.78 laps on average, with some large misses, and explained about 59% of the variation.",
+      "deep": "$\\mathrm{MAE} = \\frac1n\\sum|y-\\hat y|$, $\\mathrm{RMSE} = \\sqrt{\\frac1n\\sum(y-\\hat y)^2}$, $R^2 = 1 - \\frac{\\sum(y-\\hat y)^2}{\\sum(y-\\bar y)^2}$. Always $\\mathrm{RMSE} \\ge \\mathrm{MAE}$, with equality only when every error has the same size; a ratio near 1.8 (4.91 against 2.78) means a heavy tail of large misses, the stops forced by safety cars, damage, or weather that the filters missed. MAE is in laps, which is the natural unit for an engineer. R² of 0.591 on test depends on the test set's own variance, so it is not comparable across differently filtered datasets. A per circuit median baseline would turn MAE into a statement about added value.",
+      "evidence": [
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Test MAE: 2.781642983371599",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Test RMSE: 4.9094504303624795",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Test R2: 0.5910970211277607"
+      ],
+      "sources": [],
+      "tags": [
+        "metrics",
+        "formula",
+        "evaluation"
+      ]
+    },
+    {
+      "id": "f1-17",
+      "type": "concept",
+      "level": 2,
+      "q": "How does a Random Forest work, and what was this forest actually configured as?",
+      "easy": "Many decision trees, each trained on a random resample of the rows, vote by averaging. This one used scikit-learn defaults, which for regression means every split considers every feature, so it is closer to plain bagged trees than a textbook random forest.",
+      "deep": "Each of $B$ trees is grown on a bootstrap sample to full depth; the forest predicts the mean. Variance of the average of $B$ trees with pairwise correlation $\\rho$: $\\mathrm{Var}(\\bar f) = \\rho\\sigma^2 + \\frac{1-\\rho}{B}\\sigma^2$, so more trees shrink the second term and decorrelation (random feature subsets per split) shrinks the first. In scikit-learn RandomForestRegressor defaults to max_features=1.0, which the docs call equivalent to bagged trees, plus bootstrap=True, max_depth=None, min_samples_leaf=1. The team's model was RandomForestRegressor(n_estimators=300, random_state=42, n_jobs=-1) inside a Pipeline with a ColumnTransformer that one hot encodes circuitId, driverId, constructorId and passes the 9 numeric columns through. Untouched depth and leaf size explain the train MAE of 1.007; max_features around 0.3 and min_samples_leaf of 2 to 5 are the obvious tuning knobs, which the commented out grid search would have explored.",
+      "evidence": [
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: RandomForestRegressor(n_estimators=300, n_jobs=-1,",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Train MAE: 1.0072498286449907",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: # grid_search.fit(X_train, y_train)"
+      ],
+      "sources": [
+        "https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html"
+      ],
+      "tags": [
+        "random forest",
+        "bagging",
+        "scikit-learn"
+      ]
+    },
+    {
+      "id": "f1-18",
+      "type": "compare",
+      "level": 2,
+      "q": "Why did Extra Trees hit a perfect training score, and why does it matter?",
+      "easy": "Extra Trees grew every tree to pure leaves on the full training set, so it reproduced the training labels exactly. That is memorization, and its test error was worse than the Random Forest's.",
+      "deep": "scikit-learn's ExtraTreesRegressor defaults to bootstrap off and unlimited depth, and it draws split thresholds at random instead of searching for the best one. Each of the 400 trees sees every training row and splits until leaves are pure, so averaging trees that each fit the training set exactly gives near zero training error (MAE about 4e-14). Random Forest bootstraps by default, so each tree misses roughly a third of the rows and the ensemble's training fit is less exact (train MAE 1.007). Random thresholds lower the correlation between trees, which usually cuts variance, but here test MAE was 2.91 against the forest's 2.78. A gap this size between train and test is variance, and the fix is constraining leaves (min_samples_leaf, max_depth, max_features) under cross validated MAE. The repo README flags the same gap for both forests.",
+      "evidence": [
+        "repo:the-perfect-lap/code/model_ET.ipynb: Train MAE: 4.0580172522566376e-14",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Train MAE: 1.0072498286449907",
+        "repo:the-perfect-lap/README.md: Extra Trees and the unconstrained Random Forest both"
+      ],
+      "sources": [],
+      "tags": [
+        "extra trees",
+        "overfitting",
+        "bagging"
+      ]
+    },
+    {
+      "id": "f1-19",
+      "type": "concept",
+      "level": 2,
+      "q": "How does gradient boosting work, and what was the team's configuration?",
+      "easy": "Boosting builds small trees one after another, each fixing the errors left by the ones before, with every step shrunk by a learning rate.",
+      "deep": "Start from a constant $F_0$; at round $m$ fit a shallow tree $h_m$ to the negative gradient of the loss (for squared error, the residuals $y - F_{m-1}(x)$), then update $F_m(x) = F_{m-1}(x) + \\nu\\,h_m(x)$ with learning rate $\\nu$. Bias falls with rounds; variance is controlled by tree depth, $\\nu$, subsampling, and early stopping. The team used GradientBoostingRegressor(n_estimators=300, learning_rate=0.05, max_depth=3) on the same one hot pipeline. Train MAE 3.234 and train R² 0.564 against test 3.549 and 0.488: both sides poor and close together, the signature of underfitting.",
+      "evidence": [
+        "repo:the-perfect-lap/code/model_gbr.ipynb: max_depth=3,",
+        "repo:the-perfect-lap/code/model_gbr.ipynb: Train R2: 0.5641871184934866",
+        "repo:the-perfect-lap/code/model_gbr.ipynb: Train MAE: 3.234250125686747"
+      ],
+      "sources": [],
+      "tags": [
+        "gradient boosting",
+        "ensembles"
+      ]
+    },
+    {
+      "id": "f1-20",
+      "type": "pushback",
+      "level": 2,
+      "q": "The write up says Gradient Boosting lost because it prefers smooth data and safety cars add noise. Is that right?",
+      "easy": "Probably not. Its training score was low too, which means it underfit: shallow trees with a small learning rate could not reach the many one hot driver and team columns.",
+      "deep": "The config was 300 trees of depth 3 at learning rate 0.05. Training R² was only 0.564 against 0.488 on test, so both are poor, which is bias rather than sensitivity to noise; noise sensitivity would show up as a big train test gap. With $\\nu = 0.05$ over 300 rounds the total step budget is small. One hot encoding turns circuit, driver, and constructor into many sparse binary columns, and a depth 3 tree can test at most three of them on any path. Fixes: more rounds with early stopping, deeper trees, or a booster with native categoricals (LightGBM, HistGradientBoosting, CatBoost).",
+      "say": "I'd correct our own write up here. Gradient Boosting scored badly on training data too, so it was underfitting rather than choking on noise. With depth three trees and a small learning rate it couldn't reach the one hot driver and team columns. More rounds with early stopping, or a booster with native categoricals, is the fix.",
+      "evidence": [
+        "repo:the-perfect-lap/code/model_gbr.ipynb: Train R2: 0.5641871184934866",
+        "repo:the-perfect-lap/code/model_gbr.ipynb: max_depth=3,",
+        "portfolio: Gradient Boosting struggled with the noise introduced by safety cars and weather changes, since it prefers smoother data patterns."
+      ],
+      "sources": [],
+      "tags": [
+        "gradient boosting",
+        "underfitting",
+        "bias variance"
+      ]
+    },
+    {
+      "id": "f1-21",
+      "type": "pushback",
+      "level": 2,
+      "q": "The write up says CatBoost lost its categorical edge because categoricals were pre encoded. True?",
+      "easy": "No. The CatBoost notebook passed circuit, driver, and constructor as native categorical features, and CatBoost's test R² of 0.584 nearly tied the Random Forest. The write up's explanation does not match the code.",
+      "deep": "model_catboost.ipynb builds Pool(X_train, y_train, cat_features=cat_idx) with cat_idx pointing at circuitId, driverId, and constructorId, so CatBoost used its ordered target statistics: each category value is encoded from the targets of rows that come earlier in a random permutation, which avoids the leakage of plain mean encoding. Ordered boosting likewise computes each row's residual with a model that has not seen that row, addressing the prediction shift described in the CatBoost paper. Results: test MAE 3.10 and R² 0.584, with a much smaller train test gap (train R² 0.702) than the forest's. On R² it is a near tie; on MAE the forest wins on this single split. The honest summary: CatBoost generalized more evenly, the forest had lower absolute error, and grouped cross validation is needed to separate them.",
+      "say": "That explanation in my write up is wrong, and I'd say so. The notebook passes the three ID columns to CatBoost as native categoricals. CatBoost's test R squared was 0.584, nearly tied with the forest. So the honest read is a near tie that one random split can't break.",
+      "evidence": [
+        "repo:the-perfect-lap/code/model_catboost.ipynb: train_pool = Pool(X_train, y_train, cat_features=cat_idx)",
+        "repo:the-perfect-lap/code/model_catboost.ipynb: Test R2: 0.5836385980894527",
+        "repo:the-perfect-lap/code/model_catboost.ipynb: Train R2: 0.7022257539175608",
+        "portfolio: CatBoost would normally have a categorical handling advantage, but our pipeline pre encoded categorical variables for fair comparison, which removed that edge."
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1706.09516"
+      ],
+      "tags": [
+        "catboost",
+        "categorical encoding",
+        "target statistics"
+      ]
+    },
+    {
+      "id": "f1-22",
+      "type": "compare",
+      "level": 2,
+      "q": "Read the four models' train and test gaps as a bias variance table. Which would you actually pick?",
+      "easy": "The two forests memorized the training set and generalized to about 2.8 to 2.9 laps. Gradient Boosting was too simple. CatBoost fit moderately and generalized almost as well as the forest on R². On one random split the forest wins on error, but not by enough to be sure.",
+      "deep": "Train versus test MAE: Extra Trees about 0 vs 2.91 (high variance), Random Forest 1.01 vs 2.78 (high variance, best test), CatBoost 2.54 vs 3.10 (balanced), Gradient Boosting 3.23 vs 3.55 (high bias). R²: ET 1.0 vs 0.551, RF 0.943 vs 0.591, CB 0.702 vs 0.584, GB 0.564 vs 0.488. A single 1,597 row test split (20% of 7,984) gives each MAE a standard error of about a tenth of a lap (the spread of absolute errors, roughly 4 laps from the RMSE and MAE, over the square root of 1,597); the paired difference between two models on the same rows is tighter, so 2.78 versus 2.91 is suggestive, and CatBoost versus RF on R² is a tie. Picking would need grouped cross validation with fold to fold spread; with that, a regularized forest or CatBoost (which needs no one hot step and handles unseen IDs more gracefully) are the two candidates.",
+      "evidence": [
+        "repo:the-perfect-lap/code/model_ET.ipynb: Train MAE: 4.0580172522566376e-14",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Train MAE: 1.0072498286449907",
+        "repo:the-perfect-lap/code/model_catboost.ipynb: Train MAE: 2.54012921461931",
+        "repo:the-perfect-lap/code/model_gbr.ipynb: Train MAE: 3.234250125686747",
+        "repo:the-perfect-lap/code/createFinalData.ipynb: Total rows: 7984"
+      ],
+      "sources": [],
+      "tags": [
+        "bias variance",
+        "model selection"
+      ]
+    },
+    {
+      "id": "f1-23",
+      "type": "why",
+      "level": 2,
+      "q": "Why tree ensembles, and why skip neural networks and SVMs?",
+      "easy": "The data is a few thousand rows of numbers and ID columns, which tree ensembles handle well without scaling or heavy tuning. Neural networks and SVMs need more data, scaling, and tuning to match them on tables like this.",
+      "deep": "Trees split on thresholds, so they capture nonlinear effects (stop count shifting the first stop) and interactions (degradation by race length) without hand built terms, are unaffected by monotone transforms, and need no scaling. Bagging reduces variance by averaging; boosting reduces bias by fitting residuals in sequence. With 7,984 rows and high cardinality IDs, an MLP would need embeddings and regularization to compete, and an RBF SVM needs careful scaling of mixed one hot and numeric inputs. The project's real gap was evaluation design and label quality, and a different model family would not have fixed either.",
+      "evidence": [
+        "repo:the-perfect-lap/code/createFinalData.ipynb: Total rows: 7984",
+        "portfolio: I left out neural networks and SVMs on purpose, because they are computationally heavier and consistently underperform tree ensembles on tabular data with this feature mix."
+      ],
+      "sources": [],
+      "tags": [
+        "model selection",
+        "tabular data",
+        "random forest"
+      ]
+    },
+    {
+      "id": "f1-24",
+      "type": "define",
+      "level": 2,
+      "q": "One hot encoding versus native categorical handling: what did the team do, and what does it change?",
+      "easy": "The forest, Extra Trees, and boosting pipelines turned each circuit, driver, and team ID into its own yes or no column. CatBoost took the IDs directly and encoded them internally from the target.",
+      "deep": "OneHotEncoder(handle_unknown=\"ignore\") on circuitId, driverId, constructorId produces a couple of hundred sparse dummy columns; unseen IDs at test time become all zeros. Consequences: a tree needs one split per category to isolate it, shallow boosted trees rarely reach rare drivers, feature importance and SHAP get spread across dummies (sum them per original column to compare), and an ID never seen in training has no effect at all. Passing raw integer IDs as numbers, which the served app model does, imposes a meaningless order (driver 830 greater than driver 1). CatBoost's ordered target statistics encode each category from earlier rows' targets plus a prior, which handles high cardinality without leakage. Grouped importance code exists in the RF, ET, and GB notebooks; the SHAP plot itself is per dummy.",
+      "evidence": [
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: OneHotEncoder(handle_unknown='ignore'),",
+        "repo:the-perfect-lap/code/model_catboost.ipynb: train_pool = Pool(X_train, y_train, cat_features=cat_idx)"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1706.09516"
+      ],
+      "tags": [
+        "categorical encoding",
+        "define",
+        "one hot"
+      ]
+    },
+    {
+      "id": "f1-25",
+      "type": "pushback",
+      "level": 1,
+      "q": "Your test set leaks. Rows from the same race are in both train and test, right?",
+      "easy": "Yes. The split was a random 80/20 over driver race rows, so most test rows have teammates and rivals from the same race in training. The model can partly memorize each race's typical stop lap, which flatters the score.",
+      "deep": "train_test_split(X, y, test_size=0.2, random_state=42) shuffles rows. Rows from one race share circuitId, year, round, laps, and track features, and their first pit laps cluster because the whole field reacts to the same tire behavior and safety cars. That is group leakage: the test error estimates new drivers in races already seen, which is easier than new races. The fix is GroupKFold with groups = raceId, so each race lands wholly in train or test, and better still a forward season split (train through one season, test on the next) because deployment always predicts a future race. Two fixes belong alongside it: score only real labels, and report a naive baseline such as the per circuit median first stop. Expect MAE to rise under grouped evaluation; that rise is the honest headline.",
+      "say": "Yes, and it's the first thing I'd fix. We split by row, so teammates from the same race sat on both sides. I'd rerun with GroupKFold on race ID, then hold out a full season, and score only real pit laps. I expect the error to go up, and that's the number I'd want to report.",
+      "evidence": [
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: X, y, test_size=0.2, random_state=42"
+      ],
+      "sources": [
+        "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GroupKFold.html"
+      ],
+      "tags": [
+        "leakage",
+        "grouped cross validation",
+        "evaluation"
+      ]
+    },
+    {
+      "id": "f1-26",
+      "type": "pushback",
+      "level": 2,
+      "q": "The write up says the models used identical splits and cross validation. Where is the cross validation?",
+      "easy": "There isn't any in the repo. Every model notebook uses one random 80/20 split with the same seed, and the only cross validation code is a grid search that is commented out.",
+      "deep": "Each of randomForestModel, model_ET, model_catboost, and model_gbr calls train_test_split(test_size=0.2, random_state=42) once. The GridSearchCV block in the Random Forest notebook (cv=3, scoring neg_mean_absolute_error, a grid over n_estimators, max_depth, min_samples_leaf, max_features) is commented out and never ran. Identical splits are real, which makes the comparison paired, but a single split cannot give an error bar. The course report's model pipeline section also says cross validation. In an interview, say plainly: one seeded split, no CV, and here is the grouped protocol I would run instead.",
+      "say": "There's no cross validation in the repo. Every model used one seeded 80/20 row split, and the grid search was commented out. I'd say that directly and describe the grouped, season based protocol I'd use instead.",
+      "evidence": [
+        "portfolio: I compared four tree based regressors plus a decision tree baseline, with identical splits and cross validation.",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: # grid_search.fit(X_train, y_train)",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: X, y, test_size=0.2, random_state=42"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "cross validation",
+        "metric honesty"
+      ]
+    },
+    {
+      "id": "f1-27",
+      "type": "pushback",
+      "level": 2,
+      "q": "Which of your features would not be known before the race?",
+      "easy": "pit_stop_count is how many stops the driver actually made and laps is how many laps they actually completed, both known only afterward. The app's model also uses fastest lap speed, which is measured during the race.",
+      "deep": "pit_stop_count is counted from the pit_stops table after the fact; the write up calls it a planned stop count, but the training value is the realized count, which is entangled with the label because a two stopper pits earlier. laps comes from results.laps, the laps completed, which equals race length for finishers and encodes retirements otherwise; in the SHAP plot low laps values push predictions far down, the retirement signal. The served pickle trains on fastestLapSpeed. At inference the app substitutes a fixed speed and the scheduled laps per circuit, so serving inputs come from a different distribution than training inputs. The practice to name: list every feature with the time it becomes known and train only on what exists at decision time (grid, circuit, year, scheduled laps, a pre race strategy estimate).",
+      "say": "Two of our strongest features are only known after the race: the realized stop count and the laps a driver completed. The served model also used fastest lap speed. I'd rebuild the feature list around what an engineer actually knows on the grid.",
+      "evidence": [
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: 'laps', 'fastestLapSpeed'",
+        "repo:the-perfect-lap/code/team_omega_rf_app.py: 'laps': circuit_info['laps'], 'fastestLapSpeed': circuit_info['fastestLapSpeed']",
+        "portfolio: planned pit stop count"
+      ],
+      "sources": [],
+      "tags": [
+        "leakage",
+        "feature timing",
+        "serving skew"
+      ]
+    },
+    {
+      "id": "f1-28",
+      "type": "pushback",
+      "level": 1,
+      "q": "Is 2.78 laps of error actually good?",
+      "easy": "It is usable against a pit window of 10 to 15 laps, but without a naive baseline nobody can say how much the model adds. The test RMSE of 4.91 laps also shows some large misses.",
+      "deep": "MAE averages absolute errors, so a 6 lap miss counts twice a 3 lap miss; RMSE squares them, so RMSE 4.91 against MAE 2.78 signals a tail of large misses (safety car stops, damage stops). R² 0.591 means the model explains about 59% of the variance of the first stop lap around its test mean. The missing comparison is a baseline: the median first stop for the circuit, or race length times a fixed fraction. If a per circuit median came close to 2.78, the model would be adding little beyond circuit identity. MAE broken out by circuit and by real versus imputed label would show where the error lives.",
+      "say": "Against a pit window that's 10 to 15 laps wide, it's usable. But we never reported a naive baseline, like the per circuit median stop lap. So I can't tell you how much the model adds over that, and it's the first table I'd add.",
+      "evidence": [
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Test MAE: 2.781642983371599",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Test RMSE: 4.9094504303624795",
+        "portfolio: pit windows typically span ten to fifteen laps"
+      ],
+      "sources": [],
+      "tags": [
+        "baseline",
+        "metrics",
+        "mae vs rmse"
+      ]
+    },
+    {
+      "id": "f1-29",
+      "type": "how",
+      "level": 2,
+      "q": "Design the validation you would run now: by race, by season, or both?",
+      "easy": "Both. Group by race so no race is split across train and test, then hold out whole future seasons to mimic predicting next year's races, and score only real pit laps.",
+      "deep": "Step 1, GroupKFold(n_splits=5) with groups = raceId: each race appears in exactly one test fold, so the score measures new races. Step 2, rolling origin by season: train on 2011 to 2019, test 2020; train through 2020, test 2021; and so on, reporting each year's MAE, because regulation changes (2014 power units, 2017 wider tires, 2022 ground effect cars) shift strategy. Step 3, restrict scoring to real labels (pit_stop_count above 0) and report imputed rows separately if they stay in training. Step 4, compare against two baselines: the per circuit median first stop from training seasons, and scheduled laps times the training set's average first stop fraction. Step 5, report fold spread, so a 0.1 lap difference between models can be judged. Tune hyperparameters inside the training folds only.",
+      "evidence": [],
+      "sources": [
+        "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GroupKFold.html"
+      ],
+      "tags": [
+        "validation",
+        "time series split",
+        "evaluation design"
+      ]
+    },
+    {
+      "id": "f1-30",
+      "type": "formula",
+      "level": 2,
+      "q": "What is a SHAP value, formally, and how was it computed here?",
+      "easy": "SHAP splits one prediction into contributions from each feature, so the contributions plus the average prediction add up exactly to that prediction.",
+      "deep": "For model $f$, features $F$, and input $x$: $\\phi_i = \\sum_{S \\subseteq F\\setminus\\{i\\}} \\frac{|S|!\\,(|F|-|S|-1)!}{|F|!}\\,[f_{S\\cup\\{i\\}}(x_{S\\cup\\{i\\}}) - f_S(x_S)]$, the Shapley value from cooperative game theory, averaging feature $i$'s marginal contribution over all orderings. Local accuracy: $f(x) = \\phi_0 + \\sum_i \\phi_i(x)$ with $\\phi_0$ the expected prediction. Lundberg and Lee show this is the unique additive attribution with local accuracy, missingness, and consistency. TreeExplainer computes it exactly for tree ensembles in polynomial time. The notebook samples 500 training rows (random_state=42), transforms them with the fitted one hot preprocessor, densifies, and calls shap.TreeExplainer(rf).shap_values, then plots a beeswarm summary (output.png in the repo).",
+      "evidence": [
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: X_train_sample = X_train.sample(500, random_state=42)",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: explainer = shap.TreeExplainer(rf)"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1705.07874"
+      ],
+      "tags": [
+        "shap",
+        "interpretability",
+        "formula"
+      ]
+    },
+    {
+      "id": "f1-31",
+      "type": "concept",
+      "level": 2,
+      "q": "What did SHAP say, and how far can you trust it here?",
+      "easy": "Total laps, stop count, year, grid, and round came out on top, with driver and team identity lower. Part of that ranking reflects how the data was built rather than racing.",
+      "deep": "The beeswarm (output.png) ranks laps, pit_stop_count, year, grid, round, then track_length_km and tyre_deg_level; the write up lists the same top five with round before grid. No driverId dummy appears in the top 20, and only a few constructor dummies do. Reading the dots: low laps values push predictions down by up to about 15 to 18 laps (drivers who retired early), and pit_stop_count of 2 pushes predictions earlier while 1 pushes later. Three caveats. One hot encoding spreads driverId over many dummy columns, so each dummy looks small even when the summed driver effect is not. pit_stop_count is 0 on every imputed row and every pre 2011 row is imputed, so pit_stop_count and year partly encode whether the label came from the imputer. laps is completed laps, so it carries retirement information. Race structure beating driver identity is plausible, but it needs grouped SHAP on real labels to stand.",
+      "evidence": [
+        "portfolio: The top five contributors are total laps, planned pit stop count, year (proxying for regulation changes), round, and starting grid position.",
+        "repo:the-perfect-lap/code/datacleaning.ipynb: Fill missing pit_stop_count as 0"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1705.07874"
+      ],
+      "tags": [
+        "shap",
+        "interpretability",
+        "feature importance"
+      ]
+    },
+    {
+      "id": "f1-32",
+      "type": "why",
+      "level": 2,
+      "q": "The write up concludes pit timing is a property of the physical system, not the driver. How strong is that conclusion?",
+      "easy": "Directionally reasonable, but the evidence is weaker than it sounds: the top features include two that are known only after the race and two that flag imputed labels, and driver identity was split across many small columns.",
+      "deep": "Supporting it: drivers in one race face the same tires, length, and pit loss, so race level features should dominate first stop timing, and teams decide stops more than drivers do. Weakening it: (1) laps and pit_stop_count are realized outcomes, so their importance partly reflects retirements and the stop count to first stop link, not physics; (2) year and pit_stop_count = 0 mark imputed rows, whose labels are themselves a function of race features, which mechanically favors race features; (3) one hot SHAP spreads driver attribution across over a hundred dummies, so per column importance understates it. A cleaner test: SHAP summed per original column on a model trained with decision time features and real labels, or compare MAE with and without driver and constructor IDs under grouped CV.",
+      "evidence": [
+        "portfolio: Pit timing is more a property of the physical system (circuit, race length, planned stops) than of the person behind the wheel."
+      ],
+      "sources": [],
+      "tags": [
+        "interpretation",
+        "shap",
+        "pushback"
+      ]
+    },
+    {
+      "id": "f1-33",
+      "type": "case",
+      "level": 2,
+      "q": "Is the Streamlit app serving the model you reported?",
+      "easy": "No. The app loads a separately trained Random Forest with fewer trees, a depth limit, and a different feature set, which scored MAE 3.48 laps and R² 0.453. The finishing position shown beside it comes from hand set weights plus random noise.",
+      "deep": "f1_random_forest_model.pkl comes from a notebook cell that trains RandomForestRegressor(n_estimators=100, max_depth=15, min_samples_split=5) on 12 features including fastestLapSpeed and excluding pit_stop_count, with IDs as raw integers instead of one hot columns, on 6,621 rows: test MAE 3.48, R² 0.453. The app takes driver, circuit, and grid slot, fills year 2025 and per circuit constants, and shows the lap with a window of 2 laps either side. final_position_model.py scores a driver with fixed weights (grid 0.35, constructor strength 0.25, driver skill 0.15, and smaller terms) plus np.random.normal noise and maps the score to position buckets, with no seed, so the same inputs can show different finishes. The write up says the app takes planned stops and weather and shows SHAP; the code takes neither and shows none. Describe the app as a demo of the lighter model.",
+      "say": "I'd be precise here. The app serves a lighter forest that scored 3.48 laps of MAE, a different model from our best one. The finishing position panel is a weighted heuristic with random noise. It's a demo of the idea, and I'd say that before anyone else does.",
+      "evidence": [
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: MAE: 3.48 laps",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Clean dataset: 6,621 records",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: max_depth=15,",
+        "repo:the-perfect-lap/code/team_omega_rf_app.py: 'grid': grid_pos, 'year': 2025",
+        "repo:the-perfect-lap/code/final_position_model.py: features['grid_advantage'] * 0.35",
+        "repo:the-perfect-lap/code/final_position_model.py: np.random.normal(0, variance)",
+        "portfolio: Race engineers input live race context (circuit, grid position, planned stops, weather)"
+      ],
+      "sources": [],
+      "tags": [
+        "deployment",
+        "streamlit",
+        "training serving skew"
+      ]
+    },
+    {
+      "id": "f1-34",
+      "type": "how",
+      "level": 2,
+      "q": "Walk through the app's code path from user input to the displayed lap.",
+      "easy": "The user picks a driver, a circuit, and a grid slot. The app looks up that circuit's constants from a hard coded table, builds one row of features, asks the pickled forest for a lap, and shows it with a plus or minus 2 lap window and a position estimate.",
+      "deep": "team_omega_rf_app.py: load_random_forest_model() unpickles f1_random_forest_model.pkl and model_features.pkl. get_circuit_data() is a hard coded dict per circuit (circuitId, round, laps, track_length_km, race_distance_km, tyre_deg_level, pit_lane_loss, a typical fastestLapSpeed, aliases). predict_driver_strategy() builds a one row DataFrame with year fixed at 2025 and calls model.predict. The UI uses st.selectbox for the driver (default Lewis Hamilton), a grid st.slider from 1 to 20, and a button; the result box shows Lap N and a window from N minus 2 to N plus 2. Then calculate_position_probability() from final_position_model.py adds the finishing position panel. Since year = 2025 lies outside training years and IDs go in as integers, predictions for new drivers or teams extrapolate from whatever integer neighbors the trees saw.",
+      "evidence": [
+        "repo:the-perfect-lap/code/team_omega_rf_app.py: def predict_driver_strategy(model, features, circuit_name, driver_name, grid_pos):",
+        "repo:the-perfect-lap/code/team_omega_rf_app.py: 'grid': grid_pos, 'year': 2025",
+        "repo:the-perfect-lap/code/team_omega_rf_app.py: {predicted_lap-2:.0f}"
+      ],
+      "sources": [],
+      "tags": [
+        "streamlit",
+        "deployment",
+        "code"
+      ]
+    },
+    {
+      "id": "f1-35",
+      "type": "behavioral",
+      "level": 2,
+      "q": "It was a five person team. What was your part?",
+      "easy": "Per the team work plan, Tanay organized the data, built cleaning and quality filters, worked on merges, trained the Decision Tree, Random Forest, and Bagging models with two teammates, and co designed the finishing position layer and the combined pipeline.",
+      "deep": "WorkPlan.md credits Tanay with dataset download and organization, missing data handling with Atharva, the 2000 onward filter with Atharva, the more than two stop and early DNF filters with Praveer, applying the imputation, validating the imputer split with Titus, training Decision Tree, Random Forest, and Bagging models with Srikanth and Titus, and architecting the finishing position model with Atharva. Training the imputer itself is credited to Atharva and Srikanth, and Extra Trees and Gradient Boosting to Atharva and Praveer. The plan describes a trained position classifier with reliable podium classification, while the committed code is a weighted heuristic, and no Decision Tree or Bagging notebook is in the repo. The portfolio write up says \"I trained a dedicated Random Forest imputer\"; the work plan credits two teammates, so say we.",
+      "say": "I owned the data cleaning filters and trained the Random Forest with two teammates. I also designed the finishing position layer with a teammate, and I'd be candid that it shipped as a weighted heuristic rather than a trained model. The imputer was built by two teammates, and I applied and validated it.",
+      "evidence": [
+        "repo:the-perfect-lap/proposal/WorkPlan.md: Applied quality filters: removed >2 pit stop races and early DNFs (Praveer, Tanay)",
+        "repo:the-perfect-lap/proposal/WorkPlan.md: Trained Decision Tree, Random Forest, and Bagging models (Tanay, Srikanth, Titus)",
+        "repo:the-perfect-lap/proposal/WorkPlan.md: Architected final position prediction model responding to feedback received during project presentation (Tanay, Atharva)",
+        "repo:the-perfect-lap/proposal/WorkPlan.md: Performed train/test split on known rows for validation (Titus, Tanay)",
+        "repo:the-perfect-lap/proposal/WorkPlan.md: Developed and trained RandomForestRegressor model for missing pit lap imputation (Atharva, Srikanth)"
+      ],
+      "sources": [],
+      "tags": [
+        "teamwork",
+        "ownership"
+      ]
+    },
+    {
+      "id": "f1-36",
+      "type": "number",
+      "level": 2,
+      "q": "Which numbers in the write up would you correct?",
+      "easy": "Several write up figures do not match the notebooks: the modeling table has 7,984 rows rather than 14,000+, the models use 12 features rather than 45, and the CatBoost and Gradient Boosting test scores differ. Quote the notebook values.",
+      "deep": "Write up versus repo. Rows: 14,000+ claimed, 7,984 in Final_Model_data.csv. Features: 45 claimed, 12 model inputs (the final CSV has 54 columns, most of them identifiers and raw fields). Imputation framing: shrink from 10,000 rows to 3,000, while the notebook shows 4,079 known of 8,091. CatBoost test MAE 3.02 and R² 0.523 claimed, 3.10 and 0.584 in the notebook. Gradient Boosting test MAE 3.15 claimed, 3.55 in the notebook. The course report final.md lists Random Forest RMSE 3.65 and R² 0.87 plus a Decision Tree row, and no notebook produces those (the notebook gives RMSE 4.91 and R² 0.591). The README says the metrics are on finishing position; they are on first pit lap. The Random Forest MAE and R², the Extra Trees row, and the imputer error near 6 laps all reproduce.",
+      "say": "If someone checks my site against the repo, a few numbers won't match, and I'd rather flag them myself. The notebooks have 7,984 rows and 12 model features. The CatBoost and boosting rows in my table are off. The headline Random Forest numbers do reproduce from printed outputs.",
+      "evidence": [
+        "portfolio: The final modeling dataset is 14,000+ driver race rows with 45 engineered features.",
+        "repo:the-perfect-lap/code/createFinalData.ipynb: Total rows: 7984",
+        "portfolio: Dropping every row with a missing pit lap would have shrunk the dataset from 10,000 rows to 3,000.",
+        "repo:the-perfect-lap/README.md: | CatBoost | 3.10 | 0.584 |",
+        "portfolio: Gradient Boosting3.2343.150.5640.487Weakest",
+        "repo:the-perfect-lap/final/final.md: | Random Forest | **2.78** | **3.65** | **0.87** |",
+        "repo:the-perfect-lap/README.md: Metrics are"
+      ],
+      "sources": [],
+      "tags": [
+        "metric honesty",
+        "reproducibility"
+      ]
+    },
+    {
+      "id": "f1-37",
+      "type": "pushback",
+      "level": 3,
+      "q": "Your write up mentions a decision tree baseline and says the app shows SHAP for each prediction. Can you show me either?",
+      "easy": "Neither is in the repo. There is no Decision Tree notebook, and the app code contains no SHAP call; SHAP exists only as a notebook plot over training rows.",
+      "deep": "The write up and course report both describe a Decision Tree baseline, and final.md gives it MAE 4.89, RMSE 5.97, R² 0.71, but no notebook in code/ trains one; the work plan says Tanay trained Decision Tree and Bagging models, so they may have lived in the shared working copy the README mentions. The write up says the app returns the prediction alongside the SHAP feature importances that drove it; team_omega_rf_app.py never imports shap. The honest answer is that the per prediction explanation was designed but not shipped, and the baseline numbers cannot be reproduced from this repo. A good baseline for this problem is the per circuit median anyway, which none of the documents report.",
+      "say": "Not from this repo. There's no decision tree notebook, and the app doesn't compute SHAP; that was a notebook plot. I'd tell you that directly, and I'd add that the baseline I actually want is a per circuit median, which we never reported.",
+      "evidence": [
+        "repo:the-perfect-lap/final/final.md: | Decision Tree | 4.89 | 5.97 | 0.71 |",
+        "portfolio: the app returns a predicted first pit stop lap in real time, alongside the SHAP feature importances that drove the prediction"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "metric honesty",
+        "deployment"
+      ]
+    },
+    {
+      "id": "f1-38",
+      "type": "compare",
+      "level": 3,
+      "q": "How would you build a real pit strategy optimizer instead?",
+      "easy": "Model lap times from tire age and fuel, simulate the race many times with random safety cars, and pick the stop lap with the best expected result. Machine learning fits the pieces, such as degradation per circuit, rather than predicting the lap directly.",
+      "deep": "lap_times.csv is already in the repo, so fit a per circuit degradation curve $t_{lap} = t_0 + d\\,a + \\gamma\\,m_{fuel}$ with driver and car offsets as random effects (compound would need an external stint source such as FastF1 timing data). Simulate the race by Monte Carlo with draws for safety car laps (which shrink effective pit loss), stop duration, and traffic, and score candidate strategies by the distribution of race time or finishing position. Competitor reaction can be layered on as a game, since rivals answer an undercut. Alternatives: a discrete time hazard model of pitting on lap $k$ given no stop yet, which handles censoring and time varying covariates such as gap and tire age; or reinforcement learning on top of the simulator, which needs the simulator anyway. The current regression then becomes a prior or a sanity check inside that system.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "simulation",
+        "survival analysis",
+        "reinforcement learning",
+        "system design"
+      ]
+    },
+    {
+      "id": "f1-39",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations, and what would break at 10x or 100x scale or in production?",
+      "easy": "No live signals, first stop only, no rival modeling, rules that change over time, plus the evaluation problems the code shows. In production the bigger gap is that race day decisions need live data the model never saw.",
+      "deep": "From the write up: no safety car, weather, or tire telemetry; first stop only, though later stops depend on it; no competitor model, so no undercut or overcut; regulation drift dilutes early 2000s patterns. From the code: random row split, half the labels imputed, post race features, no baseline, and an app serving a different model. Scale: 10x more rows is trivial for these models; the binding constraint is label quality, not compute. 100x would mean lap level or telemetry data (hundreds of Hz car data), where a per lap state model, streaming features, and latency budgets on the pit wall matter, along with a model registry so the evaluated artifact is the served one. Production also needs drift monitoring per regulation era and a human override log, since the stated use is a sanity check that the strategist validates or overrides.",
+      "evidence": [
+        "portfolio: First stop only. The model predicts only the first pit lap, not full multi stop strategies.",
+        "portfolio: No competitor model. Real strategy reacts to opponents (undercuts, overcuts).",
+        "portfolio: Regulation drift. F1 rules change often."
+      ],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "production",
+        "scale"
+      ]
+    },
+    {
+      "id": "f1-40",
+      "type": "behavioral",
+      "level": 1,
+      "q": "What would you do differently now?",
+      "easy": "Split by race and by season, train and score on real pit laps only, add a naive baseline, keep only features known before the race, and serve the same model that was evaluated.",
+      "deep": "In order: (1) GroupKFold on raceId plus a forward season holdout; (2) restrict labels to 2011 onward, where pit data is real, or report real and imputed rows separately; (3) a per circuit median baseline and MAE by circuit; (4) a feature audit for decision time availability, replacing realized stop count and completed laps with scheduled laps and a planned strategy proxy; (5) one model artifact trained in one script, saved as a full sklearn Pipeline, and loaded by the app; (6) SHAP summed over one hot groups; (7) correct the write up's numbers. The larger step is reframing from imitation to optimization with a lap time simulator built from lap_times.csv.",
+      "say": "I'd fix evaluation before touching models. Group the split by race, hold out a full season, and score only real pit laps against a median baseline. Then I'd make the app load the exact pipeline we evaluated. After that, the interesting work is a lap time simulator, because that turns this into actual strategy.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "retrospective",
+        "evaluation design"
+      ]
+    },
+    {
+      "id": "f1-41",
+      "type": "pushback",
+      "level": 2,
+      "q": "Where are tire compounds and safety cars? Isn't a pit model without them missing the main drivers?",
+      "easy": "Yes, and the write up says so. The dataset has no compound or safety car data; the only tire information is a hand set wear rating per circuit.",
+      "deep": "Concede: compound choice (soft, medium, hard) and safety car timing are the two biggest drivers of when a car stops, and both are absent; tyre_deg_level is a 1 to 3 constant per circuit, the same for every year and car. Defend: the stated use is a prior before the race, not a live call, and at that horizon the circuit and race length do set the typical window. What the model can say is the usual first stop for this kind of race. Fix: join stint and compound data from an external timing source for 2018 onward, and treat safety cars as random events in a simulator rather than as features.",
+      "say": "They're missing, and that's the biggest gap. The data has no compound or safety car field, just a wear rating per circuit. So this predicts the usual first stop for this kind of race before it starts. Anything live needs stint data and a simulator.",
+      "evidence": [
+        "portfolio: No live race signals. Safety car deployments, sudden weather changes, and real time tire telemetry are absent."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "features",
+        "domain"
+      ]
+    },
+    {
+      "id": "f1-42",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the project to a staff engineer, including what you would fix.",
+      "easy": "A random forest on 12 features predicted first stop lap within 2.78 laps on a random row split; the evaluation has three leaks to name.",
+      "deep": "Lead with label construction and the 2011 pit data boundary, then models and numbers, then leakage (row split, imputed labels, post race features), then the app serving skew, then the grouped and season based fix.",
+      "say": "The label is the minimum pit lap per driver and race, and the pit table only starts in 2011, so half the labels came from an imputer about 6 laps off. Four tree models on one random row split; the forest got 2.78 laps MAE. That split leaks race context, two features are post race, and the app serves a different, weaker forest. I'd rerun with GroupKFold on race ID, a season holdout, and real labels only.",
+      "evidence": [
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: Test MAE: 2.781642983371599",
+        "repo:the-perfect-lap/code/verify_imputer.ipynb: MAE (mean absolute error): 6.046",
+        "repo:the-perfect-lap/code/randomForestModel.ipynb: MAE: 3.48 laps"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff engineer"
+      ]
+    },
+    {
+      "id": "f1-43",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the project to a product manager.",
+      "easy": "A tool that suggests when a driver should first pit, based on two decades of races, with a clear note that it reflects past team habits.",
+      "deep": "Frame the user (race engineer), the output (a lap and a window), the value (a second opinion), and the risk (it copies history and lacks live data). Skip model names.",
+      "say": "Engineers decide when a car pits under heavy pressure. We built a tool that says, for this circuit and grid slot, when teams have usually made the first stop, give or take two laps. It's a second opinion, not an autopilot. It copies past habits and doesn't see safety cars or weather, so the next version would need live race data.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "product manager"
+      ]
+    },
+    {
+      "id": "f1-44",
+      "type": "narrate",
+      "level": 3,
+      "q": "Explain the project to a recruiter in plain words.",
+      "easy": "Tanay's team used Formula 1 history to predict when a driver first changes tires, and was honest about where the evaluation fell short.",
+      "deep": "One sentence on the problem, one on the result, one on teamwork, one on the lesson. No jargon.",
+      "say": "In a class team of five, we used twenty five years of Formula 1 results to predict the lap a driver first stops to change tires. Our best model landed about three laps from what teams actually did. I handled data cleaning and trained the main model with two teammates. The biggest lesson was about testing models fairly, and I can explain what I'd change.",
+      "evidence": [
+        "portfolio: Random Forest reached a Test MAE of 2.78 laps"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    },
+    {
+      "id": "f1-45",
+      "type": "how",
+      "level": 3,
+      "q": "What tests or validation checks exist in the repo, beyond the model scores?",
+      "easy": "Only one real check: the imputer was scored on held out rows that had true pit laps. There are no unit tests, no data validation, and no check that the app's model matches the evaluated one.",
+      "deep": "verify_imputer.ipynb is the single validation artifact: a 75/25 split of the 4,079 known rows, run once with 7 race features and once with all 11, printing MAE, RMSE, and ten sample predictions. Model notebooks print train and test metrics and draw actual versus predicted scatters and error histograms. Missing: assertions on the label (1 to N laps), duplicate checks on (raceId, driverId), a test that pickled features equal model_features.pkl, a smoke test of the Streamlit prediction path, and a seed for the position heuristic. For an interview: name the one validation that exists and the four cheap tests that would have caught the serving mismatch and the never stopped driver labels.",
+      "evidence": [
+        "repo:the-perfect-lap/code/verify_imputer.ipynb: Train size: 3059",
+        "repo:the-perfect-lap/code/verify_imputer.ipynb: RMSE: 8.469"
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "validation"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "A Unified Approach to Interpreting Model Predictions (Lundberg and Lee)",
+      "url": "https://arxiv.org/abs/1705.07874",
+      "why": "The SHAP paper: additive feature attributions and the unique solution with desirable properties."
+    },
+    {
+      "title": "CatBoost: unbiased boosting with categorical features",
+      "url": "https://arxiv.org/abs/1706.09516",
+      "why": "Ordered boosting and categorical processing that remove prediction shift, the CatBoost card's mechanism."
+    },
+    {
+      "title": "scikit-learn GroupKFold",
+      "url": "https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.GroupKFold.html",
+      "why": "Splitting by race so no race appears in both train and test."
+    },
+    {
+      "title": "scikit-learn RandomForestRegressor",
+      "url": "https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestRegressor.html",
+      "why": "Defaults (max_features=1.0 is equivalent to bagged trees, bootstrap on, unlimited depth) that explain the forest's train fit."
+    }
+  ],
+  "sheet": {
+    "easy": "## What it is\n- Team project (IST 707, Team Omega, five people, Jul to Dec 2025): predict the lap of a driver's **first pit stop** in Formula 1.\n- Data: Ergast style F1 tables, races from 2000 on, plus a hand built table of tire wear and pit lane loss per circuit.\n- Output: a predicted lap plus a window of 2 laps either side in a Streamlit app.\n- It learns what teams did. Nothing in the code optimizes a strategy.\n\n## Pipeline\n1. Keep races from 2000 on. Compute first pit lap and stop count per driver per race.\n2. Drop drivers with more than two stops and drivers who retired in the first laps without stopping.\n3. Join circuit features: tire degradation level (1 to 3), pit lane time loss (18 to 24 s), track length, race distance.\n4. Pit data only exists from 2011, so a Random Forest **imputer** filled 4,012 of 8,091 missing first pit laps (about 6 laps of error).\n5. Remove first pit laps outside 1 to 40. Final table: 7,984 rows.\n6. Train four tree ensembles on the same 12 features and one random 80/20 split.\n\n## Results (random row split)\n| Model | Test MAE (laps) | Test R² | Note |\n|---|---|---|---|\n| Random Forest | 2.78 | 0.591 | selected |\n| Extra Trees | 2.91 | 0.551 | memorized train set |\n| CatBoost | 3.10 | 0.584 | near tie on R² |\n| Gradient Boosting | 3.55 | 0.488 | underfit |\n\n## What it learned\n- SHAP top five: total laps, stop count, year, grid, round. Driver and team identity ranked lower.\n\n## What the data does not have\n- Tire compounds, tire age, safety cars, weather, gaps to rivals.\n\n## Honest limits (say these first)\n- Split by row, so drivers from the same race sit in train and test. No cross validation.\n- Half the labels are imputer outputs.\n- Stop count and completed laps are only known after the race.\n- No naive baseline.\n- The app serves a lighter model (MAE 3.48) and a hand weighted position heuristic with random noise.\n- Some write up numbers (14,000+ rows, 45 features, CatBoost and boosting rows, six imputer predictors, 70% recovered) do not match the notebooks.\n",
+    "deep": "## Problem framing\n- Label: $y = \\min\\{\\text{lap} : \\text{pit stop of driver } i \\text{ in race } r\\}$ (realized first stop). Regression, metric MAE in laps.\n- This is imitation of the historical policy. \"Optimal\" needs a counterfactual race time model, which the repo does not have.\n\n## Strategy physics (why the features exist; not implemented)\nLap time with tire age $a$: $t = t_0 + d\\,a$ (fuel burn is strategy independent without refueling, so it cancels).\nOne stop at lap $k$ in an $N$ lap race, compounds with rates $d_1, d_2$, pit loss $L$:\n$$C(k) = \\tfrac{d_1 k^2}{2} + \\tfrac{d_2 (N-k)^2}{2} + L \\quad\\Rightarrow\\quad k^* = \\frac{N\\,d_2}{d_1 + d_2}$$\nEqual compounds give $k^* = N/2$. Degradation cost: one stop $dN^2/4$, two equal stops $dN^2/6$, so a second stop pays if\n$$\\frac{dN^2}{12} > L$$\nFeature mapping: laps $\\to N$, tyre_deg_level $\\to d$, pit_lane_loss $\\to L$, pit_stop_count $\\to$ number of stints. Safety cars shrink effective $L$; undercut gains come from fresh tire pace.\n\n## Data (repo facts)\n| Step | Output |\n|---|---|\n| races.csv | 1950 to 2024 in the repo (write up says 1950 to 2020) |\n| pit_stops.csv | no race before 2011 |\n| filter year $\\ge$ 2000, stops $\\le$ 2, drop zero stop drivers with laps $<3$; fillna(0) on stop count | clean_results |\n| merge results, races, drivers, constructors | master_planA.csv |\n| known vs missing first pit lap | 4,079 known, 4,012 missing (8,091 rows) |\n| verify imputer, 75/25 split of known rows (3,059 / 1,020) | RF 200 trees, 7 race features: MAE 6.046, RMSE 8.478; RF 300 trees, 11 features: MAE 5.984, RMSE 8.469 |\n| impute: RF 300 trees on 7 race + 4 track features, fill every missing row | new_master_planA_imputed.csv |\n| keep $1 \\le y \\le 40$ | 7,984 rows, 2000 to 2024 |\n- track_features.csv: one row per circuit (77), tyre_deg_level 1 to 3 (mostly 2), pit_lane_loss 18 to 24 s, track length, race distance.\n- pit_stop_count = 0 identifies exactly the imputed rows (all 2000 to 2010 rows plus post 2011 drivers who never stopped).\n\n## Features (12)\nyear, round, circuitId, driverId, constructorId, grid, laps (completed), pit_stop_count (realized), track_length_km, race_distance_km, tyre_deg_level, pit_lane_loss. One hot on the three IDs via ColumnTransformer + OneHotEncoder(handle_unknown=\"ignore\"); 9 numeric passthrough.\n\n## Models (single split: train_test_split(test_size=0.2, random_state=42))\n| Model | Config | Train MAE | Test MAE | Train R² | Test R² | Test RMSE |\n|---|---|---|---|---|---|---|\n| Random Forest | 300 trees, defaults (max_features=1.0, bootstrap) | 1.007 | 2.782 | 0.943 | 0.591 | 4.91 |\n| Extra Trees | 400 trees, bootstrap off (default) | 4e-14 | 2.909 | 1.000 | 0.551 | 5.14 |\n| CatBoost | 500 it, depth 8, lr 0.05, native cats, RMSE loss | 2.540 | 3.099 | 0.702 | 0.584 | n/a |\n| Grad. Boosting | 300 trees, depth 3, lr 0.05 | 3.234 | 3.549 | 0.564 | 0.488 | 5.50 |\nNo cross validation (GridSearchCV is commented out), no naive baseline, no Decision Tree notebook in the repo.\n\nMetrics: $\\text{MAE} = \\frac1n\\sum|y-\\hat y|$, $\\text{RMSE} = \\sqrt{\\frac1n\\sum(y-\\hat y)^2}$, $R^2 = 1 - \\frac{\\sum(y-\\hat y)^2}{\\sum(y-\\bar y)^2}$. RMSE/MAE about 1.8 means a heavy tail of big misses.\n\n## Ensemble mechanics\n- Bagging variance: $\\operatorname{Var}(\\bar f) = \\rho\\sigma^2 + \\frac{1-\\rho}{B}\\sigma^2$. scikit-learn's regressor default max_features=1.0 is plain bagged trees, so $\\rho$ is not reduced.\n- Extra Trees: random thresholds, no bootstrap, so each tree fits every training row to pure leaves, giving train MAE near 0.\n- Boosting: $F_m(x) = F_{m-1}(x) + \\nu\\,h_m(x)$, $h_m$ fit to residuals. Depth 3 with $\\nu = 0.05$ underfit (train R² 0.564).\n- CatBoost: ordered target statistics for categoricals and ordered boosting to remove prediction shift.\n\n## SHAP\n$f(x) = \\phi_0 + \\sum_i \\phi_i(x)$, $\\phi_i = \\sum_{S \\subseteq F\\setminus\\{i\\}} \\frac{|S|!(|F|-|S|-1)!}{|F|!}\\,[f_{S\\cup\\{i\\}}(x_{S\\cup\\{i\\}}) - f_S(x_S)]$. TreeExplainer on 500 training rows of the one hot matrix (output.png).\nOrder in the plot: laps, pit_stop_count, year, grid, round, track_length_km, tyre_deg_level. Low laps (retirements) push predictions down sharply; 2 stops push earlier. Caveats: one hot spreads driver attribution across dummies (sum $\\phi$ per group); pit_stop_count = 0 and year < 2011 flag imputed labels; laps is laps completed.\n\n## Evaluation flaws and fixes\n| Flaw | Fix |\n|---|---|\n| random row split, same race on both sides | GroupKFold(groups = raceId); forward season holdout |\n| half the labels imputed | train and score on 2011+ real labels, or report separately |\n| post race features (pit_stop_count, laps, fastestLapSpeed) | decision time feature audit |\n| no baseline | per circuit median first stop lap |\n| app model differs | one sklearn Pipeline artifact shared by eval and app |\n\n## Served app (code facts)\n- Pickle: RF(100 trees, max_depth 15, min_samples_split 5), 12 features incl. fastestLapSpeed, IDs as integers, 6,621 rows, test MAE 3.48, R² 0.453.\n- Inputs: driver (selectbox), circuit, grid (slider 1 to 20); year fixed at 2025; circuit constants hard coded; output lap with $\\pm 2$ window. No SHAP, no weather, no planned stops input.\n- Finish position: weighted score (grid 0.35, constructor 0.25, driver 0.15, pit quality 0.10, circuit grid 0.10, strategy 0.05) plus unseeded Gaussian noise, bucketed to P1, P2 to P3, and so on.\n\n## Write up vs repo\n| Claim | Repo |\n|---|---|\n| 1950 to 2020 source | races.csv runs to 2024 |\n| 14,000+ rows, 45 features | 7,984 rows, 12 model features |\n| 10,000 to 3,000 rows if dropped | 4,079 known of 8,091 |\n| imputer: six predictors, roughly 70% recovered | 7 then 11 predictors; all 4,012 missing rows filled |\n| identical splits and cross validation, decision tree baseline | one seeded split, no CV, no DT notebook |\n| CatBoost 3.02 / 0.523, GBR 3.15 | 3.10 / 0.584, 3.55 |\n| CatBoost lost its edge because categoricals were pre encoded | CatBoost got native cat_features |\n| final.md RF RMSE 3.65, R² 0.87 | 4.91, 0.591 |\n| README: metrics on finishing position | metrics on first pit lap |\n| app takes planned stops, weather, shows SHAP | takes driver, circuit, grid; no SHAP |\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is The Perfect Lap?",
+      "script": "The Perfect Lap was a five person class project where we predicted the lap a Formula 1 driver first pits on. We used two decades of race data, a hand built table of tire wear and pit lane loss per circuit, and a Random Forest. On a random holdout it was about 2.78 laps off. The finding I like is that race length and stop count mattered more than who was driving. I'd also tell you up front that our evaluation was optimistic, and why.",
+      "keypoints": [
+        "Target is the first pit lap per driver per race",
+        "Random Forest, test MAE 2.78 laps on a random row split",
+        "Race structure features outranked driver identity in SHAP",
+        "Flags the optimistic evaluation before being asked",
+        "Team project, says we for team work"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through the project.",
+      "script": "Pit timing is one of the few levers a race engineer controls, so we asked whether history could predict the lap a driver first stops on. The data was the Ergast style Formula 1 dump. We kept races from 2000 on, computed each driver's first pit lap and stop count, and dropped drivers with more than two stops and early retirements. I worked on those filters and the merges. We also added a small table per circuit with tire degradation level and pit lane time loss.\n\nThe first problem was missing labels. The pit stop table only starts in 2011, so about half our rows had no first pit lap. Two teammates trained a Random Forest imputer, and it was about 6 laps off on held out real rows.\n\nThen we compared four tree ensembles on twelve features. Random Forest won with a test MAE of 2.78 laps. Its R squared was 0.591. CatBoost was nearly tied on R squared, Extra Trees memorized the training set, and Gradient Boosting underfit. SHAP put total laps, stop count, year, grid, and round on top, with driver identity lower. We wrapped a model in a Streamlit app.\n\nWhat broke is the part I'd lead with now. We split by row, so drivers from the same race sat in train and test. Half the labels came from the imputer. Stop count and completed laps are only known after the race. And the app loads a lighter model than the one we scored.\n\nNext, I'd split by race and by season, score only real pit laps against a per circuit median baseline, and rebuild features around what an engineer knows on the grid. After that, a lap time simulator is what would turn this into real strategy.",
+      "keypoints": [
+        "Data: Ergast dump from 2000, filters for two or fewer stops and no early DNFs, track features table",
+        "Imputer for pre 2011 labels, about 6 laps MAE, half the rows",
+        "Random Forest 2.78 MAE and 0.591 R²; CatBoost near tie; Extra Trees overfit; boosting underfit",
+        "SHAP: race structure over driver identity",
+        "Failures: row split leakage, imputed labels, post race features, app serves a different model",
+        "Next: grouped and season splits, baseline, lap time simulator"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "The target is first_pit_lap, the minimum lap in the pit stops table for each driver and race, and it's a regression scored in laps. We filtered the Ergast style dump to 2000 onward, computed the first stop and the stop count with a groupby, filled missing stop counts with zero, dropped drivers with more than two stops, and dropped zero stop drivers who retired before lap 3. Then we joined a hand built per circuit table: tire degradation level from 1 to 3, pit lane loss in seconds, track length, and race distance.\n\nThe data's big quirk is that the pit stops table has nothing before 2011. So of 8,091 driver race rows, 4,079 had a real first stop and 4,012 didn't. Two teammates trained a Random Forest imputer on the known rows. On a held out quarter it was 6.05 laps off with race features and 5.98 with the track features added, so the track table barely helped. Every missing row got filled. One side effect I only saw later: the zero fill means a stop count of zero marks exactly the imputed rows, and drivers after 2011 who never stopped got an invented first stop. After imputation we cut first stops outside laps 1 to 40, leaving 7,984 rows.\n\nWe trained four tree models on the same twelve features with one hot circuit, driver, and team IDs and one random 80/20 split. Random Forest, 300 trees on scikit-learn defaults, got test MAE 2.78 and R squared 0.591, with train MAE about 1. Those defaults consider every feature at every split, so it's really bagged trees. Extra Trees fit the training set perfectly and got 2.91. CatBoost, with native categoricals, got 3.10 and 0.584, nearly tied on R squared. Gradient Boosting at depth 3 underfit, 3.55. RMSE for the forest was 4.91, so there's a tail of big misses.\n\nSHAP with TreeExplainer on 500 training rows put laps, stop count, year, grid, and round on top. Low lap counts drag predictions way down, which is retirements, and two stoppers pit earlier.\n\nNow the problems, because they're the real story. The split is by row, so teammates from the same race are on both sides, and the score measures new drivers in known races. Half the labels are imputer outputs, a smooth function of almost the same features. Stop count and laps completed are only known after the race. There's no cross validation and no baseline. And the app loads a different forest, 100 trees with depth 15, trained with fastest lap speed and raw integer IDs, which scored 3.48. Our write up also has numbers the notebooks don't support, like 14,000 rows and 45 features, and it explains CatBoost's result with pre encoding the code doesn't do.\n\nThe fix is GroupKFold on race ID, then rolling season holdouts, scoring only real labels against a per circuit median baseline, with a feature list limited to what's known on the grid, and one pipeline artifact shared by evaluation and the app. The bigger change is to stop imitating and start optimizing: fit degradation curves from lap_times, which is already in the repo, and simulate races with random safety cars to score candidate stop laps.",
+      "keypoints": [
+        "Label construction and the 2011 pit data boundary",
+        "Imputer numbers and the stop count zero side effect",
+        "All four models with configs and numbers; RF defaults equal bagging",
+        "SHAP ranking and what the dots mean",
+        "Leakage: row split, imputed labels, post race features, no CV, no baseline",
+        "App serves a different model; write up numbers that do not reproduce",
+        "Fix: grouped and season validation, decision time features, simulator"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to me like I'm not technical.",
+      "script": "In Formula 1, every car has to stop at least once to change tires, and picking the right lap can win or lose places. Our team of five looked at twenty five years of past races and taught a computer to predict the lap a driver usually makes that first stop, based on the track, the race length, where they start, and their team. Our best version landed about three laps from what teams really did. The interesting part was that the track and the race length mattered more than which driver was in the car. I'd also be honest that it copies past habits, and it doesn't know about crashes or rain, so it's a second opinion for the engineer rather than an answer.",
+      "keypoints": [
+        "Plain explanation of a pit stop and why timing matters",
+        "Learned from past races",
+        "About three laps off",
+        "Track and race length mattered more than driver",
+        "Honest about copying history and missing live events"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw it for me.",
+      "script": "First I draw the pipeline left to right as five boxes: raw Ergast tables, filter to 2000 on and clean, compute first pit lap and stop count, impute missing labels, final table of 7,984 rows. Under the impute box I write 4,012 of 8,091 and about 6 laps MAE, and I draw a vertical line at 2011 on a small timeline, saying that everything left of the line is imputed.\n\nSecond, a feature box with twelve names split into three groups: race structure, entrant, circuit physics. I circle laps and pit_stop_count and write post race next to them.\n\nThird, a small table of the four models with test MAE: forest 2.78, Extra Trees 2.91, CatBoost 3.10, boosting 3.55. Next to the forest I write train MAE 1.0 and say the gap is variance.\n\nFourth, the split. I draw one race as a row of driver dots and color some train and some test, then say that's the leak. Next to it I draw the fix: whole races in folds, and a season timeline with train on the left and next season on the right.\n\nFifth, the app: input boxes for driver, circuit, and grid, arrow to a different pickle labeled 3.48, output lap plus or minus 2. I say that the evaluated model and the served model should be one artifact.\n\nLast, in a corner, the physics: lap time grows with tire age, a pit stop costs a fixed loss, and the optimal stop balances the two. I say that's what a simulator would add, because the current model only copies history.",
+      "keypoints": [
+        "Pipeline with the 2011 boundary and imputation numbers",
+        "Features grouped, post race ones circled",
+        "Model table with the train test gap",
+        "Row split leak drawn and the grouped fix",
+        "App serving a different pickle",
+        "Physics sketch for a real optimizer"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Your test set mixes rows from the same race. How much does that matter, and how would you fix it?",
+      "script": "It matters a lot for this target. Drivers in the same race share the circuit, year, round, and race length, and their first stops cluster because everyone faces the same tire wear and safety cars. With a random row split, the model sees teammates from the test race during training, so it can partly memorize that race's stop lap. I'd fix it with GroupKFold on race ID, then a forward season holdout, scoring only real pit laps. I'd expect the 2.78 lap MAE to get worse, and that worse number is the honest one.",
+      "keypoints": [
+        "Same race rows share race level features and correlated labels",
+        "Random split measures new drivers in seen races",
+        "GroupKFold with raceId as the group",
+        "Forward season holdout and real labels only; expect MAE to rise"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why did the Random Forest beat Gradient Boosting and CatBoost?",
+      "script": "On one random split it had the lowest MAE, 2.78 laps. Gradient Boosting at depth 3 with a small learning rate underfit, its training error was nearly as bad as its test error. CatBoost was close: 3.10 MAE but 0.584 R squared against the forest's 0.591, with a much smaller train test gap. So I wouldn't call it a clear win. Without cross validation or fold spread, a tenth of a lap is inside the noise. Under grouped CV, CatBoost's native handling of the ID columns might come out ahead.",
+      "keypoints": [
+        "RF lowest MAE on one split",
+        "GB underfit, train error close to test",
+        "CatBoost near tie on R², smaller gap",
+        "No CV means no error bar; CatBoost could win under grouped CV"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you handle the missing pit data, and what would you change?",
+      "script": "The pit stops table starts in 2011, so about half our 8,091 rows had no first stop. Two teammates trained a Random Forest on the 4,079 real ones and filled the rest. On a held out quarter it was about 6 laps off. Then the main model trained on those filled labels. That's the part I'd change. The imputed labels are a smooth function of the same features, so they're easy to fit and they inflate the score. I'd train and score on real 2011 onward labels, or at least report the two groups separately.",
+      "keypoints": [
+        "Pit data starts in 2011",
+        "RF imputer on 4,079 known rows, about 6 laps MAE",
+        "Imputed labels inflate the downstream score",
+        "Train and score on real labels or report separately"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What would make this an actual strategy optimizer?",
+      "script": "A model of race time as a function of the stop lap. The repo already has lap times, so I'd fit degradation per circuit from tire age and fuel, with driver and car offsets. Then simulate the race many times, drawing safety cars, stop durations, and traffic, and score each candidate stop lap by expected finishing position. Compounds need an external stint source. The current regression becomes a prior inside that loop, a check on what teams usually do.",
+      "keypoints": [
+        "Race time as a function of stop lap",
+        "Degradation curves from lap_times",
+        "Monte Carlo with safety cars and traffic",
+        "Regression becomes a prior"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Half your labels are made up by another model. Why should I trust any of your numbers?",
+      "script": "You shouldn't trust the 2.78 as a real world number, and I'd say that. About half the training and test labels are imputer outputs, and the imputer itself was about 6 laps off. What I'd defend is the direction: the forest beat the other models on the same split, and the imputer was validated on real held out rows rather than assumed. The fix is simple and I'd do it first: score only rows with real pit records from 2011 on, with a race grouped split and a median baseline.",
+      "keypoints": [
+        "Concedes the headline is not a real world number",
+        "About half the labels imputed",
+        "Defends relative comparison and imputer validation",
+        "Fix: real labels, grouped split, baseline"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your site's numbers don't match your repo. Isn't that a credibility problem?",
+      "script": "It is, and I'd rather raise it myself. The notebooks show 7,984 rows and 12 model features, while the write up says 14,000 plus and 45. The CatBoost and boosting rows in the write up are off, and the CatBoost explanation contradicts the code. What does reproduce is the headline: Random Forest 2.78 MAE and 0.591 R squared, Extra Trees, and the imputer's 6 laps. The habit I took from this is that every number I publish now traces to a printed output in the repo.",
+      "keypoints": [
+        "Concedes the mismatch directly",
+        "Names the specific wrong numbers",
+        "Lists what does reproduce",
+        "Habit: every number traces to an output"
+      ]
+    }
+  ]
+}
