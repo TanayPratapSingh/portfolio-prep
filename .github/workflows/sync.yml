@@ -1,0 +1,51 @@
+name: Sync with portfolio
+
+# Run by hand from the Actions tab after the portfolio or a project repository changes.
+# It re-scrapes both, flags projects without a deck and any card whose quoted number no
+# longer matches its source, commits the report, and redeploys the site.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Sync with the portfolio and the project repositories
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scraper/sync.py
+
+      - name: Rebuild the deck manifest
+        run: python scraper/build.py || echo "deck check failed; the sync report lists the cards to fix"
+
+      - name: Commit the report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data sources
+          if git diff --cached --quiet; then echo "nothing changed"; else git commit -m "data: portfolio sync $(date -u +%F)" && git push; fi
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deploy
+        uses: actions/deploy-pages@v4
