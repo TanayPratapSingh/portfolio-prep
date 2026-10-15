@@ -1,0 +1,749 @@
+{
+  "deck_id": "p-comms-agent",
+  "title": "comms-agent: Agent Orchestration for Communications Monitoring",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/comms-agent",
+  "summary_easy": "An agent that runs a weekly media monitoring job for a brand: it collects mentions, labels each for topic and tone, sends the uncertain ones to a person, and writes a short brief from the checked labels. It runs on a small synthetic sample with a stand in model and a simulated reviewer, because the point is the orchestration and the human review gate.",
+  "summary_deep": "A dependency free state graph engine (named nodes over a shared State, fixed and conditional edges, one retry per node, a 50 step guard, a trace) runs plan, ingest, classify, a conditional review gate, human_review, aggregate, and report. The classify tool scores eight topics by keyword counts with a sharpened softmax (multiplier 1.8) and sentiment with a lexicon, and the gate flags a mention when min(topic, sentiment) confidence is below 0.50. On 24 synthetic mentions, 9 are flagged and an oracle reviewer makes 7 label corrections (counted per field, not per mention) before metrics (sentiment and topic mix, reach weighted share of voice, key message pull through) feed a templated MockLLM brief. Review of the code shows tool calls are logged per node rather than per call, the plan and relevance score are never read, an aborted run still logs the end marker, and confident errors that skip the gate are not measured.",
+  "cards": [
+    {
+      "id": "ca-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is comms-agent, in one plain sentence and then technically?",
+      "easy": "A small program that runs a weekly media monitoring job for a brand: it collects mentions, labels each one, sends the uncertain ones to a person to check, and then writes a short summary from the checked labels.",
+      "deep": "comms-agent (August 2026) is a framework free state graph agent in Python standard library code. Nodes plan, ingest, classify, human_review, aggregate, and report share one mutable State; a conditional edge after classify routes to human_review when any mention's confidence is below 0.50, otherwise straight to aggregate. Tools (fetch_articles, classify_article, score_relevance, needs_review) are registered by name and their use is logged; the LLM sits behind a two method interface, and the default MockLLM is deterministic. On the bundled 24 mention sample about a fictional brand, 9 mentions are flagged and the oracle backed reviewer makes 7 corrections before the brief is drafted. It is the automation layer over the media-pulse measurement idea.",
+      "say": "It's an agent that runs a media monitoring loop: fetch mentions, classify them, send the low confidence ones to a human, then write the brief. The point was orchestration with the human gate inside the control flow. On the sample, 9 of 24 mentions get flagged and the simulated reviewer makes 7 corrections before anything is reported.",
+      "evidence": [
+        "portfolio: META: Agent Orchestration / LLM Systems / Aug 2026",
+        "portfolio: On the sample run the agent flags 9 of 24 mentions and the reviewer, simulated in the demo, corrects 7 of them before anything is reported, so the brief is built from the corrected labels.",
+        "repo:comms-agent/src/commsagent/graph.py: def build_comms_graph(llm=None, brand: str = \"Northwind\", threshold: float = 0.50,"
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "agents",
+        "orchestration"
+      ]
+    },
+    {
+      "id": "ca-02",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain comms-agent to a hiring manager in under a minute.",
+      "easy": "A small, auditable agent with a human review gate built into its control flow, honest that the model and reviewer are stand ins.",
+      "deep": "Lead with the job it automates, the graph and the gate, the sample numbers with their caveats (synthetic data, mock LLM, simulated reviewer), and what it shows about building agents without a framework.",
+      "say": "I built a small agent that runs a weekly media monitoring job. It's a state graph: plan, ingest, classify, a review gate, aggregate, report. Anything the classifier isn't sure about goes to a person before the numbers are reported. On a synthetic sample it flagged 9 of 24 mentions. The model and reviewer are stand ins, and I say so, because the thing I was showing is the orchestration.",
+      "evidence": [
+        "portfolio: On the sample run the agent flags 9 of 24 mentions and the reviewer, simulated in the demo, corrects 7 of them before anything is reported, so the brief is built from the corrected labels."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring manager"
+      ]
+    },
+    {
+      "id": "ca-03",
+      "type": "how",
+      "level": 1,
+      "q": "Walk through the agent's graph: nodes, edges, and what each node writes to state.",
+      "easy": "Six steps in a line, with one fork: plan, ingest, classify, then either human review or straight on, then aggregate and report.",
+      "deep": "plan: data[plan] = llm.plan(brand) (five templated steps), data[brand]. ingest: calls fetch_articles, stores data[articles] (24 sample mentions), records a tool call. classify: for each article calls classify_article and score_relevance, stores data[preds]; data[low_conf] = preds where needs_review(p, threshold) is true. Conditional edge review_gate(state) returns human_review if low_conf is non empty, else aggregate. human_review: corrects flagged labels from ground truth, writes data[corrected] and data[audit]. aggregate: sentiment mix, topic mix, reach weighted share of voice, message pull through, flagged and corrected counts into data[stats]. report: data[report] = llm.summarize(stats). Edges: plan to ingest to classify; human_review to aggregate to report to END. Entry is plan.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/graph.py: return \"human_review\" if s.data[\"low_conf\"] else \"aggregate\"",
+        "repo:comms-agent/src/commsagent/graph.py: g.add_conditional_edge(\"classify\", review_gate)",
+        "repo:comms-agent/src/commsagent/graph.py: g.add_edge(\"human_review\", \"aggregate\").add_edge(\"aggregate\", \"report\").add_edge(\"report\", END)"
+      ],
+      "sources": [],
+      "tags": [
+        "graph",
+        "control flow"
+      ]
+    },
+    {
+      "id": "ca-04",
+      "type": "number",
+      "level": 1,
+      "q": "Recall the sample run numbers and every caveat attached to them.",
+      "easy": "24 mentions, 9 flagged as low confidence, 7 corrections made by the reviewer before the report. All on synthetic data, with a simulated reviewer and a template based mock model.",
+      "deep": "Context for each number: 24 is the size of data/sample_articles.json, a deterministic corpus about the fictional brand Northwind (the same fictional corpus idea as media-pulse). 9 is the count of predictions whose min(topic, sentiment) confidence fell below 0.50. 7 is the human_review counter, which increments once per corrected field (topic or sentiment), so it counts label corrections and can span fewer than 7 mentions. The reviewer is an oracle that copies ground truth labels from the sample file, so every flagged error gets fixed by construction; a real reviewer would be slower and sometimes wrong. The run measures that the gate fires and corrections flow into the report, not the classifier's real world accuracy.",
+      "evidence": [
+        "portfolio: On the sample run the agent flags 9 of 24 mentions and the reviewer, simulated in the demo, corrects 7 of them before anything is reported, so the brief is built from the corrected labels.",
+        "repo:comms-agent/src/commsagent/graph.py: corrected += 1",
+        "repo:comms-agent/src/commsagent/graph.py: for field_, truth in ((\"topic\", truth_topic), (\"sentiment\", truth_sent)):",
+        "portfolio: Synthetic sample. It runs on the same fictional brand corpus as media-pulse."
+      ],
+      "sources": [],
+      "tags": [
+        "number",
+        "results",
+        "caveats"
+      ]
+    },
+    {
+      "id": "ca-05",
+      "type": "pushback",
+      "level": 1,
+      "q": "Your write up says the reviewer corrects 7 of the 9 flagged mentions. Is that what the code counts?",
+      "easy": "Not exactly. The code adds one for every label it changes, and each flagged mention has two labels (topic and sentiment). So 7 is seven label fixes, which can come from fewer than seven mentions.",
+      "deep": "In human_review, for each flagged prediction the loop visits both fields, (topic, truth_topic) and (sentiment, truth_sent), and does corrected += 1 whenever the truth differs. The trace even logs it as \"human corrected 7 labels\". The README, the portfolio write up, and the MockLLM's report sentence (\"of which 7 were corrected before reporting\") all phrase it as mentions. The accurate statement is 7 label corrections across the 9 flagged mentions; counting distinct IDs in data[audit] gives the mention count. The test only asserts corrected == len(audit), which both definitions satisfy.",
+      "say": "Good catch, and it's a wording issue in my write up. The counter goes up once per corrected field, topic or sentiment, so 7 is label corrections, not mentions. The trace log says labels. I'd fix the README and the report template to say so.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/graph.py: for field_, truth in ((\"topic\", truth_topic), (\"sentiment\", truth_sent)):",
+        "repo:comms-agent/src/commsagent/graph.py: corrected += 1",
+        "repo:comms-agent/src/commsagent/graph.py: s.log(f\"human corrected {corrected} labels\")",
+        "repo:comms-agent/src/commsagent/llm.py: f\"of which {s['corrected']} were corrected before reporting.\"",
+        "repo:comms-agent/tests/test_agent.py: assert STATE.data[\"corrected\"] == len(STATE.data[\"audit\"])"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "metric definition"
+      ]
+    },
+    {
+      "id": "ca-06",
+      "type": "how",
+      "level": 2,
+      "q": "How does the StateGraph engine work internally?",
+      "easy": "It keeps a table of named steps and a table of what comes next after each step. Starting from the entry step, it runs a step, asks where to go next, and repeats until it reaches the end marker or a step limit.",
+      "deep": "State is a dataclass with data (dict), trace (list of strings), and tool_calls (list of dicts), plus log() and record_tool(). StateGraph holds nodes: name to Callable[[State], State]; edges: name to next name (one outgoing fixed edge per node, a second add_edge overwrites); cond: name to router Callable[[State], str]; entry; max_steps (default 50). _next(node, state) prefers a conditional router over a fixed edge and defaults to END (\"__end__\"). run(state, retries=1) loops: check the step guard, log enter:{node}, call the node with retry handling, pick the next node, increment steps. Builder methods return self for chaining. It is about 90 lines with no dependencies.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/orchestrator.py: def __init__(self, max_steps: int = 50):",
+        "repo:comms-agent/src/commsagent/orchestrator.py: def run(self, state: State | None = None, retries: int = 1) -> State:",
+        "repo:comms-agent/src/commsagent/orchestrator.py: END = \"__end__\""
+      ],
+      "sources": [],
+      "tags": [
+        "orchestrator",
+        "state machine",
+        "code"
+      ]
+    },
+    {
+      "id": "ca-07",
+      "type": "concept",
+      "level": 1,
+      "q": "Why put the human review gate in the control flow as a conditional edge, rather than filtering afterward?",
+      "easy": "Because then the program cannot produce a report without passing through review when something is uncertain. The rule is enforced by the structure of the run, and the trace shows whether review happened.",
+      "deep": "review_gate is a router: it returns human_review if data[low_conf] is non empty, else aggregate. Making it an edge means (1) aggregation and reporting are downstream of review on every uncertain run, so unreviewed labels cannot leak into the brief by forgetting a filter call; (2) the trace records enter:human_review, so an auditor can see the gate fired; (3) the policy is one swappable function, so routing rules (per field thresholds, sampling a few confident items for spot checks) change without touching nodes. The alternative, classifying everything and filtering at report time, scatters the policy across code and leaves no structural guarantee. In LangGraph the same thing is add_conditional_edges, usually paired with an interrupt so the run pauses for a real person.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/graph.py: return \"human_review\" if s.data[\"low_conf\"] else \"aggregate\"",
+        "portfolio: So the human in the loop quality gate lives in the agent's control flow."
+      ],
+      "sources": [
+        "https://docs.langchain.com/oss/python/langgraph/graph-api"
+      ],
+      "tags": [
+        "human in the loop",
+        "control flow",
+        "design"
+      ]
+    },
+    {
+      "id": "ca-08",
+      "type": "how",
+      "level": 2,
+      "q": "How do retries work in the engine, and what can go wrong with them?",
+      "easy": "If a step throws an error, the engine logs it and runs the same step again, once by default. If it fails again, the error propagates and the run stops.",
+      "deep": "Inside run, each node call sits in a while loop: on exception, attempt += 1, log error:{node}:{e} (attempt n), and if attempt > retries log FAIL:{node} and re raise. Caveats: State is shared and mutable, so a node that partially wrote to state before failing is retried on top of its own partial writes (for example a half filled list), which makes retries unsafe unless nodes are idempotent; there is no backoff or jitter, so a rate limited API would be hit again immediately; every exception is retried, including bugs that will fail deterministically; and exceptions inside a router function are not caught at all. Production frameworks checkpoint state before each node so a retry starts from a clean snapshot.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/orchestrator.py: except Exception as e:  # retry transient node failures",
+        "repo:comms-agent/src/commsagent/orchestrator.py: if attempt > retries:"
+      ],
+      "sources": [],
+      "tags": [
+        "retries",
+        "fault tolerance"
+      ]
+    },
+    {
+      "id": "ca-09",
+      "type": "how",
+      "level": 2,
+      "q": "What does the max step guard do, and what is subtly wrong with the trace when it fires?",
+      "easy": "It stops a run that has taken more than 50 steps, which catches accidental loops. But after stopping, the engine still writes the normal end marker into the trace, so an aborted run looks finished.",
+      "deep": "while node != END: if steps >= max_steps, log ABORT: exceeded max_steps=... and break. After the loop, run unconditionally appends enter:__end__ and returns state. So the last trace line is enter:__end__ for both a clean finish and an abort, and test_graph_reaches_report, which checks trace[-1] == enter:__end__, would pass on an aborted run. test_max_steps_guard builds a self loop with max_steps=5 and asserts that some trace line contains ABORT, which does test the guard. Fix: set a status field (completed, aborted, failed) on State, only log the end marker on a real END, and assert on status in tests.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/orchestrator.py: state.log(f\"ABORT: exceeded max_steps={self.max_steps}\")",
+        "repo:comms-agent/src/commsagent/orchestrator.py: state.log(\"enter:__end__\")",
+        "repo:comms-agent/tests/test_agent.py: assert STATE.trace[-1] == \"enter:__end__\""
+      ],
+      "sources": [],
+      "tags": [
+        "guardrails",
+        "bug",
+        "testing"
+      ]
+    },
+    {
+      "id": "ca-10",
+      "type": "pushback",
+      "level": 2,
+      "q": "The write up says every tool call is recorded. Is it?",
+      "easy": "Not individually. Each node writes one summary entry, so the 24 classification calls appear as a single line, and the relevance and review checks are not logged at all.",
+      "deep": "classify calls classify_article, score_relevance, and needs_review once per mention, but records only record_tool(\"classify_article\", \"classified N mentions\"). ingest records one fetch_articles entry and report one llm.summarize entry. For an audit trail that is a node level summary, not a per call log: it cannot show the input, output, or confidence of a specific call. The per mention audit that exists is in human_review (id, field, from, to, reviewer). Fix: have the Tool wrapper itself append {tool, args digest, output, latency} on every __call__, so logging cannot be forgotten by a node.",
+      "say": "It records one summary per node, not every call. Classification shows up as one line for 24 calls. I'd move the logging into the tool wrapper so every invocation is captured with inputs and outputs, which is what an audit actually needs.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/graph.py: s.record_tool(\"classify_article\", f\"classified {len(preds)} mentions\")",
+        "portfolio: Every tool call is recorded, so a run produces an auditable trace of exactly what the agent did."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "audit trail",
+        "observability"
+      ]
+    },
+    {
+      "id": "ca-11",
+      "type": "concept",
+      "level": 2,
+      "q": "How does the classify tool turn keywords into a topic and a confidence?",
+      "easy": "It counts topic keywords in the text, picks the topic with the most hits, and converts the counts into a probability like score with a sharpened softmax. One keyword hit is not enough to clear the review threshold; two hits against none is.",
+      "deep": "Eight topics each have a keyword list (Product Launch, Earnings, Leadership, Partnership, Sustainability, Controversy, Layoffs, Reviews). Score $v_t$ = total occurrences of topic $t$'s keywords. Confidence $= \\frac{e^{T v_{\\hat t}}}{\\sum_t e^{T v_t}}$ with $T = 1.8$, and 0 if no keyword appears. Worked values: one hit for one topic and none elsewhere gives $\\frac{e^{1.8}}{e^{1.8}+7} \\approx 0.46$, below 0.50, so it is flagged; two hits against none gives $\\frac{e^{3.6}}{e^{3.6}+7} \\approx 0.84$; a tie between two topics caps confidence below 0.5. So the gate effectively flags articles with zero or one topic signal and genuine two topic articles, which is the stated intent in the code comment. Ties in max() go to the first topic in dict order, a silent bias.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/tools.py: T = 1.8",
+        "repo:comms-agent/src/commsagent/tools.py: conf = math.exp(T * scores[label]) / total if total else 0.0",
+        "repo:comms-agent/src/commsagent/tools.py: label = max(scores, key=scores.get)"
+      ],
+      "sources": [],
+      "tags": [
+        "classification",
+        "softmax",
+        "heuristics"
+      ]
+    },
+    {
+      "id": "ca-12",
+      "type": "define",
+      "level": 2,
+      "q": "In the softmax here, is T a temperature?",
+      "easy": "Not in the usual sense. The code multiplies scores by T = 1.8, which sharpens the distribution; the standard temperature divides scores, and a value above 1 would flatten it. So 1.8 here acts like a temperature of about 0.56.",
+      "deep": "Standard: $p_t = \\frac{e^{z_t/\\tau}}{\\sum e^{z_j/\\tau}}$; $\\tau > 1$ flattens, $\\tau < 1$ sharpens. The code computes $e^{T v_t}$, so $T$ is an inverse temperature $\\beta = 1/\\tau$, and $T = 1.8$ corresponds to $\\tau \\approx 0.56$. The comment says the temperature (T>1) sharpens, which is correct for this code but uses the word backward relative to convention. Why it matters in interviews: temperature scaling for calibration (Guo et al.) divides logits by a learned $\\tau$ fit on validation data; here the value was hand chosen to move single topic articles above the threshold, which is threshold tuning, not calibration.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/tools.py: T = 1.8",
+        "repo:comms-agent/src/commsagent/tools.py: # The temperature (T>1) sharpens the distribution so a clear single-topic"
+      ],
+      "sources": [],
+      "tags": [
+        "define",
+        "softmax",
+        "calibration"
+      ]
+    },
+    {
+      "id": "ca-13",
+      "type": "concept",
+      "level": 2,
+      "q": "How is sentiment scored, and what is the edge case at the threshold?",
+      "easy": "Count positive words minus negative words from two small lists. More positive is positive, more negative is negative, zero is neutral. Confidence is half the absolute difference, capped at 1, so a single tone word gives exactly 0.5, which passes a threshold of 0.50.",
+      "deep": "Tokens come from the regex [a-z0-9]+ on lowercased text; sval = count in _POS minus count in _NEG; sentiment = positive, negative, or neutral by sign; s_conf = min(1, |sval| / 2). needs_review uses a strict less than: confidence < 0.50. So a mention with exactly one net tone word scores 0.5 and is not flagged, while a neutral mention (sval = 0) scores 0 and always is. Lexicon failure modes: negation (\"not strong\"), domain words (\"cuts\" in \"price cuts\"), and mixed articles where one positive and one negative word cancel to neutral with confidence 0. The overall confidence is min(topic, sentiment), so either weak signal flags the mention.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/tools.py: s_conf = min(1.0, abs(sval) / 2.0)  # one clear tone word -> 0.5, two -> 1.0",
+        "repo:comms-agent/src/commsagent/tools.py: return prediction[\"confidence\"] < threshold",
+        "repo:comms-agent/src/commsagent/tools.py: \"confidence\": round(min(conf, s_conf), 3),"
+      ],
+      "sources": [],
+      "tags": [
+        "sentiment",
+        "lexicon",
+        "threshold"
+      ]
+    },
+    {
+      "id": "ca-14",
+      "type": "pushback",
+      "level": 2,
+      "q": "Are those confidence scores calibrated? What does 0.84 actually mean?",
+      "easy": "No. They are heuristic scores built from keyword counts, with a hand tuned sharpening factor. Nothing in this repo checks that a 0.84 is right 84% of the time.",
+      "deep": "Calibration means that among predictions with confidence p, a fraction p are correct; it is measured with reliability diagrams and expected calibration error on labeled held out data. Here the topic score is a softmax over keyword counts and the sentiment score is |pos minus neg| / 2, combined with min, then compared to 0.50. The sample file has ground truth labels, so the repo could measure ECE and, more to the point, the error rate among unflagged mentions, but it does not. The sibling project media-pulse does report a topic ECE. The defensible claim for comms-agent is routing by a monotone uncertainty proxy, not calibrated probabilities.",
+      "say": "They aren't calibrated. They're keyword based scores with a hand tuned sharpening factor. The sample has labels, so I could measure calibration and the error rate among unflagged mentions, and that's the next thing I'd add. In media-pulse I did measure ECE.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/tools.py: conf = math.exp(T * scores[label]) / total if total else 0.0",
+        "repo:comms-agent/src/commsagent/tools.py: s_conf = min(1.0, abs(sval) / 2.0)  # one clear tone word -> 0.5, two -> 1.0",
+        "portfolio: expected calibration error to check that the confidence scores are honest"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "calibration"
+      ]
+    },
+    {
+      "id": "ca-15",
+      "type": "why",
+      "level": 2,
+      "q": "What kinds of errors does the gate let through, and why doesn't the demo show them?",
+      "easy": "Any mention the classifier labels wrongly but confidently skips review and goes straight into the report. The demo only counts corrections among flagged mentions, so it never reports how many confident mistakes remain.",
+      "deep": "human_review iterates over data[low_conf] only; aggregate then uses all predictions. So the residual error in the brief is exactly the confident but wrong set. With a keyword classifier, two keywords from the wrong topic (\"carbon\" and \"green\" in a product review) yield high confidence on a wrong label, and a single tone word in the wrong direction gives sentiment confidence 0.5, which is not flagged. Because the sample carries topic_true and sentiment_true for every mention, the run could report precision and recall of the gate (share of all errors caught), accuracy before and after review, and residual error, which is how a real HITL system justifies its threshold. That measurement is absent here.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/graph.py: for p in s.data[\"low_conf\"]:",
+        "repo:comms-agent/src/commsagent/tools.py: return prediction[\"confidence\"] < threshold"
+      ],
+      "sources": [],
+      "tags": [
+        "human in the loop",
+        "evaluation",
+        "error analysis"
+      ]
+    },
+    {
+      "id": "ca-16",
+      "type": "how",
+      "level": 2,
+      "q": "How does the simulated human review work, and what would production need instead?",
+      "easy": "The demo reviewer looks up the true labels stored in the sample file and copies them over any flagged prediction that differs, writing a log entry for each change. In production that would be a queue a real analyst works through.",
+      "deep": "human_review builds truth_topic and truth_sent dicts from the articles, loops over flagged predictions and both fields, and on mismatch appends {id, field, from, to, reviewer: analyst} to an audit list, overwrites the label, and increments corrected. Because truth is an oracle, the reviewer is perfect and instant. Production needs: a persistent queue (database table with status), a UI showing the mention, prediction, and confidence; reviewer identity and timestamps; an append only audit store; handling of reviewer disagreement (second review or adjudication); SLAs and a fallback when the queue is not cleared before the report deadline; and feedback of corrected labels into retraining. LangGraph style interrupts would pause the graph and resume it when review completes.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/graph.py: # oracle-backed review: the labeled sample provides ground truth, so the",
+        "portfolio: Simulated reviewer. In the demo the human review step is backed by an oracle, where production would use a real review UI."
+      ],
+      "sources": [],
+      "tags": [
+        "human in the loop",
+        "review queue",
+        "production"
+      ]
+    },
+    {
+      "id": "ca-17",
+      "type": "how",
+      "level": 2,
+      "q": "Which metrics does the aggregate node compute?",
+      "easy": "The share of positive, negative, and neutral coverage; how often each topic appears; share of voice against a competitor weighted by outlet reach; how often each key message appears; and how many mentions were flagged and corrected.",
+      "deep": "stats = {brand, n, sentiment_mix (Counter of sentiment), topic_mix (Counter, most common first), share_of_voice (reach weighted, normalized to 1, rounded to 3 places), message_pull_through (count of mentions containing each key message divided by n), flagged, corrected}. Key messages are fixed: AI-powered, privacy-first, carbon neutral by 2030, matched by lowercase substring. All of it runs on the corrected predictions, since human_review overwrote labels in place in data[preds]. The relevance score per mention is computed in classify but not used in any metric.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/graph.py: \"message_pull_through\": {k: round(c / n, 3) for k, c in msg.most_common()},",
+        "repo:comms-agent/src/commsagent/tools.py: KEY_MESSAGES = [\"AI-powered\", \"privacy-first\", \"carbon neutral by 2030\"]"
+      ],
+      "sources": [],
+      "tags": [
+        "metrics",
+        "communications measurement"
+      ]
+    },
+    {
+      "id": "ca-18",
+      "type": "formula",
+      "level": 2,
+      "q": "Write the share of voice computation and explain its bias in this setup.",
+      "easy": "Each article adds its outlet's reach weight to the brand, and also to a competitor if it mentions one. Share of voice is each name's total over the grand total.",
+      "deep": "$\\mathrm{SOV}_b = \\frac{\\sum_{a} w_a}{\\sum_{a} w_a + \\sum_{a:\\,c(a)\\neq\\emptyset} w_a}$ and $\\mathrm{SOV}_c = \\frac{\\sum_{a:\\,c(a)=c} w_a}{\\text{same total}}$, with $w_a$ = reach_weight (default 0.5). Every article in the corpus is a brand mention, so the brand collects weight from all of them while a competitor only collects weight when it is co mentioned in a brand article; competitor coverage that never mentions the brand is invisible. That structurally inflates the brand's share. A real SOV query pulls coverage for all tracked names from the same sources and window, often weighted by reach or impressions, and the test test_share_of_voice_normalized only checks that shares sum to 1.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/graph.py: sov[brand] += a.get(\"reach_weight\", 0.5)",
+        "repo:comms-agent/tests/test_agent.py: assert abs(sum(sov.values()) - 1.0) < 1e-6"
+      ],
+      "sources": [],
+      "tags": [
+        "share of voice",
+        "formula",
+        "bias"
+      ]
+    },
+    {
+      "id": "ca-19",
+      "type": "why",
+      "level": 3,
+      "q": "The classify node computes a relevance score for each mention. What uses it?",
+      "easy": "Nothing. It is calculated and stored with each prediction but never read by the gate, the metrics, or the report.",
+      "deep": "score_relevance = min(1, 0.4 times min(1, brand hits / 2) + 0.6 times reach_weight), stored as p[relevance]. aggregate does not weight or filter by it, and needs_review ignores it. Two uses would make it earn its place: weight mentions by relevance in sentiment and topic mixes (a passing mention should count less than a feature story), and route high reach, high relevance mentions to review even when confident, since an error there is costlier. Dead fields in an agent's state are a smell worth naming in a code review.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/graph.py: p[\"relevance\"] = tools[\"score_relevance\"](a)",
+        "repo:comms-agent/src/commsagent/tools.py: return round(min(1.0, 0.4 * min(1.0, hits / 2) + 0.6 * article.get(\"reach_weight\", 0.5)), 3)"
+      ],
+      "sources": [],
+      "tags": [
+        "code review",
+        "dead code"
+      ]
+    },
+    {
+      "id": "ca-20",
+      "type": "concept",
+      "level": 1,
+      "q": "Where does the LLM sit in this agent, and what does it actually do by default?",
+      "easy": "Behind a tiny interface with two jobs: produce a step plan and turn the metrics into a short written brief. The default is a fake model that fills templates, so every run is identical and needs no API key.",
+      "deep": "llm.py defines a Protocol LLM with complete(prompt) and summarize(stats). MockLLM.plan(brand) returns five fixed steps; MockLLM.summarize(stats) builds a paragraph: mention count, tone (net positive, net negative, or mixed from the counts), the dominant topic, up to three key messages with percentages, and the flagged and corrected counts. MockLLM.complete returns a placeholder string. Classification is not done by the LLM at all; it is the keyword tool. The write up is upfront: a hosted model improves the phrasing, not the pipeline.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/llm.py: def complete(self, prompt: str) -> str: ...",
+        "portfolio: The default behind it is a deterministic mock model, which keeps runs and tests reproducible offline.",
+        "portfolio: Mock model. The default LLM templates the report wording; a hosted model improves the phrasing, not the pipeline."
+      ],
+      "sources": [],
+      "tags": [
+        "llm",
+        "interfaces",
+        "mock"
+      ]
+    },
+    {
+      "id": "ca-21",
+      "type": "pushback",
+      "level": 1,
+      "q": "If the LLM is a template and the plan is fixed, is this really an agent?",
+      "easy": "By a strict definition, no: the model does not choose actions. It is a workflow with one conditional branch, run by a small graph engine. The project's claim is about orchestration and the human gate, not autonomous reasoning.",
+      "deep": "Concede: an agent in the strong sense lets a model pick tools and next steps from observations; here the graph topology is fixed in code, the plan is a constant list that nothing reads, and routing is a deterministic threshold rule. Defend: most production LLM systems that touch reporting are deliberately workflow shaped, because fixed control flow is testable and auditable, and the engine supports model chosen routing anyway, since a router is any function from State to a node name, so an LLM router can be dropped in. The honest label is an orchestrated workflow with a human gate, ready for an LLM to take over classification or routing.",
+      "say": "Strictly, it's a workflow with one conditional branch, not an autonomous agent, and I'd call it that. The model doesn't pick actions. I built the control flow first on purpose, because that's the part you need to test and audit, and a router can be an LLM call without changing the engine.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/graph.py: s.data[\"plan\"] = llm.plan(brand) if hasattr(llm, \"plan\") else []",
+        "repo:comms-agent/src/commsagent/graph.py: return \"human_review\" if s.data[\"low_conf\"] else \"aggregate\""
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "agents vs workflows"
+      ]
+    },
+    {
+      "id": "ca-22",
+      "type": "pushback",
+      "level": 2,
+      "q": "The agent makes a plan. Does the plan control anything?",
+      "easy": "No. The plan is stored and logged, but the steps that run are fixed by the graph's edges. Changing the plan text would not change what happens.",
+      "deep": "plan writes data[plan] and logs planned 5 steps; no node or router reads data[plan]. For the plan to matter, either the router should consult it (execute steps in plan order, skipping or adding nodes), or a plan and execute pattern should validate the model's plan against the allowed node set and then follow it, with the graph as a guardrail. With a hosted model the OpenAILLM skeleton has no plan method, so the hasattr check silently yields an empty plan. In an interview, present planning here as a placeholder that shows where a planner would plug in.",
+      "say": "It doesn't. The plan is logged, but the edges decide what runs. With a real model the next step would be letting a router read the plan and validating it against the allowed nodes. Right now it's a placeholder, and I'd describe it that way.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/graph.py: s.data[\"plan\"] = llm.plan(brand) if hasattr(llm, \"plan\") else []",
+        "repo:comms-agent/src/commsagent/llm.py: class OpenAILLM:  # pragma: no cover - requires api key + package"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "planning"
+      ]
+    },
+    {
+      "id": "ca-23",
+      "type": "how",
+      "level": 2,
+      "q": "What does swapping in a hosted model take, and what would you add around it?",
+      "easy": "Implement one method that sends a prompt and returns text, then pass the new class to the graph builder. Around it you would add structured outputs, validation, retries with backoff, and logging of prompts and responses.",
+      "deep": "README: implement complete() on a class in llm.py (an OpenAILLM skeleton is included, its complete raises NotImplementedError) and pass it as build_comms_graph(llm=...). Its summarize sends a prompt containing str(stats). Gaps to close for production: a plan() method or the plan becomes empty; JSON schema or tool calling output so the report can be validated (numbers in the brief must match stats exactly, which a check can enforce); retries with exponential backoff and timeouts; token and cost logging per call; prompt versioning; a fallback to the template if the model fails; and an eval that checks the brief never states a number absent from stats. If the LLM also takes over classification, its confidences need calibration before the 0.50 threshold means anything.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/llm.py: raise NotImplementedError(\"Wire up your OpenAI client here.\")",
+        "portfolio: Swapping in a hosted model is a one method change with no edits elsewhere, because the pipeline depends on the interface, not the provider."
+      ],
+      "sources": [],
+      "tags": [
+        "llm",
+        "production",
+        "integration"
+      ]
+    },
+    {
+      "id": "ca-24",
+      "type": "compare",
+      "level": 2,
+      "q": "Why build the orchestrator by hand instead of using LangGraph?",
+      "easy": "To keep the control flow visible and dependency free, so the orchestration itself is the thing being shown. The cost is missing features a framework gives you, such as saving progress and pausing for a human.",
+      "deep": "Mapping: add_node maps to add_node, the fixed edges to add_edge, the router to add_conditional_edges, and END to END; State would become a typed state schema with reducers. What LangGraph adds that this engine lacks: checkpointing after each step (resume after a crash, time travel debugging), interrupts that pause a run until a human responds, persistence across processes, streaming of intermediate state, parallel branches, and built in tracing. What hand rolling buys: about 90 auditable lines, no version churn, and tests that run on the standard library. The write up's claim that porting is mechanical is fair for this topology; adding a real human pause would be the first reason to switch.",
+      "evidence": [
+        "portfolio: It uses no agent framework on purpose, and porting the same graph to a library like LangGraph is a mechanical change.",
+        "repo:comms-agent/README.md: It runs with zero third-party dependencies so the orchestration itself is the focus."
+      ],
+      "sources": [
+        "https://docs.langchain.com/oss/python/langgraph/graph-api"
+      ],
+      "tags": [
+        "langgraph",
+        "frameworks",
+        "compare"
+      ]
+    },
+    {
+      "id": "ca-25",
+      "type": "how",
+      "level": 2,
+      "q": "What do the tests cover, and what do they miss?",
+      "easy": "Eight tests: the run reaches the report, every mention gets valid labels, the gate fires and the audit matches the counter, tool calls are logged, share of voice sums to one, the classifier is deterministic, a conditional edge can skip a node, and the step guard aborts a loop. They miss the skip path of the real graph and anything about accuracy.",
+      "deep": "tests/test_agent.py runs under pytest or standalone (a main loop prints PASS lines). Covered: test_graph_reaches_report, test_all_mentions_classified, test_human_gate_triggered_and_logged, test_tool_calls_recorded, test_share_of_voice_normalized, test_classify_tool_is_deterministic, test_conditional_edge_skips_review_when_confident, test_max_steps_guard. Gaps: the skip test builds a toy two node graph whose router always returns b, so the comms graph's all confident path is never exercised (a threshold of 0 would test it); no test of retry behavior; the end marker check passes even on abort; no assertion on residual errors after review; no golden test of the report text against stats.",
+      "evidence": [
+        "repo:comms-agent/tests/test_agent.py: def test_conditional_edge_skips_review_when_confident():",
+        "repo:comms-agent/tests/test_agent.py: def test_max_steps_guard():",
+        "repo:comms-agent/tests/test_agent.py: \"\"\"Tests for comms-agent. Runs under pytest or standalone.\"\"\""
+      ],
+      "sources": [],
+      "tags": [
+        "testing"
+      ]
+    },
+    {
+      "id": "ca-26",
+      "type": "why",
+      "level": 2,
+      "q": "Why default to a deterministic mock model?",
+      "easy": "So the whole pipeline runs offline, for free, with identical output every time, which makes tests reliable and lets anyone run the demo without an API key.",
+      "deep": "Determinism lets tests assert exact behavior (same classification twice, gate fires on the sample) and keeps CI free of network calls, cost, and flaky outputs. The tradeoff is that the mock exercises none of the hard parts of real LLM integration: malformed outputs, refusals, latency, rate limits, nondeterminism, and hallucinated numbers in summaries. A good middle ground is record and replay (cache real model responses keyed by prompt hash for tests) plus a small live eval suite run on a schedule.",
+      "evidence": [
+        "portfolio: The default behind it is a deterministic mock model, which keeps runs and tests reproducible offline."
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "llm",
+        "reproducibility"
+      ]
+    },
+    {
+      "id": "ca-27",
+      "type": "define",
+      "level": 2,
+      "q": "Define human in the loop, confidence gate, and audit trail as used here.",
+      "easy": "Human in the loop: a person checks the machine's uncertain outputs before they are used. Confidence gate: the rule that decides which outputs go to the person. Audit trail: the record of what the machine did and what the person changed.",
+      "deep": "Here the gate is confidence < 0.50 on min(topic, sentiment) confidence, implemented as a conditional edge; the human is an oracle in the demo; the audit trail is two things, the run trace (node entries, log lines, node level tool summaries) and the review audit list (mention id, field, old value, new value, reviewer). A complete HITL design also specifies reviewer capacity (how many flags per week a team can clear), the threshold chosen against that capacity and the cost of errors, sampling of confident items for quality control, and retention of the audit log.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/tools.py: return prediction[\"confidence\"] < threshold",
+        "repo:comms-agent/src/commsagent/graph.py: audit.append({\"id\": p[\"id\"], \"field\": field_,"
+      ],
+      "sources": [],
+      "tags": [
+        "define",
+        "human in the loop",
+        "responsible ai"
+      ]
+    },
+    {
+      "id": "ca-28",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations, and what breaks at 10x or 100x volume?",
+      "easy": "It is a single process, single pass demo on 24 synthetic mentions, with a keyword classifier, a perfect simulated reviewer, and state held in memory. Real volume would need queues, saved state, a real review tool, and a threshold set by how many items reviewers can handle.",
+      "deep": "From the write up: synthetic sample, mock model, simulated reviewer. From the code: node level tool logs, unused plan and relevance, trace end marker on abort, no measurement of residual errors. At 10x (hundreds of mentions a week): the loop is fine, but reviewer load scales with the flag rate, so the threshold must be set from reviewer capacity and error cost. At 100x (thousands a day, streaming): ingest becomes a queue consumer, classification batches, state goes to a database with checkpoints so retries are idempotent, review becomes an async queue with SLAs and the report waits or proceeds with a disclosed share unreviewed, and per call logs go to a tracing system.",
+      "evidence": [
+        "portfolio: Synthetic sample. It runs on the same fictional brand corpus as media-pulse.",
+        "portfolio: Simulated reviewer. In the demo the human review step is backed by an oracle, where production would use a real review UI."
+      ],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "scale",
+        "production"
+      ]
+    },
+    {
+      "id": "ca-29",
+      "type": "case",
+      "level": 2,
+      "q": "What would you build next?",
+      "easy": "Measure the gate properly, make every tool call auditable, give runs a real status, and replace the oracle with a review queue that can pause the run.",
+      "deep": "In order: (1) use the sample's ground truth to report accuracy before and after review, residual error among unflagged mentions, and gate recall; (2) choose the threshold from a curve of flags versus residual error; (3) log every tool invocation in the Tool wrapper; (4) a run status field and an end marker only on real completion; (5) checkpoint state before each node so retries are clean; (6) a persistent review queue with resume, or port to LangGraph for interrupts and checkpoints; (7) count corrections by mention and by field; (8) a hosted LLM for the brief with a check that every number in the text matches stats.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next steps"
+      ]
+    },
+    {
+      "id": "ca-30",
+      "type": "how",
+      "level": 2,
+      "q": "How does comms-agent relate to media-pulse?",
+      "easy": "They are two halves of one idea. media-pulse is the measurement system with a real trained classifier, a review queue, and quality checks; comms-agent is the automation layer that runs such a pipeline as an agent and writes the brief.",
+      "deep": "Both use a deterministic synthetic corpus about a fictional brand with ground truth labels. media-pulse has scikit learn TF-IDF plus logistic regression for topic, VADER for sentiment, ECE and per outlet accuracy, a Streamlit dashboard, and an audit log; comms-agent replaces the models with a dependency free keyword classifier so the orchestration is the focus. In an interview, pair them: media-pulse answers how good is the measurement, comms-agent answers how is the loop run, gated, and audited.",
+      "evidence": [
+        "portfolio: Where media-pulse is the measurement system, comms-agent runs it and produces the brief."
+      ],
+      "sources": [],
+      "tags": [
+        "architecture",
+        "related work"
+      ]
+    },
+    {
+      "id": "ca-31",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain comms-agent to a staff engineer.",
+      "easy": "A 90 line state graph engine with conditional routing, retries, and a step guard, running a fixed workflow with a confidence gate; and the three things you would fix.",
+      "deep": "Cover the engine, the gate, the classifier's confidence math, then the review findings: corrections counted per field, node level tool logs, end marker on abort, no residual error measurement.",
+      "say": "The engine is about 90 lines: named nodes over a shared state, fixed and conditional edges, one retry per node, and a 50 step guard. The gate is a router on min of topic and sentiment confidence below 0.5. Rereading it, I'd fix three things. Corrections are counted per field, tool calls are logged per node, and an aborted run still logs the end marker. And I'd measure the confident errors the gate lets through.",
+      "evidence": [
+        "repo:comms-agent/src/commsagent/orchestrator.py: def __init__(self, max_steps: int = 50):",
+        "repo:comms-agent/src/commsagent/graph.py: corrected += 1"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff engineer"
+      ]
+    },
+    {
+      "id": "ca-32",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain comms-agent to a product manager.",
+      "easy": "It automates the weekly media brief and guarantees a person checks anything the machine is unsure about before numbers go out.",
+      "deep": "Frame the user (a comms team), the output (a weekly brief), the trust mechanism (uncertain items reviewed first), and the open question (how many items reviewers can handle, and how many confident mistakes slip through).",
+      "say": "Comms teams write a weekly brief on how the brand is covered. This agent pulls the mentions, labels them, and holds back anything it's unsure about for a person to check before the numbers go out. The product question I'd want answered next is the tradeoff: how many items can the team review per week, and how many confident mistakes we accept.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "product manager"
+      ]
+    },
+    {
+      "id": "ca-33",
+      "type": "narrate",
+      "level": 3,
+      "q": "Explain comms-agent to a recruiter in plain words.",
+      "easy": "Tanay built a small AI assistant that prepares a weekly media report and asks a human to check anything it is unsure of.",
+      "deep": "One sentence on what it does, one on the human check, one on why it matters for AI roles.",
+      "say": "I built a small AI assistant that prepares a company's weekly media report. It labels each news mention, and anything it isn't sure about goes to a person before the report goes out. That mix of automation and human checking is what a lot of AI and communications teams need right now.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "LangGraph Graph API",
+      "url": "https://docs.langchain.com/oss/python/langgraph/graph-api",
+      "why": "State and reducers, nodes, fixed and conditional edges, checkpointers, and interrupts for human review, for mapping the hand built engine to a framework."
+    }
+  ],
+  "sheet": {
+    "easy": "## What it is\n- An agent (Aug 2026) that runs a weekly media monitoring job: get mentions, label them, send unsure ones to a person, write the brief.\n- Built on a small hand made graph engine with no outside libraries, so the control flow is easy to see and test.\n\n## The flow\nplan -> ingest -> classify -> [gate] -> human_review (only if something is unsure) -> aggregate -> report\n\n## Sample run (synthetic data, mock model, simulated reviewer)\n- 24 mentions, 9 flagged, 7 label corrections before the brief. The 7 counts corrected labels (topic or tone), not mentions.\n\n## How unsure is measured\n- Topic: keyword counts turned into a score; one keyword is not enough, two are.\n- Tone: positive words minus negative words; one word gives exactly 0.5, which passes.\n- A mention is flagged if the weaker of the two is below 0.50.\n\n## Metrics in the brief\n- Tone mix, topic mix, share of voice weighted by outlet reach, key message pull through, flagged and corrected counts.\n\n## Honest limits\n- Synthetic sample, template based model, perfect simulated reviewer.\n- Tool calls logged per step, not per call. The plan and the relevance score are never used.\n- Confident mistakes skip review and are not measured.\n",
+    "deep": "## Engine (orchestrator.py)\n- State: data dict, trace list, tool_calls list; log(), record_tool().\n- StateGraph(max_steps=50): nodes, edges (one fixed edge per node), cond (router State to name), entry. _next prefers router, else edge, else END = \"__end__\".\n- run(state, retries=1): guard steps >= max_steps then log ABORT and break; log enter:node; call node; on exception retry up to retries then FAIL and re raise; after the loop always log enter:__end__ (also after an abort).\n\n## Graph (graph.py, build_comms_graph(llm=None, brand=\"Northwind\", threshold=0.50))\n| Node | Writes |\n|---|---|\n| plan | data[plan] = llm.plan(brand) if present else [] (never read later) |\n| ingest | data[articles] via fetch_articles; one tool record |\n| classify | data[preds] (classify_article + score_relevance per mention); data[low_conf]; one tool record |\n| review_gate (router) | human_review if low_conf else aggregate |\n| human_review | oracle labels from topic_true and sentiment_true; audit {id, field, from, to, reviewer}; corrected += 1 per field |\n| aggregate | stats: sentiment_mix, topic_mix, share_of_voice, message_pull_through, flagged, corrected |\n| report | data[report] = llm.summarize(stats) |\n\n## Classifier (tools.py)\n- Topic: $v_t$ = keyword occurrences for 8 topics; $c = e^{T v_{\\hat t}} / \\sum_t e^{T v_t}$, $T = 1.8$ (an inverse temperature, equivalent to $\\tau \\approx 0.56$); 0 if no hit. One hit alone: $e^{1.8}/(e^{1.8}+7) \\approx 0.46$; two vs none: $\\approx 0.84$.\n- Sentiment: $s = \\#pos - \\#neg$ on regex tokens; label by sign; $c_s = \\min(1, |s|/2)$.\n- Confidence $= \\min(c, c_s)$; needs_review: confidence $< 0.50$ (strict, so one tone word at 0.5 passes).\n- Relevance: $\\min(1, 0.4\\min(1, h/2) + 0.6 w)$ with brand hits $h$ and reach $w$ (unused downstream).\n\n## Metrics\n- $\\mathrm{SOV}_b = \\sum_a w_a / (\\sum_a w_a + \\sum_{a: c(a)} w_a)$; brand counted on every article, competitor only when co mentioned, so brand share is inflated.\n- Pull through: share of mentions whose lowercase text contains each of AI-powered, privacy-first, carbon neutral by 2030.\n\n## LLM (llm.py)\n- Protocol: complete(prompt), summarize(stats). MockLLM: fixed 5 step plan, templated brief. OpenAILLM skeleton: complete raises NotImplementedError, no plan().\n\n## Sample run\n- 24 mentions, 9 flagged, 7 label corrections (per field). Synthetic Northwind corpus, oracle reviewer.\n\n## Tests (8, pytest or standalone)\nreaches report, all classified with valid labels, gate fires and corrected == len(audit), tool records present, SOV sums to 1, classifier deterministic, toy conditional edge skip, max step abort.\nGaps: real graph skip path, retries, abort status, residual error, report text vs stats.\n\n## Review findings\n| Claim | Code |\n|---|---|\n| reviewer corrects 7 of the 9 mentions | 7 label fields corrected |\n| every tool call recorded | one summary record per node |\n| planning | plan stored, never read |\n| complete trace | end marker logged even after ABORT |\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is comms-agent?",
+      "script": "comms-agent runs a weekly media monitoring loop as a state graph: plan, ingest, classify, a review gate, aggregate, report. Anything the classifier isn't sure about routes to a human before it reaches the brief. I wrote the graph engine myself, about 90 lines, so the control flow is explicit and testable. On a synthetic sample, 9 of 24 mentions get flagged and the simulated reviewer makes 7 label corrections. The model and reviewer are stand ins, on purpose.",
+      "keypoints": [
+        "Media monitoring loop as a state graph",
+        "Human gate is a conditional edge",
+        "Hand built engine, about 90 lines",
+        "9 of 24 flagged, 7 label corrections",
+        "Synthetic data, mock model, simulated reviewer"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "The job is the weekly brief a comms team writes about how a brand is covered. The agent automates it, with a person checking anything uncertain.\n\nUnderneath is a small state graph engine I wrote instead of using a framework. Nodes are functions over a shared state. There are fixed edges and conditional edges, one retry per node, a 50 step guard against loops, and a trace of every node entered.\n\nThe graph runs plan, ingest, classify, then a router. If any mention's confidence is below 0.5, it goes to human review, otherwise straight to aggregate, then report. Putting the gate in the control flow means the report can't be built from unreviewed uncertain labels.\n\nClassification is a keyword model so the repo has no dependencies. Topic is a sharpened softmax over keyword counts, so one keyword alone lands around 0.46 and gets flagged, while two land around 0.84. Sentiment is a word list, and confidence is the weaker of the two.\n\nOn 24 synthetic mentions, 9 get flagged. The reviewer is an oracle that copies ground truth, and it makes 7 corrections. Then aggregate computes tone mix, topic mix, reach weighted share of voice, and key message pull through, and a mock LLM fills a template for the brief.\n\nWhen I reviewed it later, I found my write up oversells a few things. The 7 counts label fields, not mentions. Tool calls are logged once per node, not once per call. And an aborted run still writes the end marker. The bigger gap is that confident mistakes skip review, and I never measured them, even though the sample has labels.\n\nNext I'd measure gate recall and residual error, and add a real review queue that pauses the run.",
+      "keypoints": [
+        "The job: weekly comms brief with human checking",
+        "Engine features: nodes, fixed and conditional edges, retries, guard, trace",
+        "Gate as a conditional edge, threshold 0.5",
+        "Classifier confidence math (0.46 vs 0.84)",
+        "Sample numbers with oracle reviewer and mock LLM",
+        "Review findings and unmeasured confident errors",
+        "Next steps"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "comms-agent automates a communications monitoring loop, and I scoped it around one question: can I make the human review gate part of the agent's control flow, with an audit trail, without a framework hiding the mechanics?\n\nThe engine is a StateGraph class. State is a dataclass with a data dict, a trace list, and a tool calls list. The graph holds a node table, one fixed outgoing edge per node, a router table for conditional edges, an entry node, and max_steps, default 50. The run loop checks the step guard, logs the node entry, calls the node, retries once on an exception, then asks the router or fixed edge for the next node, and stops at the end marker. Builder methods chain, and the whole thing is about 90 lines on the standard library.\n\nThe comms graph has six nodes. plan asks the LLM for a step plan. ingest calls fetch_articles on a 24 mention synthetic file about a fictional brand. classify runs the classifier and a relevance scorer per mention, then puts every prediction with confidence below 0.5 into a low confidence list. The router after classify sends the run to human_review if that list is non empty, otherwise to aggregate. human_review is an oracle in the demo: it copies the true topic and sentiment from the file, logs each change with id, field, old and new value, and reviewer, and counts corrections. aggregate computes sentiment and topic mixes, reach weighted share of voice, and pull through for three fixed key messages. report asks the LLM to phrase the stats.\n\nThe classifier is deliberately simple. Topic scores are keyword counts across eight topics, turned into a confidence with exp of 1.8 times the count over the sum. That 1.8 multiplies, so it's an inverse temperature. With eight topics, one keyword hit gives about 0.46 and gets flagged, two hits give about 0.84. Sentiment is positive minus negative words, with confidence half the absolute difference, capped at one. The overall confidence is the minimum, and the test is strictly less than 0.5, so a single tone word scores exactly 0.5 and passes.\n\nThe LLM sits behind a two method protocol. The default MockLLM is deterministic: a fixed plan and a templated brief. There's an OpenAI skeleton whose complete method raises NotImplementedError.\n\nResults on the sample: 9 of 24 flagged, 7 corrections. There are eight tests, covering the run, the gate, the audit count, tool records, share of voice summing to one, determinism, a toy conditional edge, and the step guard.\n\nWhen I reviewed my own code, I found four things I'd say before you do. The 7 counts corrected fields, so it's label corrections, not mentions, while my README says mentions. Tool calls are recorded once per node, so 24 classifications are one log line. The plan and relevance score are computed and never read. And after an abort, the engine still logs the end marker, so the test that checks the last trace line would pass on a failed run. The bigger evaluation gap is that only flagged items get reviewed, so confident mistakes go straight into the brief, and I never measured how many, although the sample has ground truth.\n\nNext: report accuracy before and after review, residual error, and gate recall, then pick the threshold from reviewer capacity. Move logging into the tool wrapper, add a run status, checkpoint state before each node so retries are clean, and replace the oracle with a persistent queue that pauses the run, which is the point where I'd port to LangGraph for interrupts and checkpoints.",
+      "keypoints": [
+        "Design question: gate in control flow with audit, no framework",
+        "Engine internals: State, edges, routers, retries, guard",
+        "Six nodes and what each writes",
+        "Classifier confidence math, inverse temperature, strict threshold",
+        "LLM protocol and mock",
+        "Results and tests",
+        "Self review findings and unmeasured confident errors",
+        "Next steps including LangGraph port reason"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to me like I'm not technical.",
+      "script": "Every week, a company's communications team reads through news about their brand and writes a short summary: is coverage positive or negative, what stories are people telling, are our key messages getting through. I built a small assistant that does the first pass. It reads each mention, labels it, and when it isn't confident, it hands that mention to a person to check before anything goes into the report. On a practice set of 24 mentions, it asked for help on 9. The person in my demo is simulated, and the data is made up, because I was focused on making the hand off to a human reliable and traceable.",
+      "keypoints": [
+        "What a comms brief is",
+        "Assistant labels mentions",
+        "Unsure items go to a person first",
+        "9 of 24 on the practice set",
+        "Simulated person and made up data, on purpose"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw it for me.",
+      "script": "First I draw the graph as boxes left to right: plan, ingest, classify. After classify I draw a diamond labeled gate, confidence below 0.5. One arrow from the diamond goes to human review and then to aggregate; another arrow skips straight to aggregate. Then report, then an end circle. I say that the diamond is a router function, so the review step is part of the control flow, not an afterthought.\n\nSecond, under the boxes, I draw the shared State as a long rectangle with three compartments: data, trace, tool calls. Arrows from each node point down into it. I write max steps 50 and one retry next to the engine.\n\nThird, I zoom into classify. I write the topic confidence as e to the 1.8 v over the sum, and show the two worked values: one keyword, 0.46, flagged; two keywords, 0.84, passes. Next to it, sentiment: positive minus negative words, confidence half of that, so one word is exactly 0.5. Then min of the two.\n\nFourth, the numbers: 24 in, 9 to review, 7 label corrections. I underline labels and say the counter is per field.\n\nLast, a box in the corner for what the gate misses: confident but wrong mentions bypass the diamond and land in the report. I write measure gate recall next to it, which is the first thing I'd add.",
+      "keypoints": [
+        "Graph with the gate as a diamond router",
+        "Shared State and engine features",
+        "Confidence math with worked values",
+        "Numbers with per field counting",
+        "Confident errors bypass the gate"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you choose the 0.5 threshold?",
+      "script": "Honestly, by hand, alongside the 1.8 sharpening factor. I tuned them so a single topic keyword lands just under 0.5 and gets reviewed, while two keywords clear it. That's threshold tuning on a heuristic score, not calibration. The right way uses the labels in the sample: plot residual error in the brief against the number of items flagged, then pick the point that fits the team's review capacity. In production I'd also spot check a sample of confident items, so the gate's misses get measured instead of assumed.",
+      "keypoints": [
+        "Hand tuned with the 1.8 factor",
+        "Single keyword just under 0.5",
+        "Not calibration",
+        "Choose from error versus flags curve and capacity",
+        "Spot check confident items"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What happens if a node fails halfway through?",
+      "script": "The engine catches the exception, logs it, and runs the node again once. If it fails again, it logs FAIL and re raises. The weakness is that state is shared and mutable, so a node that wrote half its output before failing gets retried on top of that partial state. That's fine for my nodes, which overwrite their keys, but it isn't safe in general. A production engine checkpoints state before each node, so a retry starts from a clean copy, and it adds backoff for flaky APIs.",
+      "keypoints": [
+        "One retry, then FAIL and re raise",
+        "Shared mutable state makes retries unsafe in general",
+        "My nodes overwrite keys",
+        "Checkpoint before each node; add backoff"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you make the human review real?",
+      "script": "Replace the oracle with a persistent queue. The gate writes flagged mentions to a table with status pending, the run pauses, and a reviewer UI shows the mention, the predicted labels, and the confidence. Each decision is written to an append only log with reviewer and timestamp. When the queue clears or a deadline hits, the run resumes and the brief says how many items were reviewed. That pause and resume is exactly what LangGraph's interrupts and checkpoints give you, so that's when I'd port.",
+      "keypoints": [
+        "Persistent queue with status",
+        "Reviewer UI with prediction and confidence",
+        "Append only audit with identity and time",
+        "Resume on clear or deadline; disclose coverage",
+        "LangGraph interrupts and checkpoints"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you evaluate whether the gate is doing its job?",
+      "script": "The sample has true labels, so I can measure it directly, and I didn't, which is the main gap. I'd report accuracy before and after review, the share of all errors that the gate caught, which is its recall, and the residual error rate among unflagged mentions, since those go straight into the brief. Then I'd plot those against the threshold. A good gate catches most errors while flagging few items, and the brief should disclose the residual error alongside its numbers.",
+      "keypoints": [
+        "Accuracy before and after review",
+        "Gate recall over all errors",
+        "Residual error among unflagged",
+        "Sweep threshold; disclose residual error"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your template model and fixed plan mean this isn't an agent. Isn't the title misleading?",
+      "script": "Fair point. Strictly, it's a workflow with one conditional branch, and the model doesn't choose actions. I'd describe it that way in an interview. What I'd defend is the choice to build the control flow first. Fixed, testable flow with a human gate is how most production LLM systems that touch reporting are built, and the engine supports model driven routing, since a router is any function from state to a node name. The plan being unused is a real gap, and I'd say so.",
+      "keypoints": [
+        "Concedes it is a workflow, model does not choose actions",
+        "Control flow first is deliberate",
+        "Routers can be LLM calls",
+        "Plan unused is a real gap"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your reviewer is perfect and your data is synthetic. What does 9 flagged and 7 corrected actually prove?",
+      "script": "It proves the plumbing, not the accuracy. The gate fires on uncertain items, corrections flow back into the labels, they're logged, and the brief is built from the corrected values. It says nothing about how well a real classifier or a real reviewer would do, and the 7 is label fields, not mentions. What I'd add to make it mean more is gate recall and residual error on the labeled sample, which the data already supports.",
+      "keypoints": [
+        "Concedes it proves plumbing only",
+        "What it does show: routing, correction, audit, report",
+        "7 is label fields",
+        "Add gate recall and residual error"
+      ]
+    }
+  ]
+}
