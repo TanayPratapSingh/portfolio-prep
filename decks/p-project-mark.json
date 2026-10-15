@@ -1,0 +1,1193 @@
+{
+  "deck_id": "p-project-mark",
+  "title": "Project Mark",
+  "group": "Portfolio",
+  "repo": "",
+  "summary_easy": "Tanay built product analytics tasks on real, licensed data that were meant to make the strongest AI models fail while staying fair to a careful human: each had one correct business recommendation and a misleading but real headline number. They built and verified four trap families. On the most developed task, about student engagement data, frontier models rebuilt the analysis and answered correctly anyway, which Tanay reports as a calibrated negative result.",
+  "summary_deep": "Project Mark (July 2026) required every task to resolve to one deterministic recommendation that ten domain experts would agree on, be reconstructible from six or more licensed real files, and draw difficulty only from methodology; a stump needed meaningfully wrong answers from at least two of the first four and one of the second four of eight model responses. Tanay profiled 5 datasets and built 4 trap families: composition shift (Simpson's paradox with a mismatched join key), an outlier artifact in an A/B revenue test (123 users, 0.06 percent of an arm, produced 89.4 percent of its revenue), circular and confounded metrics, and mismatched population merges. The final task on the Open University Learning Analytics Dataset planted a real decoy (total clicks versus passing, r = 0.56) and required decomposing clicks into active days times clicks per active day; return frequency carried a standardized effect around 0.24 (about 0.34 with all students) and intensity went to about zero, in every module and under both withdrawal rules. It cleared the program's construction and determinism checks. Frontier models solved it in repeated rollouts, even after hardening, because decomposing a composite metric is a default move for a strong reasoner.",
+  "sheet": {
+    "easy": "## What it is\n- July 2026 evaluation work: build product analytics tasks on real, licensed data that frontier AI models should fail, while staying fair to a careful human.\n- Every task: one deterministic recommendation ten domain experts would agree on, reconstructible from the shipped files, difficulty from method only.\n- A stump: across 8 model answers, at least 2 of the first 4 and 1 of the second 4 reach a meaningfully different answer.\n- Output: 5 datasets profiled, 4 trap families built and verified, golden answers reproduced to the digit.\n\n## What fair means\n- The correcting fact is somewhere in the files.\n- Every file opens with ordinary tools.\n- Every sensible way of cleaning the data gives the same answer.\n- Data is real, public domain or Creative Commons (checked per dataset), never model generated, 6 or more files in several formats, several of them needed for the answer.\n\n## The four traps\n| Trap | The misleading headline | The correction |\n| --- | --- | --- |\n| Composition shift | a blended rate falls quarter over quarter | every segment is flat or up; the mix moved (the segment must be joined across files on a mismatched key) |\n| Outlier artifact, A/B revenue | one arm's revenue looks competitive | 123 users (0.06% of the arm) paying a near identical odd amount made 89.4% of its revenue; split into conversion times value, use outlier resistant tests, the decision flips |\n| Circular metric | a health score \"agrees\" | the score contains the metric being tested, so it counts one signal twice |\n| Population mismatch | a file with similar columns | it covers another platform, window, or cohort |\n\n## The final task (Open University learning data, CC BY)\n- Question: fund richer sessions or a nudge to return on more days?\n- Decoy memo: total clicks vs passing r = 0.56; pass rate 0.3% to 91.9% from least to most active fifth.\n- Correct analysis: total clicks = active days x clicks per active day. Only days matters (standardized effect about 0.24; about 0.34 with all students). Clicks per day: about zero.\n- Same answer in every module and with or without withdrawn students. Two decoys built. Passed the program's checks.\n\n## What happened\n- The models solved it in repeated runs, ignored the decoys, and often quoted the exact adjusted numbers. Harder framing and stronger decoys changed nothing.\n- Lesson: splitting a combined metric and testing the parts is a reflex for a strong model. A fair trap has to target a step it skips.\n",
+    "deep": "## Brief and constraints\n- Domain: user behavior in a digital product feeding a product, growth, or monetization decision.\n- Determinism: one recommendation that ten domain experts would independently reach. Closure: reconstructible entirely from shipped files.\n- Legitimate difficulty: methodology and reasoning; no vague wording, no trick definitions.\n- Data: real; public domain or Creative Commons only, verified per dataset; never model generated; 6 or more files, several formats, several load bearing.\n- Fairness: correcting fact in corpus; standard tooling; all defensible cleanings converge.\n- Stump bar over 8 responses: $\\ge 2$ of responses 1 to 4 and $\\ge 1$ of responses 5 to 8 meaningfully different. Illustration (not a program number): with independent failure probability $q$, $P(\\text{stump}) = P(X_1\\ge2)P(X_2\\ge1)$, $X_i\\sim\\mathrm{Bin}(4,q)$; $q=0.5 \\Rightarrow 0.64$, $q=0.25 \\Rightarrow 0.18$.\n\n## Shared trap anatomy\nA headline number that is real, easy to compute, and misleading, plus a standard correcting analysis a rushed solver skips. The decoy never lies; only the inference is wrong.\n\n## Trap 1: composition shift (Simpson's paradox)\n$$P_t=\\sum_s w_{s,t}p_{s,t},\\qquad \\Delta P=\\underbrace{\\sum_s (w_{s,1}-w_{s,0})p_{s,0}}_{\\text{mix}}+\\underbrace{\\sum_s w_{s,1}(p_{s,1}-p_{s,0})}_{\\text{rate}}$$\n- Trap condition: rate term $\\ge 0$, mix term negative and larger. Anchoring is not unique; a symmetric split averages both orders.\n- Segment discovered and joined across files on a mismatched key (form of mismatch not stated in the write up).\n- Choosing pooled versus stratified: back door criterion (stratifier blocks spurious paths, is not caused by the treatment).\n\n## Trap 2: outlier artifact in an A/B revenue test\n- 123 users, 0.06 percent of the group, near identical anomalous payment, 89.4 percent of that arm's revenue; none in the other arm.\n- $\\mathrm{ARPU}=c\\cdot\\bar v$, $c=n_{pay}/n$, $\\bar v=\\frac{1}{n_{pay}}\\sum_{R_i>0}R_i$. Test $c$ with a two proportion z test; test $\\bar v$ among payers with ranks, bootstrap, or log scale (conditional on conversion, so post randomization selection caveat).\n- Mean fragility: $SE=\\sigma/\\sqrt n$ with tail inflated $\\sigma$; one user with revenue $x$ moves the mean by $x/n$.\n- Mann-Whitney: $U_1=n_1n_2+\\frac{n_1(n_1+1)}{2}-R_1$, $U_1/(n_1n_2)$ estimates $P(X>Y)+\\tfrac12P(X=Y)$; tie correction essential with a point mass at 0; efficiency about $3/\\pi$ under normality; does not test means.\n- Winsorize (cap at a percentile, keep $n$) versus trim (drop extremes); both depend on the cutoff.\n- Exclusion legitimacy: rule defined on record signature, blind to arm, reported with and without.\n\n## Trap 3: confounded and circular metrics\n- $H=aM+bZ \\Rightarrow \\mathrm{Cov}(H,M)=a\\,\\mathrm{Var}(M)+b\\,\\mathrm{Cov}(Z,M)$; positive even if $Z\\perp M$. Fix: rest score $Z$, the corrected item total idea.\n- Same family: correlation presented as causation on observational data. Adjustment: $P(y\\mid do(x))=\\sum_z P(y\\mid x,z)P(z)$. Never adjust for colliders (Berkson) or, for total effects, mediators.\n\n## Trap 4: mismatched population merges\n- Distractor file, similar columns, different platform, window, or cohort. Checks: key overlap rate, date and platform coverage, join cardinality, distribution comparison.\n\n## Final task: OULAD engagement decision\n- Data: OULAD (Kuzilek, Hlosta, Zdrahal 2017; CC BY 4.0; per the paper 32,593 students, 7 modules, 22 presentations, 10,655,280 studentVle rows with date and sum_click).\n- Question: fund a richer per session experience or a nudge to return on more days.\n- Decoy pre read: $r_{pb}$(total clicks, pass) $=0.56$; pass rate 0.3 percent to 91.9 percent across activity quintiles. $r_{pb}=\\frac{M_1-M_0}{s_n}\\sqrt{\\frac{n_1n_0}{n^2}}$.\n- Decomposition: $C_i=D_i\\cdot I_i$, $D_i$ = distinct active dates, $I_i=C_i/D_i$; $\\log C=\\log D+\\log I$.\n- Model: passing on both components; standardized effect of return frequency about 0.24, about 0.34 with all students included; intensity about 0 once days present is controlled. $\\beta^*=\\beta\\,s_x/s_y$. Link function and covariates not stated in the write up.\n- Robustness: within every module; with or without withdrawn students. Interpretation of 0.24 versus 0.34 (reasoning, not in source): withdrawn students add low $D$, $y=0$ rows, partly mechanical.\n- Two corroborating decoys pointing at the wrong lever; every figure reproduced from raw files. Cleared the program's automated construction and determinism checks.\n\n## Outcome\n- Repeated live rollouts: strong frontier models rebuilt the analysis, ran the frequency versus intensity decomposition, ignored the decoys, reached the golden answer, often quoting exact adjusted numbers. Hardening and more authoritative decoys did not change it.\n- Explanation: decomposing a composite and testing parts is a default move for a capable analyst. A stump needs a trap outside a strong reasoner's default repertoire.\n\n## Limitations\n- One task described in detail; models and rollout counts not recorded in the write up; expert agreement argued (cleaning convergence) rather than measured; possible training data exposure to public datasets not discussed; no public repo.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "In July 2026 I built analytics tasks meant to make frontier models fail, fairly. Each was a real product decision on real, licensed data, with one answer ten experts would agree on. I built four trap families, like Simpson's paradox and an outlier cluster in an A/B revenue test, and reproduced every golden answer from the raw files. My best task cleared the program's determinism checks. The models still solved it, and that negative result showed me where they're strong.",
+      "keypoints": [
+        "Eval task construction, July 2026, real licensed data",
+        "One deterministic answer ten experts would agree on",
+        "Four verified trap families, golden answers reproduced exactly",
+        "Frontier models solved the clean traps",
+        "Frames the miss as a calibrated finding"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "The program wanted product analytics tasks that frontier models would fail. The rules were strict. One deterministic recommendation that ten domain experts would agree on. Everything reconstructible from the shipped files. Real data under public domain or Creative Commons licenses, at least six files, several of them load bearing. Difficulty had to come from method, never from vague wording. A stump meant that across eight model answers, two of the first four and one of the second four reached a different answer.\n\nI profiled five datasets and built four trap families. Each pairs a real, easy, misleading headline with a correction a rushed solver skips. A blended metric that falls only because the segment mix moved. An A/B test where 123 users paying a near identical amount made 89.4 percent of one arm's revenue. A health score that secretly contains the metric it's supposed to corroborate. And a distractor file covering a different population.\n\nThe most developed task used the Open University's learning analytics data. Should we fund richer sessions, or a nudge to return on more days? A shipped pre read backed richer sessions with a real correlation of 0.56 between total clicks and passing. But total clicks is active days times clicks per day. Regress passing on both, and return frequency carries it, a standardized effect around 0.24. Intensity goes to about zero. That held in every module and with or without withdrawn students.\n\nIt cleared the program's construction and determinism checks. Then the models solved it anyway, in repeated rollouts. They decomposed the metric, ignored my decoys, and quoted the adjusted numbers. Hardening the framing did nothing. Decomposing a composite is a reflex for a strong analyst, so a fair trap has to target a step they skip.",
+      "keypoints": [
+        "States the brief: determinism, closure, licensed real data, method based difficulty",
+        "States the stump bar (2 of first 4, 1 of second 4)",
+        "Names all four trap families with the 123 users and 89.4 percent figures",
+        "OULAD task: r = 0.56 decoy, days times intensity, about 0.24, intensity about zero",
+        "Robustness: every module, with or without withdrawn students",
+        "Outcome: models solved it, hardening did not help, and why"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "The job was building eval tasks for frontier models in product analytics. The constraints matter, so I'll start there. Each task had to resolve to one recommendation that ten domain experts would independently reach. It had to be reconstructible from the shipped files, which meant at least six real files, public domain or Creative Commons, licenses checked per dataset, never model generated, several of them load bearing. Difficulty could only come from methodology. And it had to stump: across eight sampled responses, at least two of the first four and one of the second four had to land on a meaningfully different answer. Roughly, that needs a systematic blind spot, not occasional slips.\n\nFairness had three parts. The correcting fact had to be in the corpus. Every file had to open with standard tooling. And every defensible cleaning had to converge on the same answer. That last one is the hard engineering constraint, because real data offers lots of defensible cleanings.\n\nI profiled five datasets and built four trap families, each with a real, easy, misleading headline and a standard correction. Composition shift: a blended retention metric declines quarter over quarter while every segment is flat or up, and the segment has to be joined across files on a mismatched key. The outlier trap was on a real experiment dataset: 123 users, 0.06 percent of one arm, paid a near identical anomalous amount and produced 89.4 percent of that arm's revenue. The other arm had none. The correct call decomposes revenue into conversion times value, uses outlier resistant tests, and flips the decision raw averages imply. The circular metric trap ships a health score that embeds the metric under investigation, so citing it as corroboration double counts. The population trap ships a file with similar columns that covers a different platform, window, or cohort.\n\nThe flagship task used the Open University Learning Analytics Dataset, real click logs and outcomes under CC BY. The decision: fund a richer per session experience or a nudge to return on more days. The decoy pre read recommended per session, with a real correlation of 0.56 between total clicks and passing and pass rates climbing from 0.3 percent to 91.9 percent across activity quintiles. The trap is that total clicks equals active days times clicks per active day, and the two initiatives target different factors. I regressed passing on both components. Return frequency carried the whole association, a standardized effect around 0.24, and about 0.34 with withdrawn students included. Intensity collapsed to essentially zero once days were controlled. I checked it within every module, since pooling modules invites its own Simpson's paradox, and under both withdrawal rules, since that's the most contested cleaning choice in this dataset. Both held. I built two decoys pointing at the wrong lever, every figure reproducible. It passed the program's automated construction and determinism checks.\n\nThen it failed as a stump. In repeated live rollouts the models rebuilt the analysis from raw files, ran the frequency versus intensity split, ignored the decoys, and often quoted my exact adjusted numbers. I hardened the framing and added more authoritative decoys. Nothing changed. My read is structural: decompose a composite and test the parts is a default move for a capable analyst, and decoys act on beliefs, not on whether the analysis gets run. Once the model computes the split, its own numbers win.\n\nWhat I'd defend: the traps were fair, deterministic, and verified, so this is a clean negative result. What I'd concede: it's one detailed task, and the causal claim from observational data is limited, so the recommendation should ship as a randomized test of the nudge. Next time I'd profile what models check by default before designing a trap, and put the correcting fact in process knowledge, like a changelog, rather than in a statistic.",
+      "keypoints": [
+        "Constraints first: ten expert determinism, licensed real multi file data, stump bar",
+        "Fairness triple, with cleaning convergence as the hard constraint",
+        "All four trap families with the outlier numbers",
+        "OULAD: decoy figures, C = D x I, 0.24 and 0.34, intensity about zero",
+        "Why per module and withdrawal checks were the right sensitivity tests",
+        "Models solved it; structural explanation for why hardening failed",
+        "Concessions: one task, observational causal limits; next steps"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to me like I'm not technical.",
+      "script": "I wrote data puzzles meant to fool the best AI models, while staying fair to a careful person. Each puzzle was a real business decision built on real public data, with one answer experts would agree on. The trick was always a true number that points the wrong way. In my best puzzle, a memo said students pass more when they click more, so make each study session richer. But when you split clicking into how often students come back and how much they do each visit, only coming back matters. The AI models figured that out on their own, every time, even when I made the memo more convincing. So I didn't fool them. I learned how good they've become at careful analysis, and that changed how I design tests for them.",
+      "keypoints": [
+        "Puzzles meant to fool AI fairly, on real data",
+        "Each trap is a true number pointing the wrong way",
+        "The student example: how often versus how much",
+        "The models solved it even with stronger decoys",
+        "What was learned: they are good at careful analysis"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw it for me.",
+      "script": "First I draw the stump bar, because it defines success. Two boxes of four slots each. I write at least two wrong in the first box, at least one in the second, and say that a task needs a repeatable blind spot to pass.\n\nSecond, I draw the shared anatomy of every trap as two arrows out of the data. The short arrow goes to a headline number, real and easy to compute. The long arrow goes through a correcting step to the true answer. Under the long arrow I list the four corrections: segment the metric, inspect the distribution, read the metric's definition, check what population a file covers. I mark the outlier trap's numbers next to the second one: 123 users, 89.4 percent of one arm's revenue.\n\nThird, the OULAD task. I write C equals D times I, total clicks equals active days times clicks per active day. Above C I write r equals 0.56, the decoy. I draw two arrows into a box labeled pass, one from D and one from I, then label the D arrow about 0.24 and the I arrow about zero. Beside it I write two check marks: every module, and with or without withdrawn students.\n\nFourth, the outcome. I draw a model reading the files, then an arrow straight to the split C equals D times I, bypassing the decoy memo, which I cross out. I say the models did this step by reflex, so louder decoys didn't help.\n\nLast, in a corner, I write what I'd target next: steps a model skips, like a changelog that records a metric definition change.",
+      "keypoints": [
+        "Stump bar drawn first as two batches of four",
+        "Trap anatomy: headline arrow versus correction arrow",
+        "Four corrections listed with the outlier numbers",
+        "C = D x I with r = 0.56, about 0.24 and about zero",
+        "Robustness checks marked",
+        "Outcome: model bypasses the decoy; next targets"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you know the 123 users weren't real big spenders?",
+      "script": "Three things. They all paid a near identical, unusual amount, and genuine high value customers spread across many amounts. They sat entirely in one arm, and randomization should spread a real spending pattern across both arms. And the cluster carried 89.4 percent of that arm's revenue from 0.06 percent of its users, so the arm's mean was measuring the cluster. Then I checked the decision without depending on the amounts at all: split revenue into conversion times value, and compare with outlier resistant tests. Those agreed, which is why the flipped decision was deterministic.",
+      "keypoints": [
+        "Near identical anomalous amount",
+        "All in one arm, against randomization",
+        "0.06 percent of users, 89.4 percent of revenue",
+        "Conversion times value and outlier resistant tests agree"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why does intensity drop to zero once you control for active days?",
+      "script": "Because total clicks is a product of the two. If passing tracks how many days a student returns, total clicks will correlate with passing too, since it inherits the variation in days. The pre read credited the factor its initiative targeted. When both factors go into the same regression, active days absorbs the association and clicks per active day has nothing left to explain. I didn't trust that from the pooled data alone. I checked it within each module and under both withdrawal rules, and it held.",
+      "keypoints": [
+        "Total clicks is days times intensity",
+        "Correlation on the product inherits from days",
+        "Joint regression: days absorbs it, intensity about zero",
+        "Checked per module and both withdrawal rules"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why didn't hardening the framing or adding stronger decoys work?",
+      "script": "Decoys work on what the solver believes before it analyzes. They don't stop the analysis. The step that cracks this task, split a composite and test the parts, is something a capable analyst does without being asked, and the frontier models did it every time. Once a model computes the decomposition itself, its own numbers override any memo. That's also why they quoted my exact adjusted numbers. Making the decoy more authoritative just made a document they had already stopped trusting louder.",
+      "keypoints": [
+        "Decoys act on beliefs, not on the analysis step",
+        "Decomposition is a default move for strong models",
+        "Computed numbers override documents",
+        "Exact adjusted numbers quoted as evidence"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What would you build next time to actually stump a model, fairly?",
+      "script": "I'd start from the model instead of from the textbook. Run exploratory rollouts on a raw corpus and write down every check the model does unprompted, then design around a check it skips. My guess is that process knowledge is weaker than statistics: a metric definition that changed midway, recorded only in a changelog, or a filter baked into how an export was generated. The correcting fact would still sit in the corpus, so it stays fair. And I'd record rollouts per model, so the stump rate is a measured number.",
+      "keypoints": [
+        "Profile model default checks first",
+        "Target process knowledge such as changelogs and pipeline configs",
+        "Keep the fairness rule: fact in the corpus",
+        "Record rollouts so stump rate is measured"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "So the models beat your tasks. Isn't that just a failed project?",
+      "script": "On the stump bar, yes, and I lead with that. But the failure is clean. The task was fair, deterministic, cleared the program's construction and determinism checks, and every figure reproduced from raw files. Hardening didn't change the outcome. So it isn't a broken trap that models slipped through; it's a measurement. Strong models now decompose a composite metric by reflex and reject a confounded headline. For anyone building evals, that says where not to spend effort, and it's why I now start trap design from what models do by default.",
+      "keypoints": [
+        "Concedes the stump bar was not met",
+        "Task was fair, deterministic, and verified",
+        "Hardening did not change it",
+        "Reframes as a capability measurement",
+        "Changed design approach"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your recommendation to fund the return nudge is a causal claim from observational click data. How can it be deterministic?",
+      "script": "It isn't proof that a nudge causes passes, and I'd say that in the readout. Motivated students both return more and pass more. What's deterministic is the comparison between the two levers. The evidence for richer sessions vanishes once days are controlled, in every module and under both withdrawal rules. If you can fund one initiative, you back the one that carries the association, and you ship it as a randomized test. That's the answer ten analysts would converge on, causal caveat included.",
+      "keypoints": [
+        "Concedes no causal proof; motivation confounds",
+        "Determinism is about comparing two levers",
+        "Intensity evidence disappears under control, robustly",
+        "Recommends shipping the nudge as a randomized test"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "pm-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is Project Mark, in two sentences?",
+      "easy": "Tanay designed product analytics puzzles on real, licensed data, each with one correct business recommendation, meant to trip up the strongest AI models while staying fair to a careful human analyst. They built and verified four families of statistical traps, and the strongest models still solved the clean ones, which Tanay reports as a useful negative result.",
+      "deep": "Project Mark (July 2026, AI evaluation and analytics red teaming) was a task construction program. Each submission had to be a product, growth, or monetization question about how users behave inside a digital product, resolve to one deterministic recommendation that ten domain experts would independently agree on, be reconstructible entirely from the shipped files, and make a panel of frontier models fail. Tanay profiled 5 datasets and built 4 trap families (composition shift, an outlier artifact in an A/B revenue test, confounded and circular metrics, mismatched population merges), each pairing a real but misleading headline number with a correcting analysis. Every golden solution was reproduced from the raw files before shipping. The most developed task, on the Open University Learning Analytics Dataset, cleared the program's automated construction and determinism checks, and frontier models still rebuilt the analysis and answered correctly in repeated rollouts. There is no public repo; the portfolio write up is the only source for this deck.",
+      "say": "I built analytics tasks on real data that were supposed to stump frontier models, fairly. Each had one correct recommendation and a trap built from a real number. The traps were sound and verified, and the models still solved the clean ones. That told me more about where these models are strong than a win would have.",
+      "evidence": [
+        "portfolio: AI Evaluation / Analytics Red Teaming / Jul 2026",
+        "portfolio: 5 datasets profiled",
+        "portfolio: 4 trap families built and verified",
+        "portfolio: frontier models solved the clean traps"
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "llm evaluation",
+        "red teaming"
+      ]
+    },
+    {
+      "id": "pm-02",
+      "type": "concept",
+      "level": 1,
+      "q": "What did the brief require of every task?",
+      "easy": "A realistic product analytics question, one answer that domain experts would all reach, everything needed to solve it inside the shipped files, and enough difficulty that strong AI models get it wrong. The difficulty had to come from method and reasoning, never from vague wording.",
+      "deep": "Five constraints held at once. (1) Domain: how users behave inside a digital product, feeding a product, growth, or monetization decision. (2) Determinism: a single recommendation that ten domain experts would independently reach. (3) Closure: reconstructible entirely from the shipped files, so no outside knowledge or hidden context decides the answer. (4) Difficulty: a frontier model panel must fail, judged by a concrete stump bar over eight responses. (5) Legitimate difficulty: methodology and reasoning only, with no ambiguous phrasing and no trick definitions. Constraints 2 and 4 pull against each other. The more obvious the right answer is to ten experts, the more likely a strong model sees it too, and that tension is what the write up calls the real constraint: fair and hard at the same time.",
+      "evidence": [
+        "portfolio: Each had to resolve to a single deterministic recommendation that ten domain experts would independently agree on",
+        "portfolio: Difficulty had to come from methodology and reasoning, never from vague wording or a trick definition."
+      ],
+      "sources": [],
+      "tags": [
+        "task design",
+        "brief"
+      ]
+    },
+    {
+      "id": "pm-03",
+      "type": "number",
+      "level": 1,
+      "q": "What exactly counted as a successful stump?",
+      "easy": "Eight model answers were collected. At least two of the first four and at least one of the second four had to land on a meaningfully different answer from the golden one.",
+      "deep": "The bar counts failures over eight sampled responses split into two batches of four: at least 2 of 4 wrong in batch one and at least 1 of 4 wrong in batch two, where wrong means a meaningfully different recommendation, not a wording or rounding difference. So a stump needs at least 3 wrong out of 8, spread over both batches. As an illustration added for this deck (not a program number): if each response failed independently with probability $q$, the chance of clearing the bar is $P(X_1 \\ge 2)\\,P(X_2 \\ge 1)$ with $X_i \\sim \\mathrm{Binomial}(4, q)$. At $q = 0.5$ that is $\\tfrac{11}{16}\\cdot\\tfrac{15}{16} \\approx 0.64$; at $q = 0.25$ it is about $0.26 \\times 0.68 \\approx 0.18$. A task the model gets right three times in four rarely qualifies, so the bar demands a systematic blind spot rather than occasional slips.",
+      "evidence": [
+        "portfolio: Across eight model responses, at least two of the first four and one of the second four had to land on a meaningfully different answer."
+      ],
+      "sources": [],
+      "tags": [
+        "stump bar",
+        "binomial"
+      ]
+    },
+    {
+      "id": "pm-04",
+      "type": "why",
+      "level": 3,
+      "q": "Why split the stump bar into two batches of four instead of asking for 3 wrong out of 8?",
+      "easy": "The write up does not give the program's reason. A split bar makes failure show up in both batches, so one unlucky run of bad answers cannot make an easy task look hard.",
+      "deep": "Treat this as reasoning, since the program's rationale is not in the source. Requiring failures in both halves works like a replication requirement: the second batch confirms that the first batch's failures were not sampling noise. It also protects against failures that share a cause within one batch, such as a transient serving issue or a shared seed. The asymmetry, 2 of the first 4 and then 1 of the next 4, sets a stricter discovery bar and a lighter confirmation bar. Only a meaningfully different recommendation counts, so stochastic wording differences cannot pass as failures. It is pass@k turned around: the task must show that failure is reproducible across independent samples.",
+      "evidence": [
+        "portfolio: Across eight model responses, at least two of the first four and one of the second four had to land on a meaningfully different answer."
+      ],
+      "sources": [],
+      "tags": [
+        "stump bar",
+        "eval design"
+      ]
+    },
+    {
+      "id": "pm-05",
+      "type": "concept",
+      "level": 1,
+      "q": "What does \"fair\" mean for one of these traps?",
+      "easy": "The fact that corrects the misleading number has to be somewhere in the files, every file has to open with ordinary tools, and every sensible way of cleaning the data has to lead to the same answer.",
+      "deep": "Three conditions, quoted from the write up. Correcting fact present: the segmentation, the anomalous cluster, the score definition, or the population metadata is in the corpus, so a wrong answer measures skipped analysis rather than missing information. Standard tooling: files open in pandas or a spreadsheet; a failure caused by a corrupt or exotic format would measure parsing, not reasoning. Convergence across defensible cleanings: if dropping nulls versus imputing them, or including versus excluding a cohort, changed the answer, ten experts could disagree, and the task would be ambiguous rather than hard. The OULAD task tested the third condition directly: the answer held within every module and with or without withdrawn students.",
+      "evidence": [
+        "portfolio: Fair means the correcting fact lives somewhere in the corpus, every file opens with standard tooling, and all defensible cleanings converge on the same answer.",
+        "portfolio: The result held within every module and whether or not withdrawn students were included"
+      ],
+      "sources": [],
+      "tags": [
+        "fairness",
+        "task design"
+      ]
+    },
+    {
+      "id": "pm-06",
+      "type": "why",
+      "level": 2,
+      "q": "Why can't the difficulty come from vague wording or a trick definition?",
+      "easy": "Because then a model fails for reading the question differently, not for reasoning badly, and a careful human could fail for the same reason. That would measure ambiguity instead of analytical skill.",
+      "deep": "An eval item is valid when the gap between a right and a wrong answer reflects the capability being measured. Ambiguous wording makes the label depend on interpretation, which breaks the ten expert agreement requirement. A trick definition, for example a nonstandard meaning of \"active user\" hidden in a footnote, rewards gotcha reading rather than method. Both inflate apparent difficulty in a way that does not transfer: a model that fails a trick question has not shown a weakness a real analytics user would hit. Methodological difficulty (a confounded composite, a mix shift, an outlier cluster) is exactly the failure a stakeholder would suffer if they trusted the model's analysis, so the rule keeps the eval measuring what it claims to.",
+      "evidence": [
+        "portfolio: Difficulty had to come from methodology and reasoning, never from vague wording or a trick definition."
+      ],
+      "sources": [],
+      "tags": [
+        "eval validity",
+        "task design"
+      ]
+    },
+    {
+      "id": "pm-07",
+      "type": "how",
+      "level": 2,
+      "q": "What were the data constraints, and why does each one exist?",
+      "easy": "Real data only, with public domain or Creative Commons licenses checked one dataset at a time, never generated by a model, at least six files in several formats, and several of those files actually needed for the answer.",
+      "deep": "Real and licensed: tasks ship to a third party, so every file needs a license that allows redistribution, and Tanay checked the license per dataset rather than trusting an aggregator's label. Never model generated: data written by a model can carry regularities another model recognizes, and it weakens the claim that the task reflects real analytics work; real data also carries the quirks (nulls, key mismatches, odd clusters) that make honest traps possible. Six or more files across formats: real analysis means joining and reconciling sources, and one tidy table turns any trap into a single computation. Several load bearing: the correcting fact must live beyond the headline file, so the solver has to find and perform the join. The write up says satisfying all of these at once, on real data, is most of the work.",
+      "evidence": [
+        "portfolio: public domain or Creative Commons only, verified per dataset",
+        "portfolio: six or more files across a variety of formats and several of them load bearing"
+      ],
+      "sources": [],
+      "tags": [
+        "provenance",
+        "licensing",
+        "data"
+      ]
+    },
+    {
+      "id": "pm-08",
+      "type": "define",
+      "level": 2,
+      "q": "What is a \"load bearing\" file in a task corpus?",
+      "easy": "A file the correct answer actually depends on. Take it away and the task can no longer be solved, or the answer changes.",
+      "deep": "In a multi file corpus, files play three roles: load bearing (needed to reach the golden answer, such as the segment table that reveals a mix shift), decoys (real files that point at the wrong answer, like the OULAD pre reads), and context (data dictionaries, documentation). Requiring several load bearing files forces the solver to discover relationships between files, find join keys, and reconcile them, which is where rushed analysts cut corners. One way to confirm the set is a deletion ablation: remove each file in turn and check whether the golden answer is still reachable. The write up states the requirement; it does not describe how the program audited it.",
+      "evidence": [
+        "portfolio: six or more files across a variety of formats and several of them load bearing"
+      ],
+      "sources": [],
+      "tags": [
+        "define",
+        "task design"
+      ]
+    },
+    {
+      "id": "pm-09",
+      "type": "why",
+      "level": 1,
+      "q": "Why build deterministic traps with golden solutions reproduced to the digit?",
+      "easy": "So grading is unambiguous and the trap itself is trustworthy. If the correct answer comes out exactly from the files, any model answer can be checked against it, and nobody can argue the trap was miscomputed.",
+      "deep": "Determinism does three jobs. Grading: one recommendation backed by exact figures lets a grader mark right or wrong without judgment calls, which the eight response stump bar depends on. Validity: if Tanay's own pipeline could not reproduce both the headline and the correction from the raw files, the trap might rest on a computation error, and a model marked wrong might actually be right. Auditability: reproducing to the digit catches silent choices (inclusive versus exclusive date windows, which key a join used, dropped nulls) before a reviewer does. The program layered its own automated construction and determinism checks on top, which the OULAD task cleared.",
+      "evidence": [
+        "portfolio: deterministic golden solutions reproduced to the digit",
+        "portfolio: The task cleared the program's automated construction and determinism checks."
+      ],
+      "sources": [],
+      "tags": [
+        "determinism",
+        "golden solution"
+      ]
+    },
+    {
+      "id": "pm-10",
+      "type": "how",
+      "level": 2,
+      "q": "How was each trap verified before it shipped?",
+      "easy": "Each trap was built on the real data and checked with code so the intended answer came out exactly, along with every number quoted in the decoy files.",
+      "deep": "Per the write up, every trap was implemented against real data and checked with code so the intended answer reproduced exactly before anything shipped. For the OULAD task that ran in both directions: the decoy's figures (r = 0.56; pass rate 0.3 percent to 91.9 percent across activity quintiles) had to be real and reproducible, and so did the correcting decomposition (standardized effects about 0.24 and about 0.34). Then sensitivity checks: within each module, and with or without withdrawn students. Finally the program's automated construction and determinism checks. The tag list names Python, Pandas, NumPy, and SciPy; the write up does not describe the scripts themselves, so Tanay should be ready to describe them from memory.",
+      "evidence": [
+        "portfolio: Every trap below was implemented against real data and checked with code so the intended answer reproduced exactly before anything shipped.",
+        "portfolio: total clicks versus passing at r = 0.56, with pass rate climbing from 0.3 percent to 91.9 percent across activity quintiles",
+        "portfolio: standardized effect around 0.24, and about 0.34 with all students included",
+        "portfolio: The result held within every module and whether or not withdrawn students were included",
+        "portfolio: TAGS: Python, Pandas, NumPy, SciPy"
+      ],
+      "sources": [],
+      "tags": [
+        "verification",
+        "reproducibility"
+      ]
+    },
+    {
+      "id": "pm-11",
+      "type": "concept",
+      "level": 1,
+      "q": "What anatomy do all four trap families share?",
+      "easy": "A headline number that is real, easy to compute, and misleading, paired with a correcting analysis that a rushed solver skips.",
+      "deep": "\"Real\" carries the fairness: the decoy never lies, so a solver is never blamed for trusting a fabricated figure, only for stopping at the first figure. \"Easy to compute\" makes the shortcut attractive, because the headline appears after one groupby. The correcting analysis is always a standard method (segment the metric, inspect the distribution, read the metric's definition, check population coverage), which is why ten experts converge on it. The behavior under test is premature stopping: answering from the first defensible number without asking what produced it. That is also why the traps failed against frontier models, since asking what produced a number is something they now do by default.",
+      "evidence": [
+        "portfolio: Each one pairs a headline number that is real, easy to compute, and misleading with a correcting analysis that a rushed solver skips."
+      ],
+      "sources": [],
+      "tags": [
+        "trap design"
+      ]
+    },
+    {
+      "id": "pm-12",
+      "type": "concept",
+      "level": 1,
+      "q": "Trap 1, composition shift: what is it, and what does it test?",
+      "easy": "A blended retention or conversion rate falls from one quarter to the next even though every user segment is flat or improving, because the mix of users moved toward weaker segments. A solver who reads only the blended number concludes the product got worse.",
+      "deep": "The blended rate is a weighted average of segment rates, weighted by each segment's share of users. If the share of a low rate segment grows (more users arriving through a channel that retains worse, say), the blend falls while each segment holds or improves: Simpson's paradox in its time series form. The trap tests two things. Statistical: does the solver segment a metric before interpreting a change in it? Data work: can they find the segmentation at all? In Tanay's version the segment had to be discovered and joined across files on a mismatched key, so the correction needed both the idea and the join. The write up does not say what form the key mismatch took; typical forms are type or padding differences, case or prefix differences, or two ID namespaces bridged by a crosswalk file.",
+      "evidence": [
+        "portfolio: A blended retention or conversion metric that declines quarter over quarter while every underlying segment is flat or improving, because the mix of segments moved.",
+        "portfolio: The naive read (the product is getting worse) is refuted by a segmentation the solver has to discover and join across files on a mismatched key."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Simpson%27s_paradox"
+      ],
+      "tags": [
+        "simpsons paradox",
+        "composition shift"
+      ]
+    },
+    {
+      "id": "pm-13",
+      "type": "formula",
+      "level": 2,
+      "q": "Write the mix versus rate decomposition of a change in a blended rate.",
+      "easy": "Split the change into two parts: how much came from segments changing their own rates, and how much came from the mix of segments changing.",
+      "deep": "Segment $s$ has share $w_{s,t}$ and rate $p_{s,t}$ in period $t$, so $P_t = \\sum_s w_{s,t}\\,p_{s,t}$. Then $\\Delta P = \\underbrace{\\sum_s (w_{s,1}-w_{s,0})\\,p_{s,0}}_{\\text{mix}} + \\underbrace{\\sum_s w_{s,1}\\,(p_{s,1}-p_{s,0})}_{\\text{rate}}$. In a composition shift trap the rate term is zero or positive and the mix term is negative and larger. The split is not unique: anchoring the other way (new rates in the mix term, old shares in the rate term) gives different pieces with the same total, and a symmetric version averages the two anchorings. Report both terms, because a stakeholder asking whether the product got worse needs the rate term, while a growth team asking why the topline fell needs the mix term. This decomposition is textbook shift share analysis; the write up names the trap but not the exact formula used.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Simpson%27s_paradox"
+      ],
+      "tags": [
+        "simpsons paradox",
+        "shift share",
+        "formula"
+      ]
+    },
+    {
+      "id": "pm-14",
+      "type": "define",
+      "level": 1,
+      "q": "Define Simpson's paradox and give the two classic examples.",
+      "easy": "A trend that appears inside every group but disappears or reverses once the groups are pooled, because the groups are mixed in different proportions.",
+      "deep": "Pooled rates are weighted averages, so when a confounder is distributed unevenly across the compared groups, the pooled comparison can flip even when every within group comparison points the other way. UC Berkeley 1973: men were admitted at a higher overall rate, but women applied more often to competitive departments; department by department the data showed a small bias in favor of women. Kidney stones: treatment A beat B for small stones and for large stones, yet B looked better pooled, because A was given more of the hard large stone cases. Which table is right depends on the causal structure, not the arithmetic: Pearl's back door criterion says stratify on a variable that blocks spurious paths and is not itself affected by the treatment. In the composition shift trap, the segment is a property of the user mix, so the stratified view answers whether the product changed.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Simpson%27s_paradox"
+      ],
+      "tags": [
+        "simpsons paradox",
+        "define",
+        "causal inference"
+      ]
+    },
+    {
+      "id": "pm-15",
+      "type": "concept",
+      "level": 1,
+      "q": "Trap 2, the outlier artifact in an A/B revenue test: what was it?",
+      "easy": "On a real experiment dataset, one arm's revenue looked competitive, but a tiny cluster of users who all paid almost the same unusual amount produced nearly all of it. The other arm had no such cluster. Seen correctly, the decision flips.",
+      "deep": "123 users, 0.06 percent of the group, each paid a near identical anomalous amount and accounted for 89.4 percent of that arm's revenue, while the other arm had none. Raw revenue per user, the obvious headline, makes that arm look competitive. The correct call has three steps: recognize the cluster as non genuine; handle the zero inflated, heavy tailed revenue distribution properly by decomposing revenue into conversion times value and using outlier resistant tests; then flip the decision that raw averages imply. The trap tests whether a solver looks at the distribution behind a mean before acting on it, the most common way real A/B readouts go wrong for revenue metrics.",
+      "evidence": [
+        "portfolio: 123 users (0.06 percent of the group) each paid a near identical anomalous amount and accounted for 89.4 percent of that arm's revenue, while the other arm had none.",
+        "portfolio: decompose conversion times value",
+        "portfolio: flipping the decision the raw averages imply"
+      ],
+      "sources": [],
+      "tags": [
+        "ab testing",
+        "outliers",
+        "revenue"
+      ]
+    },
+    {
+      "id": "pm-16",
+      "type": "number",
+      "level": 1,
+      "q": "Recall the numbers behind the outlier trap and what each one means.",
+      "easy": "123 users, 0.06 percent of their arm, produced 89.4 percent of that arm's revenue. The other arm had no such users.",
+      "deep": "123 is the count of users in the cluster; 0.06 percent is their share of the arm's users; 89.4 percent is their share of the arm's total revenue. Together they say roughly nine tenths of the arm's revenue rests on about one user in 1,700, which is what makes a mean based comparison meaningless here. \"Each paid a near identical anomalous amount\" is the tell that the cluster is an artifact rather than a set of real big spenders, since genuine high value customers spread across many amounts. The figures come from a real experiment dataset the write up does not name, and the arm size is not given, so do not quote one. Context: this was one of four trap families; the write up does not report model results on this trap specifically.",
+      "evidence": [
+        "portfolio: 123 users (0.06 percent of the group) each paid a near identical anomalous amount and accounted for 89.4 percent of that arm's revenue, while the other arm had none."
+      ],
+      "sources": [],
+      "tags": [
+        "number",
+        "outliers"
+      ]
+    },
+    {
+      "id": "pm-17",
+      "type": "how",
+      "level": 2,
+      "q": "How would an analyst recognize that cluster as non genuine rather than a set of real whales?",
+      "easy": "Look at the revenue values themselves: many users paying the same odd amount, all in one arm, is a pattern real spending does not produce.",
+      "deep": "Checks that surface it, in the order a careful analyst runs them: (1) value counts of the revenue amount, where a spike of 123 users at one near identical value stands out against a continuous spend distribution; (2) revenue concentration, the share of revenue from the top 0.1 percent of users per arm, here 89.4 percent in one arm and nothing comparable in the other; (3) arm asymmetry, since randomization should spread genuine whales across both arms roughly evenly; (4) supporting attributes such as timestamps, sign up dates, or device fields that cluster together. The write up says the solver must recognize the cluster as non genuine; it does not list which attributes it planted or which the intended solution uses, so treat items 3 and 4 as general method. Randomization is the strongest argument: a real effect does not put all of a rare spending pattern in one arm.",
+      "evidence": [
+        "portfolio: 123 users (0.06 percent of the group) each paid a near identical anomalous amount and accounted for 89.4 percent of that arm's revenue, while the other arm had none."
+      ],
+      "sources": [],
+      "tags": [
+        "outliers",
+        "data quality",
+        "ab testing"
+      ]
+    },
+    {
+      "id": "pm-18",
+      "type": "formula",
+      "level": 2,
+      "q": "Decompose revenue per user into conversion times value. Why does that help?",
+      "easy": "Revenue per user equals the share of users who pay times the average amount a payer pays. Testing the two parts separately shows whether one arm gets more payers or just a few huge payments.",
+      "deep": "$\\mathrm{ARPU} = \\frac{1}{n}\\sum_i R_i = \\underbrace{\\frac{n_{pay}}{n}}_{c\\ \\text{(conversion)}}\\cdot\\underbrace{\\frac{1}{n_{pay}}\\sum_{i: R_i>0} R_i}_{\\bar v\\ \\text{(value per payer)}}$. Conversion is a proportion, tested with a two proportion z test, which is insensitive to how much anyone paid. Value per payer is tested among payers only, where the distribution is still skewed, so a rank test, a bootstrap interval, or a test on log revenue is safer than a t test on raw amounts. The decomposition localizes the effect: an arm with a high ARPU from a few large payments shows a flat or worse conversion and a value per payer driven by the cluster. A caution for the deep version: the payer subgroup is defined after randomization, so comparing value per payer is a conditional comparison and can be biased if the treatment changes who converts.",
+      "evidence": [
+        "portfolio: decompose conversion times value"
+      ],
+      "sources": [],
+      "tags": [
+        "ab testing",
+        "arpu",
+        "formula"
+      ]
+    },
+    {
+      "id": "pm-19",
+      "type": "concept",
+      "level": 2,
+      "q": "What is a zero inflated, heavy tailed distribution, and why does it break a t test on mean revenue?",
+      "easy": "Most users pay nothing, and a few pay a lot. The average then depends on a handful of people, so it jumps around, and a test built on averages becomes unreliable.",
+      "deep": "Zero inflated: a large point mass at 0 (non payers) plus a continuous part for payers. Heavy tailed: the payer part has a slowly decaying right tail, so the variance is large and dominated by a few values. The sample mean has standard error $\\sigma/\\sqrt{n}$ with $\\sigma$ inflated by the tail, and a single user with revenue $x$ moves the arm mean by $x/n$. The t test's normal approximation for the mean converges slowly under heavy tails, so its p values are off at realistic sample sizes. In the Project Mark trap the tail was not even genuine: 0.06 percent of users supplied 89.4 percent of one arm's revenue, so that arm's mean measured the cluster, not the treatment.",
+      "evidence": [
+        "portfolio: 123 users (0.06 percent of the group) each paid a near identical anomalous amount and accounted for 89.4 percent of that arm's revenue, while the other arm had none."
+      ],
+      "sources": [],
+      "tags": [
+        "distributions",
+        "ab testing",
+        "define"
+      ]
+    },
+    {
+      "id": "pm-20",
+      "type": "compare",
+      "level": 2,
+      "q": "Compare the outlier resistant options for testing a revenue A/B result.",
+      "easy": "Test whether more people pay, compare ranks instead of raw amounts, cap extreme values, or resample to get an interval. Each answers a slightly different question.",
+      "deep": "Two proportion z test on conversion: clean and well powered, ignores amounts. Mann-Whitney U on revenue: tests whether a random user in one arm tends to out spend one in the other, $P(X>Y)$; it is resistant to outliers because only ranks matter, but with a big point mass at zero most observations tie, so tie corrections matter and the test mostly reflects conversion. Winsorizing: replace values above a chosen percentile with that percentile, which keeps every user but caps influence; the answer depends on the cap, so report it. Trimmed mean: drop the extremes, same caveat. Bootstrap interval of the mean or of the ARPU difference: honest about skew but still dominated by a planted cluster unless it is removed first. The write up says to use outlier resistant tests without naming one, so know which one the golden solution used.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Mann%E2%80%93Whitney_U_test",
+        "https://en.wikipedia.org/wiki/Winsorizing"
+      ],
+      "tags": [
+        "ab testing",
+        "nonparametric",
+        "compare"
+      ]
+    },
+    {
+      "id": "pm-21",
+      "type": "formula",
+      "level": 3,
+      "q": "Write the Mann-Whitney U statistic. What does it actually test, and what goes wrong on revenue data?",
+      "easy": "Rank all values from both arms together, add up the ranks of one arm, and convert that sum to U. It asks whether values from one arm tend to be larger than values from the other.",
+      "deep": "With sizes $n_1, n_2$ and rank sums $R_1, R_2$ over the pooled sample: $U_1 = n_1 n_2 + \\frac{n_1(n_1+1)}{2} - R_1$, $U_2 = n_1 n_2 - U_1$, and $U_1/(n_1 n_2)$ estimates $P(X > Y) + \\tfrac12 P(X = Y)$ (exactly which arm depends on the sign convention). The null is that the two distributions are identical; it is a test of medians only under a pure location shift. Ties get midranks, and the normal approximation's variance must be tie corrected. On zero inflated revenue most users tie at 0, so U is mostly a conversion comparison plus a rank comparison among payers. It is efficient (about $3/\\pi \\approx 0.95$ of the t test under normality) and resistant to the 123 user cluster's magnitude, though not to its count. It does not test means, so it cannot say whether total revenue rose.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Mann%E2%80%93Whitney_U_test"
+      ],
+      "tags": [
+        "mann-whitney",
+        "formula",
+        "nonparametric"
+      ]
+    },
+    {
+      "id": "pm-22",
+      "type": "why",
+      "level": 2,
+      "q": "When is it legitimate to set aside 123 users and flip an A/B decision?",
+      "easy": "When there is a reason independent of the result: the cluster looks like an artifact, it sits in one arm only, and the rule for excluding it would be applied the same way whichever arm it landed in.",
+      "deep": "The defense against cherry picking is a decision rule that does not look at which arm wins: define the anomaly by its signature (near identical amount, a pattern genuine spending does not produce), apply it to both arms, and report results with and without it. Here the signature is strong, randomization should not put an entire rare spending pattern in one arm, and the decomposition into conversion and value tells the same story without any exclusion. Flipping a decision on a judgment call about outliers would not satisfy the ten expert agreement requirement; flipping it because every outlier resistant view agrees once the artifact is identified does. In an interview, name the sensitivity analysis before the interviewer asks for it.",
+      "evidence": [
+        "portfolio: 123 users (0.06 percent of the group) each paid a near identical anomalous amount and accounted for 89.4 percent of that arm's revenue, while the other arm had none.",
+        "portfolio: flipping the decision the raw averages imply"
+      ],
+      "sources": [],
+      "tags": [
+        "ab testing",
+        "outliers",
+        "decision making"
+      ]
+    },
+    {
+      "id": "pm-23",
+      "type": "concept",
+      "level": 1,
+      "q": "Trap 3, confounded and circular metrics: what was the trap?",
+      "easy": "A composite \"health score\" was offered as separate evidence for a claim, but the score is partly built from the very metric being investigated. Quoting it as support counts the same signal twice.",
+      "deep": "If the question is whether metric $M$ is moving, and the corpus also ships a composite health score $H$ whose definition includes $M$, then $H$ moves with $M$ by construction. A solver who writes \"retention fell, and the health score fell too, which corroborates it\" has counted one signal twice. The correction requires reading the score's definition, which the fairness rule puts in the corpus, and either removing $M$'s contribution or ignoring $H$. The same family covers correlation dressed up as causation on observational data, which the OULAD task uses in full. What it tests: does the solver check what a metric is made of before treating it as independent evidence?",
+      "evidence": [
+        "portfolio: A composite health score presented as independent corroboration that actually embeds the very metric under investigation, so citing it double counts one signal.",
+        "portfolio: The same family covers correlation dressed up as causation on observational data."
+      ],
+      "sources": [],
+      "tags": [
+        "metric design",
+        "circularity",
+        "confounding"
+      ]
+    },
+    {
+      "id": "pm-24",
+      "type": "formula",
+      "level": 2,
+      "q": "Show why a composite that contains the metric under study is guaranteed to correlate with it.",
+      "easy": "If a score is built partly from a metric, the score moves whenever the metric moves, even if the rest of the score is pure noise.",
+      "deep": "Let $H = aM + bZ$ with $a > 0$ and $Z$ the other components. Then $\\mathrm{Cov}(H, M) = a\\,\\mathrm{Var}(M) + b\\,\\mathrm{Cov}(Z, M)$. Even with $\\mathrm{Cov}(Z, M) = 0$, $\\mathrm{Corr}(H, M) = \\frac{a\\sigma_M}{\\sqrt{a^2\\sigma_M^2 + b^2\\sigma_Z^2}} > 0$, which is mechanical and says nothing about the world. The psychometric version is the item total correlation: correlating an item with a total that includes the item inflates it, and a corrected version removes the item first. The fix in analytics is the same: recompute the composite without $M$ (the rest score $Z$) and ask whether $Z$ alone corroborates the claim. In the trap, citing $H$ as independent support is the error.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Point-biserial_correlation_coefficient"
+      ],
+      "tags": [
+        "circularity",
+        "formula",
+        "metric design"
+      ]
+    },
+    {
+      "id": "pm-25",
+      "type": "concept",
+      "level": 2,
+      "q": "What is confounding, and how does adjustment remove it?",
+      "easy": "A confounder is a third factor that drives both the supposed cause and the outcome, making them look related. Comparing like with like on that factor removes the false link.",
+      "deep": "Traditionally $Z$ confounds $X \\to Y$ if $Z$ predicts $Y$, is associated with $X$, and is not on the causal path from $X$ to $Y$; the modern definition is membership in a minimal sufficient adjustment set. Adjustment formula with one confounder: $P(y \\mid do(x)) = \\sum_z P(y \\mid x, z)\\,P(z)$, which stratification and regression approximate. Failure modes: adjusting for a mediator removes part of the real effect, and adjusting for a collider (a common effect of $X$ and $Y$) creates a spurious association (Berkson's paradox). In the OULAD task the confounding is internal to the metric: total clicks bundles return frequency and per session intensity, and controlling for active days shows intensity carries essentially no association of its own.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Confounding"
+      ],
+      "tags": [
+        "confounding",
+        "causal inference",
+        "define"
+      ]
+    },
+    {
+      "id": "pm-26",
+      "type": "concept",
+      "level": 1,
+      "q": "Trap 4, mismatched population merges: what was it, and how does a careful analyst catch it?",
+      "easy": "A distractor file has columns that look like the ones the analysis needs, but it describes a different set of users: another platform, another time window, or another cohort. Merging it in produces a number that does not apply to the group in question.",
+      "deep": "The tempting move is a join or concat on similar column names, after which the solver reports a figure computed over the wrong population. Checks that catch it, as general method: (1) key overlap, the share of IDs that match between files, where a different population shows near zero overlap or an implausible match rate; (2) coverage metadata, comparing date ranges, platform or region fields, and cohort definitions against the question; (3) join cardinality, since row counts that grow or shrink unexpectedly after a merge flag a mismatch; (4) distribution checks, since summary statistics far from the main file suggest a different population. The trap tests whether the solver confirms what population a file covers before using it. The write up names the three ways the populations differed; it does not say which signal the intended solution relies on.",
+      "evidence": [
+        "portfolio: A distractor file with similar looking columns that covers a different population entirely (different platform, window, or cohort)"
+      ],
+      "sources": [],
+      "tags": [
+        "data integration",
+        "joins",
+        "population"
+      ]
+    },
+    {
+      "id": "pm-27",
+      "type": "compare",
+      "level": 2,
+      "q": "Compare the four trap families: what wrong belief does each exploit?",
+      "easy": "Composition shift: the average changed, so the parts changed. Outlier artifact: the average reflects typical users. Circular metric: two numbers agreeing are two pieces of evidence. Population mismatch: similar columns mean the same users.",
+      "deep": "Composition shift exploits treating a weighted average as if its weights were fixed; corrected by stratifying. Outlier artifact exploits treating a mean as representative under a zero inflated, heavy tailed distribution with a planted cluster; corrected by distribution inspection, conversion times value, and outlier resistant tests. Circular or confounded metrics exploit treating co movement as independent corroboration or as causation; corrected by reading definitions and adjusting for the bundled component. Population mismatch exploits treating schema similarity as population identity; corrected by coverage and key overlap checks. Simpson's paradox and confounding are related (the segment acts as a confounder of the time comparison), while circularity is a measurement construction error and population mismatch is a data integration error. All four share one anatomy: a real, easy headline and a standard correction a rushed solver skips.",
+      "evidence": [
+        "portfolio: Each one pairs a headline number that is real, easy to compute, and misleading with a correcting analysis that a rushed solver skips."
+      ],
+      "sources": [],
+      "tags": [
+        "trap design",
+        "compare"
+      ]
+    },
+    {
+      "id": "pm-28",
+      "type": "concept",
+      "level": 1,
+      "q": "Describe the final task: data, business question, and the decoy.",
+      "easy": "Real click logs and outcomes from Open University students. The question: to raise pass rates, fund a richer per session experience or a nudge to return on more days? A shipped internal memo argued for richer sessions, backed by a real correlation.",
+      "deep": "Data: the Open University Learning Analytics Dataset, real virtual learning environment click logs, registrations, and outcomes for tens of thousands of students, released under CC BY. Business question: which one engagement initiative to fund to raise course pass rates, a richer per session experience or a nudge to return on more days. Decoy: an internal pre read recommending the per session option, backed by a real and reproducible correlation, total clicks versus passing at r = 0.56, with pass rate climbing from 0.3 percent to 91.9 percent across activity quintiles. The trap is that total activity bundles two levers. Correct answer: fund return frequency. Tanay added a second decoy artifact pointing at the same wrong lever and verified every figure from the raw files.",
+      "evidence": [
+        "portfolio: real virtual learning environment click logs, registrations, and outcomes for tens of thousands of students, released under CC BY",
+        "portfolio: The business question was which one engagement initiative to fund to raise course pass rates: a richer per session experience, or a nudge to return on more days.",
+        "portfolio: total clicks versus passing at r = 0.56, with pass rate climbing from 0.3 percent to 91.9 percent across activity quintiles",
+        "portfolio: I built two corroborating decoy artifacts pointing at the wrong lever and verified that every figure reproduced from the raw files."
+      ],
+      "sources": [],
+      "tags": [
+        "oulad",
+        "final task"
+      ]
+    },
+    {
+      "id": "pm-29",
+      "type": "define",
+      "level": 2,
+      "q": "What is the Open University Learning Analytics Dataset (OULAD)?",
+      "easy": "A public dataset from the UK's Open University with anonymized students, the courses they took, their clicks in the online learning platform day by day, their assessments, and whether they passed.",
+      "deep": "Published by Kuzilek, Hlosta and Zdrahal in Scientific Data (2017) under CC BY 4.0. Per the paper: 32,593 students across 7 modules and 22 module presentations, with 10,655,280 rows in the studentVle click table. Tables are CSVs linked by IDs: courses, assessments, vle (one row per learning resource, id_site), studentInfo (demographics and final_result), studentRegistration (registration and unregistration day), studentAssessment, and studentVle (code_module, code_presentation, id_student, id_site, date, sum_click). Presentations start in February (B) or October (J). Students who unregistered carry a withdrawn final result, and date_unregistration is empty for completers. The date and sum_click columns are what make the days times intensity split computable. These counts describe the public dataset, not figures from Tanay's task.",
+      "evidence": [],
+      "sources": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC5704676/",
+        "https://research.stem.open.ac.uk/ouanalyse/dataset/"
+      ],
+      "tags": [
+        "oulad",
+        "define",
+        "dataset"
+      ]
+    },
+    {
+      "id": "pm-30",
+      "type": "number",
+      "level": 1,
+      "q": "Recall the decoy numbers: r = 0.56 and the quintile pass rates. What do they mean, and why are they real but misleading?",
+      "easy": "Students with more total clicks passed far more often: the correlation was 0.56, and pass rates rose from 0.3 percent in the least active fifth of students to 91.9 percent in the most active fifth. True, reproducible, and still the wrong basis for the decision.",
+      "deep": "With passing coded 0 or 1, Pearson r between total clicks and passing is the point biserial correlation, $r_{pb} = \\frac{M_1 - M_0}{s_n}\\sqrt{\\frac{n_1 n_0}{n^2}}$, where $M_1, M_0$ are mean clicks among passers and non passers. An r of 0.56 is large for behavioral data. Activity quintiles split students into five equal sized groups by total clicks; a pass rate climbing from 0.3 percent to 91.9 percent is a steep, monotone dose response pattern, exactly the kind of figure a pre read leads with. Both numbers are real, which is the point of the trap: the misleading part is the inference that more per session activity would raise passing. Caveat: point biserial r depends on the pass and fail split, and correlation on total clicks cannot say which component of clicks carries the association.",
+      "evidence": [
+        "portfolio: total clicks versus passing at r = 0.56, with pass rate climbing from 0.3 percent to 91.9 percent across activity quintiles"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Point-biserial_correlation_coefficient"
+      ],
+      "tags": [
+        "number",
+        "correlation",
+        "oulad"
+      ]
+    },
+    {
+      "id": "pm-31",
+      "type": "formula",
+      "level": 2,
+      "q": "Write the decomposition of total clicks and explain why it separates two levers.",
+      "easy": "Total clicks equals the number of days a student showed up times how many clicks they made on a typical active day. A return nudge moves the first factor; a richer session moves the second.",
+      "deep": "For student $i$: $D_i$ = active days (distinct dates with at least one click), $I_i = C_i / D_i$ = clicks per active day, so $C_i = D_i \\cdot I_i$ and $\\log C_i = \\log D_i + \\log I_i$. The two initiatives map onto the two factors: a nudge to return targets $D$, a richer per session experience targets $I$. Total clicks correlates with passing if either factor does, so r = 0.56 on $C$ cannot pick a lever. Regressing passing on $D$ and $I$ together asks which factor carries the association holding the other fixed. With OULAD's studentVle table, $D_i$ is a count of distinct date values per student and module presentation, and $C_i$ is the sum of sum_click. The write up states the decomposition; the log form is added here to show why the factors separate additively.",
+      "evidence": [
+        "portfolio: Decompose clicks into active days times clicks per active day, regress both against passing, and the entire association lives in return frequency"
+      ],
+      "sources": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC5704676/"
+      ],
+      "tags": [
+        "decomposition",
+        "formula",
+        "oulad"
+      ]
+    },
+    {
+      "id": "pm-32",
+      "type": "how",
+      "level": 1,
+      "q": "What did the decomposition show, with numbers?",
+      "easy": "Once both parts are in the model, the whole association with passing sits in how many days students return. How much they do per session drops to essentially nothing.",
+      "deep": "Passing was regressed on both components. Return frequency carried the entire association, with a standardized effect around 0.24, and about 0.34 with all students included. Per session intensity collapsed to essentially zero once days present was controlled. The result held within every module and whether or not withdrawn students were included, so the deterministic answer is to fund return frequency, not intensity. The write up says \"standardized effect\" but does not say whether the model was a linear probability model or a logistic regression, or what other covariates were in it; Tanay should state those details from their own notes, not guess.",
+      "evidence": [
+        "portfolio: Decompose clicks into active days times clicks per active day, regress both against passing, and the entire association lives in return frequency",
+        "portfolio: standardized effect around 0.24, and about 0.34 with all students included",
+        "portfolio: Per session intensity collapses to essentially zero once days present is controlled.",
+        "portfolio: The result held within every module and whether or not withdrawn students were included"
+      ],
+      "sources": [],
+      "tags": [
+        "regression",
+        "oulad",
+        "result"
+      ]
+    },
+    {
+      "id": "pm-33",
+      "type": "formula",
+      "level": 2,
+      "q": "What is a standardized regression coefficient, and what are its pitfalls?",
+      "easy": "It is the change in the outcome, in standard deviations, for a one standard deviation change in a predictor. It lets you compare predictors measured in different units, like days and clicks per day.",
+      "deep": "$\\beta^* = \\beta \\cdot \\frac{s_x}{s_y}$, equivalent to fitting the regression after scaling every variable to unit variance (some fields standardize only the predictors, in which case $\\beta^* = \\beta s_x$). With one predictor it equals the correlation. Why it fits here: active days and clicks per day have different units and spreads, and the question is which one matters more. Pitfalls: it depends on the sample's variance, so a predictor with a narrow range looks weak; a one SD change is hard to interpret for skewed variables such as click counts; and with a binary outcome in a logistic model the scaling of $y$ is not defined in the usual way. So \\\"about 0.24\\\" should always come with the model specification.",
+      "evidence": [
+        "portfolio: standardized effect around 0.24, and about 0.34 with all students included"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Standardized_coefficient"
+      ],
+      "tags": [
+        "standardized coefficient",
+        "regression",
+        "formula"
+      ]
+    },
+    {
+      "id": "pm-34",
+      "type": "why",
+      "level": 2,
+      "q": "Why is the 0.56 correlation real and still the wrong guide to the decision?",
+      "easy": "Because total clicks rises whenever students come back more often, and coming back is what goes with passing. The memo credited the wrong part of the number.",
+      "deep": "Total clicks is a product of two factors. If passing depends on $D$ and not on $I$ (conditional on $D$), total clicks still correlates strongly with passing because $C$ inherits $D$'s variation. The decoy's error is attributing the association to the visible factor that the proposed initiative targets. Adding $D$ to the model absorbs the association, and intensity's coefficient falls to about zero. The same logic shows up with session length versus session count in product engagement, or order size versus order frequency in retail. The fix is to never fund a lever on the strength of a composite's correlation; decompose the composite and test the parts.",
+      "evidence": [
+        "portfolio: total clicks versus passing at r = 0.56, with pass rate climbing from 0.3 percent to 91.9 percent across activity quintiles",
+        "portfolio: Per session intensity collapses to essentially zero once days present is controlled."
+      ],
+      "sources": [],
+      "tags": [
+        "confounding",
+        "decomposition"
+      ]
+    },
+    {
+      "id": "pm-35",
+      "type": "why",
+      "level": 3,
+      "q": "Why would the standardized effect rise from about 0.24 to about 0.34 when all students are included?",
+      "easy": "Students who withdraw stop logging in and also do not pass, so adding them puts more students at the low end of active days with no passes, which makes the link stronger.",
+      "deep": "The write up reports the two numbers and that the answer held either way; it does not explain the change, so present this as reasoning. Withdrawn students have truncated activity (no clicks after unregistration) and a non pass outcome by definition. Including them adds many observations with low $D$ and $y = 0$, which widens the spread of $D$ and steepens its relation to passing. Part of that extra association is mechanical rather than behavioral: withdrawal causes low active days as much as low active days predict withdrawal. That is why the version that excludes withdrawn students (about 0.24) is the cleaner estimate of how return frequency relates to passing among students who stayed, and why it matters that the conclusion held in both.",
+      "evidence": [
+        "portfolio: standardized effect around 0.24, and about 0.34 with all students included",
+        "portfolio: The result held within every module and whether or not withdrawn students were included"
+      ],
+      "sources": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC5704676/"
+      ],
+      "tags": [
+        "oulad",
+        "withdrawal",
+        "reverse causation"
+      ]
+    },
+    {
+      "id": "pm-36",
+      "type": "how",
+      "level": 2,
+      "q": "Which sensitivity checks made the OULAD answer deterministic, and why those two?",
+      "easy": "The answer was checked inside every course module separately, and with and without students who withdrew. It came out the same every time.",
+      "deep": "Within every module: pooling seven modules with different workloads and pass rates invites exactly the Simpson's paradox the trap family warns about, so the decomposition must hold within each module, not only pooled. With and without withdrawn students: whether to count withdrawals as fails is the most contested cleaning choice in OULAD, and the fairness rule says all defensible cleanings must converge. If either choice had flipped the sign or the ranking of the two levers, ten experts could disagree, and the task would be ambiguous. Holding both is what let the golden answer be one sentence: fund return frequency, not intensity.",
+      "evidence": [
+        "portfolio: The result held within every module and whether or not withdrawn students were included",
+        "portfolio: Fair means the correcting fact lives somewhere in the corpus, every file opens with standard tooling, and all defensible cleanings converge on the same answer."
+      ],
+      "sources": [],
+      "tags": [
+        "sensitivity analysis",
+        "determinism",
+        "oulad"
+      ]
+    },
+    {
+      "id": "pm-37",
+      "type": "pushback",
+      "level": 2,
+      "q": "Active days is a proxy for motivation. Isn't \"fund the return nudge\" a causal claim you cannot make from observational data?",
+      "easy": "Partly true. The data show which part of activity goes with passing; they cannot prove a nudge would cause more passes. What the analysis does rule out is the memo's reason for funding richer sessions.",
+      "deep": "Concede: motivated students both return more often and pass more, so the coefficient on active days is not the effect of an intervention that raises active days, and a nudge might bring back students who log in without engaging. Defend: the task's decision is a comparison between two levers, and the evidence for the intensity lever disappears once days are controlled, within every module and under both withdrawal rules. A funding decision with a budget for one initiative should back the lever that carries the association, and should ideally ship as a randomized test of the nudge. That is the recommendation ten experts converge on, and its causal limits belong in the readout.",
+      "say": "That's fair. The days coefficient isn't the effect of a nudge, because motivated students return more and pass more. What the analysis kills is the memo's case for richer sessions: that association vanishes once days are controlled, in every module. So I'd fund the return nudge and ship it as a randomized test.",
+      "evidence": [
+        "portfolio: Per session intensity collapses to essentially zero once days present is controlled.",
+        "portfolio: The result held within every module and whether or not withdrawn students were included"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "causal inference"
+      ]
+    },
+    {
+      "id": "pm-38",
+      "type": "how",
+      "level": 2,
+      "q": "What were the decoy artifacts, and why were they built from real numbers?",
+      "easy": "Two shipped documents pointed at the wrong lever, the richer per session experience. Every figure in them was true and reproducible from the raw files; they misled only through their conclusion.",
+      "deep": "The first decoy is the internal pre read that recommends the per session option on the strength of r = 0.56 and the 0.3 percent to 91.9 percent quintile climb. Tanay built two corroborating decoy artifacts in all, both pointing at the wrong lever, and verified that every figure reproduced from the raw files. Real figures matter for fairness: a decoy that misstated data would make the task about catching a lie, and a model that trusted it would be failing for a reason no expert would endorse. With true figures, the only error available is the inference. Later, hardening the framing and adding more authoritative decoys did not change the models' answers.",
+      "evidence": [
+        "portfolio: I built two corroborating decoy artifacts pointing at the wrong lever and verified that every figure reproduced from the raw files.",
+        "portfolio: total clicks versus passing at r = 0.56, with pass rate climbing from 0.3 percent to 91.9 percent across activity quintiles",
+        "portfolio: Hardening the framing and adding more authoritative decoys did not change the outcome."
+      ],
+      "sources": [],
+      "tags": [
+        "decoys",
+        "fairness"
+      ]
+    },
+    {
+      "id": "pm-39",
+      "type": "concept",
+      "level": 1,
+      "q": "What happened when frontier models attempted the OULAD task?",
+      "easy": "They solved it. In repeated runs the models rebuilt the analysis from the raw files, split clicks into days and intensity, ignored the decoy memos, and recommended the return nudge, often quoting the exact adjusted numbers.",
+      "deep": "In repeated live rollouts, strong frontier models independently rebuilt the analysis from the raw files, ran the frequency versus intensity decomposition, ignored the decoy pre reads, and reached the correct answer, often quoting the exact adjusted numbers. Hardening the framing and adding more authoritative decoys did not change the outcome. So the task met every fairness and determinism condition and cleared the program's automated checks, but did not meet the stump bar. The portfolio's stats line puts it as frontier models solved the clean traps. The write up does not name the models or give a rollout count, so do not supply either.",
+      "evidence": [
+        "portfolio: In repeated live rollouts, strong frontier models independently rebuilt the analysis from the raw files",
+        "portfolio: often quoting the exact adjusted numbers",
+        "portfolio: Hardening the framing and adding more authoritative decoys did not change the outcome.",
+        "portfolio: frontier models solved the clean traps"
+      ],
+      "sources": [],
+      "tags": [
+        "result",
+        "frontier models"
+      ]
+    },
+    {
+      "id": "pm-40",
+      "type": "why",
+      "level": 1,
+      "q": "Why didn't hardening the framing or adding more authoritative decoys change the outcome?",
+      "easy": "Because the step that cracks the task, splitting a combined metric into its parts and testing each, is something a capable analyst does by reflex. A strong model does it whether or not the prompt hints at it, so louder decoys do not stop it.",
+      "deep": "The write up's explanation is structural: decompose a composite metric and test the parts is a reflexive step for a capable analyst, so a frontier model does it whether or not the prompt signposts it. Framing and decoys act on what the solver believes before analyzing; they do not remove the analysis step. Once the model computes the decomposition itself, its own numbers override any document. That also explains why the model quoted the exact adjusted numbers: it did the computation, not a guess. The implication for trap design is that difficulty has to come from a step the model does not take by default, not from more persuasive misdirection.",
+      "evidence": [
+        "portfolio: Hardening the framing and adding more authoritative decoys did not change the outcome.",
+        "portfolio: The move that cracks the task, decompose a composite metric and test the parts, is a reflexive step for a capable analyst"
+      ],
+      "sources": [],
+      "tags": [
+        "frontier models",
+        "eval design"
+      ]
+    },
+    {
+      "id": "pm-41",
+      "type": "case",
+      "level": 2,
+      "q": "What does this project say about LLMs doing analytics work?",
+      "easy": "On clean, fair analytics problems, strong models now do the standard careful moves on their own: they segment, decompose, check definitions, and distrust a memo when their own numbers disagree. Beating them needs something outside that standard toolkit.",
+      "deep": "Tanay's read is that the failed stump is a calibrated data point about where these systems are strong: they rejected a plausible but confounded headline artifact and reconstructed the causal story from first principles. Implications: (1) a trap tuned to fool a rushed human analyst is not a measure of frontier model weakness; (2) eval tasks need a target behavior outside a strong reasoner's default repertoire, a higher bar than a smart person needing to be careful; (3) persuasion based difficulty (authoritative decoys) is weak against models that compute. Limits on the inference: one fully developed task, an unspecified number of rollouts, and unnamed models, so it supports \"they can do this reliably enough to beat this trap\", not a general claim about analytics competence.",
+      "evidence": [
+        "portfolio: Stumping a frontier model on a clean, fair analytics problem requires a trap that sits outside a strong reasoner's default repertoire",
+        "portfolio: In repeated live rollouts, strong frontier models independently rebuilt the analysis from the raw files"
+      ],
+      "sources": [],
+      "tags": [
+        "llm evaluation",
+        "capabilities"
+      ]
+    },
+    {
+      "id": "pm-42",
+      "type": "case",
+      "level": 3,
+      "q": "If you had to try again, what kinds of traps might sit outside a frontier model's default repertoire?",
+      "easy": "Traps where the correcting fact is not a standard statistical move but a fact about how the data was produced, which a model has no habit of looking for.",
+      "deep": "These are ideas for next time, not things the source says were built. Candidates: (1) a metric definition change partway through a time series, recorded only in a changelog file, so the right move is reading project history rather than running a statistic; (2) a survivorship filter baked into how an export was generated, documented in a pipeline config; (3) a units or currency change in one partition; (4) an instrumentation outage that zeroes events for one platform, visible only in an ops log; (5) a cohort definition that leaks the outcome, which needs reasoning about time ordering. Each still has to pass the fairness rule (the fact is in the corpus) and the ten expert rule. The design lesson from the write up is to start from what strong models do by default and target a step they skip.",
+      "evidence": [
+        "portfolio: Stumping a frontier model on a clean, fair analytics problem requires a trap that sits outside a strong reasoner's default repertoire"
+      ],
+      "sources": [],
+      "tags": [
+        "next steps",
+        "eval design"
+      ]
+    },
+    {
+      "id": "pm-43",
+      "type": "define",
+      "level": 2,
+      "q": "Define golden solution, rollout, and decoy artifact as used in this project.",
+      "easy": "A golden solution is the official correct answer with the numbers behind it. A rollout is one full attempt by a model at the task. A decoy artifact is a real but misleading document planted in the files.",
+      "deep": "Golden solution: the reference recommendation plus the computation that produces it, reproduced from the raw files to the digit before shipping, which is what makes grading deterministic. Rollout: one sampled end to end attempt by a model, which here means reading the files, running analysis, and producing a recommendation; the stump bar counts eight of them in two batches of four. Decoy artifact: a shipped file, such as the OULAD internal pre read, whose figures are true but whose conclusion is wrong, testing whether the solver accepts an authoritative conclusion without redoing the analysis. Frontier model panel: the set of strongest available models the task must defeat; the write up does not name them.",
+      "evidence": [
+        "portfolio: deterministic golden solutions reproduced to the digit",
+        "portfolio: Across eight model responses, at least two of the first four and one of the second four had to land on a meaningfully different answer.",
+        "portfolio: I built two corroborating decoy artifacts pointing at the wrong lever and verified that every figure reproduced from the raw files."
+      ],
+      "sources": [],
+      "tags": [
+        "define",
+        "eval design"
+      ]
+    },
+    {
+      "id": "pm-44",
+      "type": "define",
+      "level": 2,
+      "q": "Define activity quintile and point biserial correlation.",
+      "easy": "Quintiles split students into five equal sized groups ordered by activity. A point biserial correlation is an ordinary correlation where one of the two variables is yes or no, such as passed or not.",
+      "deep": "Quintile: the 20th, 40th, 60th, and 80th percentiles of total clicks cut the population into five groups of equal count; reporting the outcome rate per quintile shows the shape of a relationship without assuming linearity. Point biserial: Pearson r with a 0/1 variable, $r_{pb} = \\frac{M_1-M_0}{s_n}\\sqrt{\\frac{n_1 n_0}{n^2}}$, tested via $t = r_{pb}\\sqrt{\\frac{n-2}{1-r_{pb}^2}}$, which is the two sample t test in disguise. Its maximum possible value shrinks as the split moves away from 50/50, so r values are not comparable across outcomes with very different pass rates. In the decoy, r = 0.56 and the quintile climb from 0.3 percent to 91.9 percent describe the same total clicks association two ways.",
+      "evidence": [
+        "portfolio: total clicks versus passing at r = 0.56, with pass rate climbing from 0.3 percent to 91.9 percent across activity quintiles"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Point-biserial_correlation_coefficient"
+      ],
+      "tags": [
+        "define",
+        "correlation"
+      ]
+    },
+    {
+      "id": "pm-45",
+      "type": "define",
+      "level": 2,
+      "q": "What do CC BY licensing and data provenance mean for this kind of work?",
+      "easy": "CC BY lets anyone reuse and redistribute data as long as they credit the source. Provenance is the documented trail of where each file came from and under what terms.",
+      "deep": "Creative Commons Attribution (OULAD uses CC BY 4.0) permits copying, redistribution, and adaptation, including commercially, with attribution. Public domain data carries no restriction. The program allowed only these two classes, verified per dataset, because tasks ship to a third party and get reused. Provenance in practice means recording, per file, the source URL, the license, any transformation applied, and confirmation that no file was model generated. The write up calls this disciplined data provenance and licensing, the less visible part of the work. A sharp follow up: real public datasets such as OULAD may appear in model training data, so provenance also bears on contamination, which the write up does not discuss.",
+      "evidence": [
+        "portfolio: public domain or Creative Commons only, verified per dataset"
+      ],
+      "sources": [
+        "https://pmc.ncbi.nlm.nih.gov/articles/PMC5704676/"
+      ],
+      "tags": [
+        "licensing",
+        "provenance",
+        "define"
+      ]
+    },
+    {
+      "id": "pm-46",
+      "type": "pushback",
+      "level": 1,
+      "q": "The models solved your tasks. Didn't the project just fail?",
+      "easy": "It failed the stump bar, and Tanay says so. The traps were still correct and verified, and finding out that strong models handle them is a measured result about model capability.",
+      "deep": "Concede: the stated goal was a task the frontier panel would fail, and the most developed task did not meet that bar, despite hardening and stronger decoys. Defend: the task was fair, deterministic, cleared the program's automated checks, and every figure reproduced from raw files, so the negative result is clean. A clean negative is informative: it places the boundary of model capability above textbook confounding and decomposition traps, which tells an eval designer where not to spend effort. The write up frames it as a happy failure and a calibrated data point.",
+      "say": "On the stump bar, yes, and I say that up front. But the task was fair, deterministic, and verified, so the miss is a clean measurement. Strong models now decompose a composite metric by reflex. Knowing that changed how I design evals: I start from what they do by default.",
+      "evidence": [
+        "portfolio: The task cleared the program's automated construction and determinism checks.",
+        "portfolio: Hardening the framing and adding more authoritative decoys did not change the outcome.",
+        "portfolio: The move that cracks the task, decompose a composite metric and test the parts, is a reflexive step for a capable analyst"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "negative result"
+      ]
+    },
+    {
+      "id": "pm-47",
+      "type": "pushback",
+      "level": 2,
+      "q": "Simpson's paradox is in every statistics textbook. Why would you expect it to stump a frontier model?",
+      "easy": "Fair point, and the result agrees with it. The bet was that a real dataset, a key mismatch, and decoys would make the standard move harder to reach; for the clean traps it was not enough.",
+      "deep": "Concede: the four families are canonical, and models have seen thousands of worked examples of each. Defend the design choice: the brief required difficulty from methodology and fair, reconstructible answers, which steers toward well understood traps, because exotic ones risk failing the ten expert agreement rule. The added difficulty came from the data work: discovering a segmentation and joining across files on a mismatched key, decoys with real figures, and multi file corpora. The finding is that this combination was not enough, which is exactly the lesson the write up draws: a winning trap must sit outside a strong reasoner's default repertoire.",
+      "say": "You're right that it's textbook, and the outcome agrees with you. I leaned on known traps because the answer had to be one ten experts would reach. I added difficulty through the data, a mismatched join key and real decoys. It wasn't enough, which is the finding.",
+      "evidence": [
+        "portfolio: The naive read (the product is getting worse) is refuted by a segmentation the solver has to discover and join across files on a mismatched key.",
+        "portfolio: Stumping a frontier model on a clean, fair analytics problem requires a trap that sits outside a strong reasoner's default repertoire"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "simpsons paradox"
+      ]
+    },
+    {
+      "id": "pm-48",
+      "type": "pushback",
+      "level": 2,
+      "q": "Dropping 123 users to flip a decision sounds like p-hacking.",
+      "easy": "It would be if the rule depended on the outcome. Here the users share a signature real spending does not produce, they sit in one arm only, and the decomposition and rank tests agree without any exclusion.",
+      "deep": "Concede: removing data after seeing results is the classic garden of forking paths, and analysts do invent outlier rules to get the answer they want. Defend: the exclusion criterion is a property of the records (near identical anomalous amounts), applicable blind to arm; randomization should not concentrate 89.4 percent of an arm's revenue in 0.06 percent of users with nothing similar in the other arm; and conversion and rank based comparisons do not depend on the dollar amounts at all. Report with and without, state the rule, and the decision does not rest on a judgment call. That is also what made the golden answer deterministic.",
+      "say": "It would be, if I picked the rule after looking at who wins. The rule is about the records: 123 near identical payments in one arm only. And conversion and rank tests don't care about the amounts, so they tell the same story without dropping anyone.",
+      "evidence": [
+        "portfolio: 123 users (0.06 percent of the group) each paid a near identical anomalous amount and accounted for 89.4 percent of that arm's revenue, while the other arm had none."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "ab testing"
+      ]
+    },
+    {
+      "id": "pm-49",
+      "type": "pushback",
+      "level": 2,
+      "q": "\"Ten domain experts would independently agree\" is an assertion. Did anyone check it?",
+      "easy": "The write up states it as the program's requirement and describes the checks Tanay ran to support it: exact reproduction, and robustness across modules and cleaning choices. It does not report an actual panel of ten experts.",
+      "deep": "Concede: no source here describes ten experts answering the task, so agreement is argued, not measured. Defend what is defensible: the proxy for expert agreement is that all defensible cleanings converge, and Tanay tested that directly for the OULAD task (within every module, with or without withdrawn students), plus the program's automated construction and determinism checks. A stronger protocol would have two or three independent analysts solve the task blind before it ships. Frontier models that reached the golden answer independently are weak evidence of convergence too, though not of expert agreement.",
+      "say": "Nobody ran a ten person panel that I can point to. What I tested was the proxy: every defensible cleaning gives the same answer, in every module and either way on withdrawals. If I did it again I'd have two analysts solve it blind before shipping.",
+      "evidence": [
+        "portfolio: Each had to resolve to a single deterministic recommendation that ten domain experts would independently agree on",
+        "portfolio: The result held within every module and whether or not withdrawn students were included",
+        "portfolio: The task cleared the program's automated construction and determinism checks."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "eval validity"
+      ]
+    },
+    {
+      "id": "pm-50",
+      "type": "pushback",
+      "level": 2,
+      "q": "You only describe one fully developed task. Why should I believe anything general from it?",
+      "easy": "The general claim is narrow on purpose: strong models can beat a fair decomposition trap even when it is hardened. Four families were built, but only one has its outcome described in detail.",
+      "deep": "Concede: one detailed task, unnamed models, and no rollout count do not support claims about model analytics competence in general. Defend: the conclusion drawn is specific, a frontier model performs the decomposition step whether or not prompted, and the evidence for it is direct (the models quoted the exact adjusted numbers, and hardening did not change outcomes). The stats line also reports that frontier models solved the clean traps, which extends the finding past one task, though without detail. For an interview, keep the claim the size of the evidence.",
+      "say": "It's one detailed task, so I keep the claim small. Strong models did the decomposition themselves and quoted the adjusted numbers, and hardening didn't move them. That's a specific capability I watched, not a general verdict on LLM analytics.",
+      "evidence": [
+        "portfolio: often quoting the exact adjusted numbers",
+        "portfolio: Hardening the framing and adding more authoritative decoys did not change the outcome.",
+        "portfolio: frontier models solved the clean traps"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "generalization"
+      ]
+    },
+    {
+      "id": "pm-51",
+      "type": "pushback",
+      "level": 3,
+      "q": "Why not make the task harder by hiding the correcting fact or making it ambiguous?",
+      "easy": "Because the rules forbid it, and for a good reason: a model that fails because information is missing or the question is vague has not shown a reasoning weakness.",
+      "deep": "Concede: hiding the segmentation, dropping the score definition, or blurring the question would very likely produce model failures and clear the stump bar. Defend: the fairness rule requires the correcting fact to be in the corpus, and the brief bans difficulty from vague wording or trick definitions. A task that stumps by withholding information measures nothing transferable, and it would fail the ten expert agreement requirement, since experts would also disagree. Difficulty bought by unfairness produces an eval that looks hard and teaches nothing, which is the failure mode the program was designed to avoid.",
+      "say": "I could have stumped them by hiding the key fact, and that would've been useless. A failure from missing information isn't a reasoning failure. The rules required the fact to be in the files and the wording to be plain, and I think those rules are right.",
+      "evidence": [
+        "portfolio: Fair means the correcting fact lives somewhere in the corpus, every file opens with standard tooling, and all defensible cleanings converge on the same answer.",
+        "portfolio: Difficulty had to come from methodology and reasoning, never from vague wording or a trick definition."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "fairness"
+      ]
+    },
+    {
+      "id": "pm-52",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain Project Mark to a hiring manager.",
+      "easy": "Tanay built hard, fair evaluation tasks for AI models on real data, verified every answer, and reported honestly when the models won.",
+      "deep": "Lead with the job (eval task construction under strict fairness and determinism rules), then the craft (four verified trap families on licensed real data, golden answers reproduced exactly), then the outcome (frontier models solved the clean traps) and the takeaway for eval design. Keep the negative result in the first half minute; it is the most credible part.",
+      "say": "I built evaluation tasks meant to make frontier models fail at product analytics, fairly. Real licensed data, one answer ten experts would agree on, and every number reproduced from raw files. I built four kinds of statistical traps. The models still solved the clean ones, and I report that as a result: it showed me exactly where they're strong, which is how I design evals now.",
+      "evidence": [
+        "portfolio: 4 trap families built and verified",
+        "portfolio: frontier models solved the clean traps",
+        "portfolio: deterministic golden solutions reproduced to the digit"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring manager"
+      ]
+    },
+    {
+      "id": "pm-53",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the OULAD trap to a staff engineer.",
+      "easy": "Total clicks hides two levers. Split it into days times clicks per day and only days matters.",
+      "deep": "Give the setup, the decomposition, the numbers, the robustness checks, and the outcome in that order. Name what the write up does not specify (model form, covariates) before being asked.",
+      "say": "The decoy was a real correlation, 0.56, between total clicks and passing. Total clicks is active days times clicks per active day, and the two candidate initiatives target one factor each. Regress passing on both and days carries a standardized effect around 0.24; intensity goes to about zero. It held in every module and under both withdrawal rules. The models found that decomposition on their own.",
+      "evidence": [
+        "portfolio: total clicks versus passing at r = 0.56, with pass rate climbing from 0.3 percent to 91.9 percent across activity quintiles",
+        "portfolio: standardized effect around 0.24, and about 0.34 with all students included",
+        "portfolio: Per session intensity collapses to essentially zero once days present is controlled.",
+        "portfolio: The result held within every module and whether or not withdrawn students were included"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff engineer"
+      ]
+    },
+    {
+      "id": "pm-54",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the project to a product manager.",
+      "easy": "A memo said to make sessions richer; the data said to get students back more often. Tanay built that into a test for AI models, and the models got it right.",
+      "deep": "Use the business framing: two initiatives, one budget, a persuasive memo with true numbers and the wrong conclusion. Avoid regression vocabulary; talk about splitting a number into how often and how much.",
+      "say": "The question was which feature to fund to raise pass rates: richer sessions or a nudge to come back more often. A memo backed richer sessions with a real chart. When I split activity into how often students came back and how much they did each time, only coming back mattered. I turned that into a test for AI models, and they caught it.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "product manager"
+      ]
+    },
+    {
+      "id": "pm-55",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the project to a recruiter in plain words.",
+      "easy": "Tanay wrote tricky but fair data puzzles to test AI models, checked every answer, and learned the best models are better at this than expected.",
+      "deep": "No statistics terms. One sentence on the job, one on what was built, one on the outcome, one on why it matters for the roles Tanay targets (evals, AI engineering).",
+      "say": "I wrote data puzzles designed to trip up the best AI models, using real public data and making sure each had one clear right answer. The models solved the fair ones. That's useful to know if you're building or testing AI products, and it's the kind of evaluation work I want to keep doing.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    },
+    {
+      "id": "pm-56",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations of this work, and what would break at 10x or 100x the number of tasks?",
+      "easy": "One task is described in depth, the models and rollout counts are not recorded in the write up, and building each fair task by hand took most of the effort, so the approach does not scale without tooling.",
+      "deep": "Limits of the evidence: one fully developed task, unnamed models, no rollout count, and no measured expert agreement. Public datasets like OULAD may be in training data, so a model might recognize the dataset, a contamination question the write up does not address. At 10x tasks: hand verification of licensing, golden solutions, and sensitivity checks becomes the bottleneck, so each task needs a scripted golden pipeline, a provenance manifest, and automated cleaning variants that confirm convergence. At 100x: grading eight rollouts per task needs an automated grader that maps free text recommendations to answer classes, itself an eval problem; trap families would repeat, letting models pattern match; and dataset reuse would correlate tasks. Production would also need versioned corpora and inter rater checks on grading.",
+      "evidence": [
+        "portfolio: public domain or Creative Commons only, verified per dataset",
+        "portfolio: Across eight model responses, at least two of the first four and one of the second four had to land on a meaningfully different answer."
+      ],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "scale"
+      ]
+    },
+    {
+      "id": "pm-57",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next with this line of work?",
+      "easy": "Start from what strong models do by default and build traps around a step they skip, then measure failure rates properly across many rollouts.",
+      "deep": "Next steps, none of which the source says were done: (1) profile model behavior first by running exploratory rollouts on raw corpora and listing the checks models perform unprompted, then target checks they skip; (2) move the correcting fact from statistics into process knowledge (changelogs, pipeline configs, ops logs); (3) record rollouts per model with outcomes so the stump rate is a measured number with an interval; (4) run a blind two analyst check per task to measure agreement instead of asserting it; (5) test contamination by perturbing a public dataset's identifiers and checking whether answers change.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next steps"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "Simpson's paradox (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Simpson%27s_paradox",
+      "why": "Definition, Berkeley and kidney stone examples, and the back door criterion for choosing pooled or stratified tables."
+    },
+    {
+      "title": "Confounding (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Confounding",
+      "why": "Confounder definitions, the adjustment formula, and collider and mediator failure modes."
+    },
+    {
+      "title": "Mann-Whitney U test (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Mann%E2%80%93Whitney_U_test",
+      "why": "U statistic, what it tests, tie handling, and efficiency relative to the t test."
+    },
+    {
+      "title": "Point-biserial correlation coefficient (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Point-biserial_correlation_coefficient",
+      "why": "Formula for correlation with a binary outcome, its link to the t test, and the item total inflation caveat."
+    },
+    {
+      "title": "Standardized coefficient (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Standardized_coefficient",
+      "why": "Beta weights, conversion from unstandardized coefficients, and criticisms."
+    },
+    {
+      "title": "Winsorizing (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Winsorizing",
+      "why": "Capping extreme values versus trimming, with a worked example."
+    },
+    {
+      "title": "Open University Learning Analytics dataset (Kuzilek, Hlosta, Zdrahal 2017, PMC)",
+      "url": "https://pmc.ncbi.nlm.nih.gov/articles/PMC5704676/",
+      "why": "OULAD tables, columns, counts, and CC BY 4.0 license."
+    },
+    {
+      "title": "OU Analyse open dataset page",
+      "url": "https://research.stem.open.ac.uk/ouanalyse/dataset/",
+      "why": "Official dataset landing page with module and presentation conventions."
+    }
+  ]
+}
