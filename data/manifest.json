@@ -1,10 +1,10 @@
 {
- "generated_at": "2026-10-15T16:43:04Z",
+ "generated_at": "2026-10-15T20:34:53Z",
  "totals": {
-  "decks": 9,
+  "decks": 11,
   "planned": 29,
-  "cards": 494,
-  "narrations": 109
+  "cards": 607,
+  "narrations": 134
  },
  "decks": [
   {
@@ -113,14 +113,25 @@
    "id": "p-distributed-vit",
    "title": "Distributed ViT on CIFAR-10",
    "group": "Portfolio",
-   "blurb": "Proving a data parallel speedup, then explaining why it vanished.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-distributed-vit.json",
+   "count": 60,
+   "narrations": 14,
+   "types": {
+    "concept": 8,
+    "why": 7,
+    "how": 11,
+    "formula": 4,
+    "number": 9,
+    "compare": 2,
+    "define": 4,
+    "case": 5,
+    "pushback": 6,
+    "narrate": 4
+   },
+   "summary_easy": "Tanay trained a small image classification model on two GPUs and measured honestly what the second GPU bought. In full precision two GPUs were 1.96x faster than one; with mixed precision turned on, the same setup was only 1.15x faster. A controlled test showed the cause was a 4 core CPU host that could not prepare images fast enough, not the communication between GPUs.",
+   "repo": "https://github.com/TanayPratapSingh/distributed-vit-cifar10",
+   "ready": true,
+   "blurb": "Proving a data parallel speedup, then explaining why it vanished."
   },
   {
    "id": "p-ztf-transient-pipeline",
@@ -188,14 +199,25 @@
    "id": "p-shopfloor-ai",
    "title": "ShopFloor AI",
    "group": "Portfolio",
-   "blurb": "Predictive maintenance and RAG for the factory floor, served as a seven service stack.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-shopfloor-ai.json",
+   "count": 53,
+   "narrations": 11,
+   "types": {
+    "concept": 7,
+    "number": 1,
+    "define": 5,
+    "how": 13,
+    "formula": 3,
+    "case": 4,
+    "pushback": 7,
+    "why": 8,
+    "compare": 1,
+    "narrate": 4
+   },
+   "summary_easy": "ShopFloor AI predicts milling machine failures from five sensor readings, streams sensor KPIs and alerts through Kafka, and answers maintenance questions with a RAG assistant, all as one Docker Compose stack with MLflow and Airflow. On the synthetic AI4I 2020 dataset its gradient boosting model reached 0.85 F1 and 0.96 AUC. Reading the code back shows several connections between the parts that do not yet work as described, which Tanay owns as the main lesson.",
+   "repo": "https://github.com/TanayPratapSingh/shopfloor-ai",
+   "ready": true,
+   "blurb": "Predictive maintenance and RAG for the factory floor, served as a seven service stack."
   },
   {
    "id": "p-handoff",
