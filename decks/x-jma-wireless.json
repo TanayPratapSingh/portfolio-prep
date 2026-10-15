@@ -1,0 +1,1180 @@
+{
+  "deck_id": "x-jma-wireless",
+  "title": "JMA Wireless Lean Six Sigma Lead",
+  "group": "Experience",
+  "repo": "",
+  "summary_easy": "From January to May 2026, Tanay led a four person Lean Six Sigma team at JMA Wireless, a cell tower equipment maker, in the department that builds jumper cables. The team got five performance measures defined the same way for a manual line and an automated cell, built the data pipeline and dashboard, and found that the automated cell was almost never broken but was starved of parts. A daily standup Tanay piloted cut the time to act on a red measure from about four hours to about 25 minutes, and the projected value is about $355,000 a year pending the company's finance team.",
+  "summary_deep": "A 15 week DMAIC engagement sponsored by JMA's SVP of Global Operations. In Define, Tanay ran definition interviews across manufacturing, quality, and production supervision and wrote a sponsor approved document fixing one formula and one target for Parts per Labor Hour, Uptime, First Time Throughput, Schedule Attainment, and a Culture and Engagement index. In Measure, a pandas and openpyxl pipeline walked the automated cell's three level nested PLC JSON with explicit json_normalize record paths to one typed row per test event with derived cycle time, taking data that expanded past 31 GB in Power BI down to under 5 MB. The standardized baseline showed the automated cell at 97.3% uptime but 46.3% schedule attainment, an input limited pattern that a fishbone traced to kitting batched for the manual line, batched connector subassemblies, and a commissioning era target, while the manual line masked the gap at 139.7%. Improve chose three fixes from six with a Pugh matrix (daily dashboard standup, two bin kitting, a target reset to about 1,150 cables a week with a ramp), and a two week standup pilot cut median red to first action from about 4 hours to about 25 minutes. Control delivered a Control Plan with a refresh owner, a dashboard FMEA, and tiered escalation. The roughly $355,000 a year is a projection on conservative assumed rates pending JMA Finance; the stated gaps are no pipeline unit tests and no culture baseline.",
+  "sheet": {
+    "easy": "## What it was\n- **JMA Wireless**, Liverpool NY: cell tower transmitters and 5G infrastructure. Client engagement, Jan to May 2026 (ended).\n- Tanay was **Project Lead** of a four person Whitman School team, 15 weeks, on site weekly, sponsored by the **SVP of Global Operations** with a named project champion. Counted toward the Lean Six Sigma Green Belt (SCM 755).\n- Department: **Jumper** cables. Jumper 1.0 is manual (eight operators, two ten hour shifts). Jumper 2.0 is a fully automated cell.\n\n## The problem\nNobody could compare the two lines, because words like Uptime meant different things to different teams.\n\n## What Tanay did (DMAIC)\n| Phase | What happened |\n| --- | --- |\n| Define | Charter, SIPOC, CTQC tree, interviews; five KPIs with one formula and one target each, sponsor approved |\n| Measure | Python pipeline: 31 GB of nested machine JSON (as expanded in Power BI) to under 5 MB |\n| Analyze | 97.3% uptime but 46.3% of target on the automated cell; fishbone and two Paretos |\n| Improve | Six ideas, Pugh matrix, three picks; daily standup piloted |\n| Control | Control Plan: refresh owner, dashboard FMEA, escalation on red |\n\n## The five KPIs\n| KPI | Formula | Target |\n| --- | --- | --- |\n| Parts per Labor Hour | good parts / labor hours | at least 50 |\n| Uptime | runtime / (runtime + downtime) | at least 85% |\n| First Time Throughput | good parts / parts tested | at least 95% |\n| Schedule Attainment | actual parts / weekly target | at least 100% |\n| Culture and Engagement | pulse 60% + weekly active dashboard users 40% | index at least 75 |\n\n## The finding\nThe automated cell was almost never down yet built less than half its target, so it was **starved**: the constraint was kitting and material flow upstream. The manual line hid this by running at 139.7% of its own target.\n\n## Results\n- Pilot: red KPI to first action, about 4 hours to about 25 minutes; KPI familiarity 2.4 to 4.1 out of 5.\n- About **$355K a year projected** (27,000 cables at an assumed $12 margin plus 48 analyst hours a week at an assumed $12.50), pending JMA Finance.\n\n## Honest limits\n- Pilot was two weeks on one shift. Culture KPI has no baseline. No unit tests on the pipeline.\n",
+    "deep": "## Engagement facts\n- JMA Wireless Jumper Department, Liverpool NY. Jan to May 2026, 15 weeks, weekly on site. Four person Whitman team; Tanay Project Lead. Sponsor: SVP of Global Operations; named project champion. Lean Six Sigma Green Belt, SCM 755, Spring 2026.\n- Tanay owned: charter, SIPOC, CTQC tree, KPI definition interviews, Python pipeline, Control Plan; ran the standup pilot.\n- Lines: Jumper 1.0 manual, eight operators, two ten hour shifts. Jumper 2.0 fully automated cell with PLC level data capture. Tests per cable: continuity, return loss, visual.\n- Tools: Python, pandas, openpyxl, Power BI, DAX, Minitab, SIPOC, Pugh matrix, FMEA, Control Plan.\n\n## KPI definitions (sponsor approved)\n$$\\text{PPLH}=\\frac{\\text{good parts}}{\\text{labor hours}}\\ (\\ge 50)\\qquad \\text{Uptime}=\\frac{\\text{runtime}}{\\text{runtime}+\\text{downtime}}\\ (\\ge 85\\%)$$\n$$\\text{FTT}=\\frac{\\text{good parts}}{\\text{parts tested}}\\ (\\ge 95\\%)\\qquad \\text{SA}=\\frac{\\text{actual parts}}{\\text{weekly target}}\\ (\\ge 100\\%)$$\n$$\\text{C\\&E}=0.6\\cdot\\text{pulse}+0.4\\cdot\\text{weekly active dashboard users}\\ (\\ge 75)$$\n- Pulse: five questions, two minutes. Usage: distinct named users opening the dashboard at least twice a week. Scaling of both parts to 0 to 100 must be stated.\n- PPLH trap: same scheduled labor hours denominator on both lines; automated cell needs a technician for part of a shift, so on engaged technician minutes it is roughly an order of magnitude higher; dashboard also shows cycles per engaged hour.\n\n## Data pipeline\n| Stage | Action |\n| --- | --- |\n| Extract | load raw test report JSON (record, then tests, then measurements, then channel readings) |\n| Parse | `pd.json_normalize` with explicit `record_path`, `meta` for parent fields |\n| Type cast | datetime64, float64, boolean |\n| Calculate | cycle time in seconds from start and end timestamps |\n| Load | Power BI ready workbook via openpyxl |\n- Input: two raw datasets of 809 and 1,000 records, more than 31 GB when expanded in Power BI; unopenable below 64 GB RAM. Output: under 5 MB, instant refresh.\n- Row explosion: rows $= \\sum_{\\text{records}} T \\cdot M \\cdot C$, each repeating parent columns; sibling arrays expanded independently create cross products.\n- DAX pattern: `Uptime = DIVIDE(SUM(runtime), SUM(runtime) + SUM(downtime))`.\n\n## Baseline (standardized definitions)\n| KPI | Jumper 1.0 | Jumper 2.0 | Target |\n| --- | --- | --- | --- |\n| FTT | 87.9% | 92.5% | 95% |\n| Uptime | 31.3% | 97.3% | 85% |\n| Schedule Attainment | 139.7% | 46.3% | 100% |\n| PPLH | 34.9 | 7.94 | 50 |\n\n## Analyze\n- Finding: 97.3% uptime with 46.3% attainment means input limited. Manual line at 139.7% absorbed the shortfall and masked the demand signal.\n- Fishbone leading causes: Method (kitting batches sized for the manual line), Material (connector subassemblies batched), Measurement (commissioning era weekly target never revisited).\n- Quality Pareto (Jumper 1.0): torque and return loss 74% of first time failures.\n- Downtime Pareto (Jumper 1.0): material wait 38% (18 min, about 24 a week), setup and changeover 27% (32 min, about 9), tool calibration and maintenance 19% (22 min, about 9), operator absent or break overrun 12% (11 min, about 11), other 4%. Shares sum to 100%, so they are shares of downtime; duration times frequency (about 17 hours a week) does not reconcile to 31.3% uptime by itself.\n- Loops: a root cause failed validation and went back for re analysis; an unreachable target was revalidated.\n- Theory of constraints: identify, exploit, subordinate, raise capacity, repeat. Drum buffer rope. Here the constraint was a policy and method constraint in kitting.\n- OEE check: OEE = Availability x Performance x Quality, and starved time is an availability loss; know how cell states were classified.\n\n## Improve\n- Six candidates, Pugh matrix, benefit and effort grid. Picks: 15 minute daily standup at a wall mounted dashboard screen; two bin continuous kitting feed; target reset to roughly 1,150 cables a week with a ramp of about 200 a week.\n- Pilot (two weeks, manual line first shift): median red to first action about 4 h to about 25 min; KPI familiarity 2.4 to 4.1 of 5 (self reported). No control group.\n\n## Control\n- Control Plan: named refresh owner and cadence; dashboard FMEA ($\\text{RPN}=S\\times O\\times D$); tiered escalation on red.\n\n## Business case (projection)\n$$27{,}000 \\times \\$12 \\approx \\$324{,}000 \\qquad 48 \\times 52 \\times \\$12.50 = \\$31{,}200 \\qquad \\text{total} \\approx \\$355{,}000$$\n- Conservative assumed rates in an assumptions table, pending JMA Finance. Cable recovery projected from demonstrated capability.\n\n## Validation and testing\n- Definitions validated by sponsor sign off before build. Root causes validated with data (one failed). Pilot measured. No unit tests on the pipeline (stated gap).\n\n## Limitations and scale\n- Script plus workbook; no tests; no governed metric layer; culture KPI without baseline; small pilot; projection only.\n- At 10x: warehouse table partitioned by date and line, incremental loads keyed on test event id, schema validation at ingest, orchestration, one governed KPI layer (dbt or shared semantic model).\n\n## Next\n- Implement two bin kitting and track attainment against the ramp; first culture survey; staggered standup rollout to second shift; Finance confirmation of rates; pipeline assertions; explicit starved time measure.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: tell me about the JMA Wireless project.",
+      "script": "I led a four person Lean Six Sigma team through a full DMAIC cycle at JMA Wireless, sponsored by their SVP of Global Operations. Their two jumper cable lines couldn't be compared, so I wrote five KPI definitions the sponsor approved. I built a pandas pipeline that took the automated cell's nested JSON from over 31 GB in Power BI to under 5 MB. Measured the same way, the cell showed 97.3% uptime but 46.3% of target, which put the constraint upstream in kitting. My standup pilot cut red to first action to about 25 minutes.",
+      "keypoints": [
+        "Project lead, four person team, SVP sponsor, full DMAIC",
+        "Problem: lines not comparable, definitions differed",
+        "Five sponsor approved KPI definitions",
+        "31 GB to under 5 MB pipeline",
+        "97.3% uptime vs 46.3% of target, constraint in kitting",
+        "Pilot: red to first action about 25 minutes"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through the project.",
+      "script": "JMA Wireless builds cell tower equipment in Liverpool, New York. From January to May 2026 I led a four person Whitman team through a full DMAIC engagement in their Jumper Department, sponsored by the SVP of Global Operations, with a named champion and weekly on site access.\n\nThe department runs two lines side by side: a manual line with eight operators across two ten hour shifts, and a fully automated cell. Nobody could compare them, because Uptime and Schedule Attainment meant different things to different functions. In Define I ran interviews across manufacturing, quality, and production supervision and wrote a definition document with one formula and one target for five KPIs: Parts per Labor Hour, Uptime, First Time Throughput, Schedule Attainment, and a Culture and Engagement index. The sponsor approved it before we built anything.\n\nThen the data. The automated cell writes one JSON record per test event, with three levels of arrays inside. Two small raw datasets expanded past 31 GB in Power BI. I flattened them in pandas with explicit json_normalize record paths to one row per test event, cast the types in Python, derived cycle time, and wrote a workbook under 5 MB.\n\nThe finding came from the definitions. The automated cell showed 97.3% uptime and 46.3% of its weekly target. A cell that's almost always up but misses plan by half is input limited, so the constraint was kitting and material flow upstream, and the manual line was hiding it by running at 139.7% of its own target.\n\nWe picked three fixes out of six with a Pugh matrix: a daily standup at a dashboard screen, a two bin kitting feed, and a target reset with a ramp. I piloted the standup for two weeks, and median time from red to first action fell from about four hours to about 25 minutes. The projected opportunity is about $355,000 a year, pending JMA Finance. What I'd change: I never wrote unit tests for the pipeline, and the culture metric never got a baseline.",
+      "keypoints": [
+        "Context: JMA, Jumper Department, two lines, SVP sponsor",
+        "Define: interviews, five KPIs with one formula and target each",
+        "Pipeline: nested JSON, 31 GB to under 5 MB",
+        "Finding: 97.3% uptime vs 46.3% attainment, kitting is the constraint",
+        "Manual line at 139.7% masked it",
+        "Pugh matrix, three fixes, standup pilot 4 h to 25 min",
+        "$355K projected pending Finance; no tests, no culture baseline"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full story, as you would to a senior engineer.",
+      "script": "I'll give you the whole engagement, including the parts that were hard.\n\nJMA Wireless's Jumper Department builds RF jumper cables, and every cable has to pass continuity, return loss, and visual inspection. Jumper 1.0 is manual, eight operators over two ten hour shifts. Jumper 2.0 is a fully automated cell with PLC level data capture. I led a four person team for fifteen weeks, sponsored by the SVP of Global Operations, with a project champion and weekly on site access.\n\nDefine was the most important phase. I wrote the charter, the SIPOC, and the CTQC tree, and ran KPI definition interviews across manufacturing, quality, and production supervision. Uptime and Schedule Attainment meant different things to different functions, so leadership couldn't connect the floor to the financial plan. The output was a sponsor approved document with one formula and one target per KPI. Parts per Labor Hour is good parts over labor hours, target 50. Uptime is runtime over runtime plus downtime, target 85%. First Time Throughput is good parts over parts tested, target 95%. Schedule Attainment is actual parts over weekly target, target 100%. Culture and Engagement weights a five question pulse survey at 60% and weekly active dashboard users at 40%, target 75.\n\nMeasure was a data engineering problem. The cell publishes one JSON record per test event; each record nests tests, each test nests measurements, each measurement nests channel readings. Two raw datasets of 809 and 1,000 records expanded past 31 GB in Power BI, because Power BI expanded the nesting on every visual, and nobody under 64 GB of RAM could open the file. I wrote a pandas and openpyxl pipeline that walks the nesting with explicit json_normalize record paths and writes one flat row per test event. It casts timestamps to datetime, readings to float, and pass or fail to boolean, so Power Query never coerces anything, and it derives cycle time in seconds for the Uptime and labor productivity measures. The output is under 5 MB and refreshes instantly.\n\nAnalyze is where the definitions paid off. On the standardized baseline the automated cell showed 97.3% uptime and 46.3% schedule attainment. Those can't both describe a machine problem. A cell that's up almost all the time and misses plan by more than half is input limited. The manual line was absorbing the shortfall at 139.7% of its own target, which looks heroic but masks the demand signal to planning. A fishbone on the gap put the leading causes in Method, Material, and Measurement: kitting batches sized for the manual line, connector subassemblies arriving in batches, and a weekly target set at commissioning and never revisited. Two Paretos backed it: torque and return loss were 74% of first time failures on the manual line, and material wait was the largest downtime category at 38%. One candidate root cause failed validation and went back for re analysis.\n\nImprove: six candidates, a Pugh matrix, and a benefit and effort grid gave three recommendations: a fifteen minute daily standup at a wall mounted dashboard screen, a two bin continuous kitting feed, and a reset of the cell's target to demonstrated capability, roughly 1,150 cables a week, with a ramp of about 200 a week as kitting improves. I piloted the standup for two weeks on first shift. Median time from a KPI going red to a named owner acting fell from about four hours to about 25 minutes, and self reported KPI familiarity went from 2.4 to 4.1 out of five.\n\nControl: a Control Plan with a named refresh owner and cadence, an FMEA on the dashboard itself, and tiered escalation on red status.\n\nThe money is a projection. About 27,000 recoverable cables a year at an assumed $12 margin is about $324,000, plus about 48 analyst hours a week at an assumed $12.50 is about $31,200, so about $355,000, pending JMA Finance.\n\nWhat I'd challenge myself on: the pilot is one shift for two weeks with no control group. Uptime alone can't separate starved time from slow cycles, so I'd add starved time as its own measure. The culture KPI has no baseline. And the pipeline has no unit tests, so an upstream schema change would only be caught by someone noticing a wrong dashboard.",
+      "keypoints": [
+        "Context and sponsor, two lines with different economics",
+        "Define: interviews and five exact formulas with targets",
+        "Measure: three level nested JSON, 31 GB, json_normalize, typed, under 5 MB",
+        "Analyze: 97.3% vs 46.3%, manual line at 139.7%, fishbone, two Paretos, failed root cause",
+        "Improve: Pugh matrix, three fixes, target 1,150 with ramp, pilot results",
+        "Control Plan, FMEA, escalation",
+        "$355K as a projection with its two components",
+        "Self critique: pilot size, starved time, culture baseline, no tests"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone without a technical background.",
+      "script": "JMA Wireless makes equipment for cell towers in upstate New York. I led a team of four students on a semester long improvement project in the department that builds the cables connecting radios to antennas. They had two production lines, one run by people and one fully automated, and nobody could compare them because each team measured performance its own way. I got everyone to agree on five measures, wrote the code that turned the automated line's messy machine data into something a dashboard could read, and built the dashboard. It showed the automated line was almost never broken but was often waiting for parts, so the fix was in how materials reach it. We also tested a short daily meeting at the dashboard, and problems started getting an owner in about 25 minutes instead of about four hours.",
+      "keypoints": [
+        "Who JMA is and what the department makes",
+        "Two lines no one could compare",
+        "Agreed measures, cleaned machine data, dashboard",
+        "Automated line waiting on parts",
+        "Daily meeting: four hours to 25 minutes"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the engagement on the whiteboard.",
+      "script": "First I draw two boxes side by side, Jumper 1.0 manual and Jumper 2.0 automated, with a kitting box upstream feeding both. Arrows from kitting into each line. I say the department makes RF jumper cables and that nobody could compare these two lines.\n\nSecond, under them, a table with five rows: Parts per Labor Hour, Uptime, First Time Throughput, Schedule Attainment, Culture and Engagement. One column for the formula, one for the target. I say the sponsor signed this before anything was built, and that this table is where the finding came from.\n\nThird, the data path out of the automated cell: a box labeled nested JSON, record to tests to measurements to readings, with 31 GB written beside it. An arrow into a box labeled pandas json_normalize, typed, cycle time, then a box labeled under 5 MB, then Power BI.\n\nFourth, I write two numbers large next to the automated cell: 97.3% uptime and 46.3% of target. I circle the kitting box, draw a thick arrow from it into the cell, and write starved. I write 139.7% next to the manual line and say it was hiding the gap.\n\nFifth, on the right, three recommendation boxes: standup, two bin kitting, target reset with a ramp. Under the standup I write four hours to 25 minutes, two week pilot.\n\nLast, a box at the bottom labeled Control Plan with three bullets: refresh owner, dashboard FMEA, escalation on red. Beside it a small note: about $355K a year, projected, pending Finance.",
+      "keypoints": [
+        "Two lines with kitting upstream",
+        "Five KPI table with formulas and targets",
+        "Data path: nested JSON 31 GB to under 5 MB",
+        "97.3% vs 46.3% with the starved arrow; 139.7% on the manual line",
+        "Three recommendations and the pilot result",
+        "Control Plan and labelled projection"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you get different functions to agree on one definition of Uptime?",
+      "script": "I started with interviews, before any formulas. I ran definition interviews across manufacturing, quality, and production supervision, and the disagreements themselves were the first finding, because Uptime and Schedule Attainment meant different things to each function. Then I wrote one document with one formula and one target for each of the five KPIs and took it to the sponsor for approval before anything was built. Sponsor approval mattered because it turned a debate into a reference. After that, a disputed number could be checked against the document, and the pipeline and dashboard implemented those formulas exactly.",
+      "keypoints": [
+        "Interviews across three functions first",
+        "Disagreement itself was a finding",
+        "One formula and one target per KPI",
+        "Sponsor approval before any build",
+        "Pipeline and dashboard implement the document"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Walk me through the json_normalize pipeline.",
+      "script": "The cell writes one JSON record per test event, with tests nested inside, measurements inside those, and channel readings inside those. I chose the output grain first: one row per test event, because that's what the KPIs need. Then pandas json_normalize walks the nesting along explicit record paths, so no sibling arrays get expanded against each other. I cast timestamps to datetime, readings to float, and pass or fail to boolean in Python, so Power Query never has to guess a type. Cycle time in seconds comes from start and end timestamps and feeds Uptime and Parts per Labor Hour. openpyxl writes a workbook under 5 MB.",
+      "keypoints": [
+        "Three nested levels under each test event",
+        "Grain chosen first: one row per test event",
+        "Explicit record paths",
+        "Types fixed in Python",
+        "Cycle time derived; under 5 MB via openpyxl"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you size the $355K?",
+      "script": "Two components, both written into an assumptions table. First, closing the automated line's schedule attainment gap recovers roughly 27,000 cables a year with no added labor, and at an assumed $12 contribution margin that's about $324,000. Second, retiring the manual weekly reporting cycle frees about 48 analyst hours a week, which at an assumed $12.50 fully loaded rate is about $31,200 a year. Together, about $355,000. Both rates are conservative and still need JMA Finance to confirm, and the cable figure is a projection from demonstrated capability, so I call it a sized opportunity, never a saving.",
+      "keypoints": [
+        "27,000 cables at assumed $12 margin, about $324,000",
+        "48 analyst hours a week at assumed $12.50, about $31,200",
+        "Assumptions table, conservative rates",
+        "Pending JMA Finance; projection, not realized"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What would you do differently?",
+      "script": "Two things. The Culture and Engagement KPI was scoped late, so the survey and the usage count are built and wired into the dashboard, but the first survey slipped past the engagement and it's the one KPI with no baseline. I'd run it in Measure next time, alongside the other baselines. And I didn't write unit tests for the pipeline. It's correct today, but an upstream schema change would only be caught by someone noticing a wrong dashboard. A handful of assertions on columns, types, row counts, and cycle time ranges would have removed that dependency before handover.",
+      "keypoints": [
+        "Culture KPI scoped late, no baseline",
+        "Run the survey during Measure",
+        "No unit tests on the pipeline",
+        "Specific assertions that would have closed the gap"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "If the cell was starved, that idle time should count as downtime. How can it show 97.3% uptime?",
+      "script": "Fair challenge, and it comes down to how the cell's states were classified. Our formula is runtime over runtime plus downtime, so 97.3% says the equipment almost never faulted while it was running work. In OEE terms starved time is an availability loss, and uptime alone can't separate starvation from a slow cycle. The conclusion still holds, because a healthy machine missing plan by half is limited by something other than the machine, and the fishbone found it in kitting and an inflated target. The fix I'd make is putting starved time and cycle time against the design rate on the dashboard.",
+      "keypoints": [
+        "Concede: OEE counts starved time as availability loss",
+        "Depends on state classification",
+        "Uptime alone cannot separate starved from slow",
+        "Conclusion holds: equipment rarely faulted",
+        "Add starved time and cycle time against design rate"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Two weeks on one shift with no control group. Why believe the pilot?",
+      "script": "As proof that it lasts, you shouldn't yet, and I wrote it up as a pilot. What it does show is the mechanism. Red status got a named owner at a fixed time instead of whenever a supervisor walked by, and the median time to first action dropped from about four hours to about 25 minutes. That metric is timestamped and behavioral, so it's hard to fake. To make it convincing I'd stagger the rollout to second shift as a comparison, keep measuring after the novelty wears off, and report the full distribution, not only the median.",
+      "keypoints": [
+        "Concede: small, short, uncontrolled",
+        "Mechanism is direct and observable",
+        "Behavioral, timestamped metric",
+        "Staggered rollout and longer tracking"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "The $355K is a student estimate. Isn't it just a made up number?",
+      "script": "It's a projection, and I never present it as anything else. The arithmetic is two lines anyone can check: about 27,000 recoverable cables at an assumed $12 margin, and about 48 analyst hours a week at an assumed $12.50. The team picked conservative rates and put them in an assumptions table, so JMA Finance can swap in real numbers without redoing the analysis. What I'd defend is the method and the labelling. What I wouldn't claim is that any of it has been realized.",
+      "keypoints": [
+        "Concede: projection, assumed rates",
+        "Transparent two component arithmetic",
+        "Conservative rates in an assumptions table",
+        "Never claimed as realized"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "jma-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What was the JMA Wireless engagement, and what did Tanay own?",
+      "easy": "JMA Wireless makes cell tower equipment in Liverpool, New York. From January to May 2026, Tanay led a four person student team through a Lean Six Sigma improvement project in the department that builds jumper cables, sponsored by the company's SVP of Global Operations.",
+      "deep": "A 15 week DMAIC engagement run as a client project by a four person Whitman School team, with JMA's SVP of Global Operations as sponsor, a named project champion, and weekly on site access. The Jumper Department builds radio frequency jumper cables on two lines: Jumper 1.0, manual, eight operators across two ten hour shifts; and Jumper 2.0, a fully automated cell with PLC level data capture. Tanay was Project Lead and personally wrote the charter, SIPOC, and CTQC tree, ran the KPI definition interviews, built the Python pipeline that made the automated line's data usable, and wrote the Control Plan. Outputs: a sponsor approved definition of five KPIs across both lines; a pipeline that took 31 GB of nested PLC JSON to under 5 MB; a Power BI dashboard; the finding that the automated cell was input limited (97.3% uptime, 46.3% schedule attainment); a piloted daily standup (red to first action from about 4 hours to about 25 minutes); and a projected opportunity of about $355,000 a year that still needs JMA Finance to confirm.",
+      "say": "I was project lead on a four person team running a full DMAIC cycle at JMA Wireless, sponsored by their SVP of Global Operations. I wrote the KPI definitions the sponsor signed off and built the pipeline that made the automated line measurable. The main finding was that the constraint sat upstream of the automated cell, in kitting and material flow.",
+      "evidence": [
+        "portfolio: JMA Wireless builds cell tower transmitters and active 5G infrastructure in Liverpool, New York.",
+        "portfolio: Jumper 1.0 is manual, staffed by eight operators across two ten hour shifts. Jumper 2.0 is a fully automated cell with PLC level data capture.",
+        "portfolio: I was Project Lead on a four person Whitman School team running a full DMAIC engagement from January to May 2026",
+        "portfolio: sponsored by JMA’s SVP of Global Operations with a named project champion and weekly on site access",
+        "portfolio: I wrote the charter, SIPOC, and CTQC tree, ran the KPI definition interviews, built the Python pipeline that made the automated line",
+        "portfolio: and wrote the Control Plan that governs the dashboard after handover",
+        "portfolio: Duration 15 weeks, on site weekly",
+        "portfolio: 5 KPIs standardized across 2 lines",
+        "portfolio: 31 GB of nested PLC JSON reduced to under 5 MB",
+        "portfolio: automated line at 97.3% uptime but 46.3% schedule attainment",
+        "portfolio: Median time from a KPI going red to a named owner taking the first action fell from about 4 hours to about 25 minutes, because the standup surfaced the red status instead of a supervisor finding it on a walk.",
+        "portfolio: Retiring the manual weekly reporting cycle frees about 48 analyst hours per week, roughly $31,200 a year at an assumed $12.50 fully loaded hourly rate. Together that is about $355,000 of recurring annual opportunity.",
+        "portfolio: still need JMA Finance to confirm, so they are a sized opportunity rather than a realized saving."
+      ],
+      "sources": [],
+      "tags": [
+        "jma",
+        "overview",
+        "lean-six-sigma"
+      ]
+    },
+    {
+      "id": "jma-02",
+      "type": "define",
+      "level": 1,
+      "q": "What is DMAIC, and how did each phase map onto this engagement?",
+      "easy": "DMAIC is the five step Six Sigma method for improving an existing process: Define the problem, Measure how it performs now, Analyze why, Improve it, and Control it so the gains last.",
+      "deep": "Define: charter, scope, SIPOC, voice of the customer translated into critical to quality requirements. Here: the charter, SIPOC, CTQC tree, definition interviews across manufacturing, quality, and production supervision, and a sponsor approved document fixing one formula and one target for each of five KPIs. Measure: a baseline from a trusted measurement system. Here: the Python pipeline that made the automated cell's PLC JSON usable and the first standardized baseline for both lines. Analyze: root causes, validated with data. Here: the contradiction of 97.3% uptime against 46.3% attainment, a fishbone on that gap, and two Paretos (first time failures, manual line downtime). Improve: generate, select, pilot. Here: six candidates in a Pugh matrix, three recommendations sequenced on a benefit and effort grid, a two week standup pilot. Control: sustain. Here: a Control Plan with a refresh owner and cadence, a dashboard FMEA, and tiered escalation. Two loops fired: a root cause that failed validation went back for re analysis, and an unreachable target went back to be revalidated. Tanay completed it for the Lean Six Sigma Green Belt (SCM 755, Spring 2026).",
+      "evidence": [
+        "portfolio: Lean Six Sigma Green Belt",
+        "portfolio: SCM 755 · Spring 2026",
+        "portfolio: The most important Define deliverable was a written, sponsor approved definition document: five KPIs, each with one agreed formula and one agreed target, confirmed by the sponsor before anything was built.",
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem.",
+        "portfolio: A fishbone on that gap put the leading causes in Method, Material, and Measurement: kitting batches sized for the manual line, connector subassemblies arriving batched rather than continuously, and a weekly target set at commissioning that had never been revisited against demonstrated capability.",
+        "portfolio: Three recommendations came out of Improve, selected against six candidates with a Pugh matrix and sequenced on a benefit and effort grid",
+        "portfolio: I piloted the standup for two weeks on the manual line first shift and measured it rather than asserting it worked.",
+        "portfolio: a named refresh owner and cadence, an FMEA on the dashboard itself covering the ways a stale or broken feed could mislead a supervisor, and a tiered escalation framework that triggers on red KPI status",
+        "portfolio: A root cause that did not survive validation went back for re analysis, and a target the data showed was unreachable went back to be revalidated rather than left red on a dashboard forever."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/DMAIC"
+      ],
+      "tags": [
+        "dmaic",
+        "six-sigma",
+        "method"
+      ]
+    },
+    {
+      "id": "jma-03",
+      "type": "how",
+      "level": 1,
+      "q": "What did Tanay do in Define, and what are a SIPOC and a CTQ tree?",
+      "easy": "Tanay wrote the project charter, mapped the process from suppliers to customers, broke good performance down into measurable requirements, and interviewed the people who use the numbers. The result was a sponsor approved document defining five KPIs exactly.",
+      "deep": "Charter: problem statement, goal, scope (the Jumper Department's two lines), sponsor and champion, team, timeline. SIPOC: a one page map of Suppliers, Inputs, Process, Outputs, Customers that fixes the project boundary and shows where inputs enter, which mattered because the eventual constraint was an input. An illustrative jumper version: cable and connector suppliers and the kitting area; cable stock, connectors, kits; cut, terminate, torque, test; tested jumpers; tower and small cell deployments (rebuild the real one from the project files). CTQC tree (critical to quality characteristics): starts from a customer need, such as cables that work on the tower and ship on time, and breaks it into drivers and then measurable characteristics with specifications, such as torque within spec, return loss within spec, first time throughput, schedule attainment. Definition interviews: across manufacturing, quality, and production supervision, which showed Uptime and Schedule Attainment meant different things to different functions. Output: one formula and one target per KPI, confirmed by the sponsor before anything was built.",
+      "evidence": [
+        "portfolio: I wrote the charter, SIPOC, and CTQC tree, ran the KPI definition interviews, built the Python pipeline that made the automated line",
+        "portfolio: Attainment meant different things to different functions. I ran the definition interviews across",
+        "portfolio: manufacturing, quality, and production supervision and wrote a sponsor approved document that",
+        "portfolio: The most important Define deliverable was a written, sponsor approved definition document: five KPIs, each with one agreed formula and one agreed target, confirmed by the sponsor before anything was built.",
+        "portfolio: Before this project there was no way to compare them, because terms like Uptime and Schedule Attainment meant different things to different functions."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/DMAIC"
+      ],
+      "tags": [
+        "define-phase",
+        "sipoc",
+        "ctq",
+        "charter"
+      ]
+    },
+    {
+      "id": "jma-04",
+      "type": "why",
+      "level": 1,
+      "q": "Why does Tanay say the definitions, more than the code, produced the main finding?",
+      "easy": "Before the project, each function calculated Uptime and Schedule Attainment its own way, so the two lines could not be compared. Once everyone used one formula, the automated cell's contradiction (almost always up, yet producing half its target) was plain to see.",
+      "deep": "Without shared definitions, each function's numbers were internally consistent and mutually incomparable: Uptime could mean scheduled time not in fault or time producing; Schedule Attainment could be against a daily plan, a weekly target, or demand. Leadership could not draw a line from what happened on the floor on Tuesday to the financial plan. The sponsor approved document fixed one formula and one target per KPI, and the pipeline then applied those formulas the same way to both lines. Only then did 97.3% uptime and 46.3% schedule attainment sit side by side for the same cell, and that pair located the constraint upstream. The write up says so directly: the pattern only became visible because standardizing the definitions made the two numbers comparable. The general lesson is that the semantic layer (what a metric means and who signed it) often decides an analytics outcome more than the modeling, and a sponsor signed definition ends arguments about whose number is right.",
+      "say": "The code made the automated line measurable, but the finding came from agreeing what the words meant. Once Uptime and Schedule Attainment had one formula each, the automated cell showed 97.3% uptime and less than half of its target on the same baseline. You can't see that contradiction in numbers defined differently by each function.",
+      "evidence": [
+        "portfolio: Before this project there was no way to compare them, because terms like Uptime and Schedule Attainment meant different things to different functions.",
+        "portfolio: Leadership could not draw a clean line from what happened on the floor on Tuesday to the financial plan.",
+        "portfolio: The most important Define deliverable was a written, sponsor approved definition document: five KPIs, each with one agreed formula and one agreed target, confirmed by the sponsor before anything was built.",
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem.",
+        "portfolio: The pattern only became visible because standardizing the definitions made the two numbers comparable."
+      ],
+      "sources": [],
+      "tags": [
+        "metric-definitions",
+        "semantic-layer",
+        "judgment"
+      ]
+    },
+    {
+      "id": "jma-05",
+      "type": "formula",
+      "level": 1,
+      "q": "Define Parts per Labor Hour exactly, with its target and its trap.",
+      "easy": "Parts per Labor Hour is good parts made divided by labor hours spent; the target was at least 50. It measures labor productivity, and it misleads for an automated cell unless the denominator is chosen carefully.",
+      "deep": "$$\\text{PPLH} = \\frac{\\text{total good parts}}{\\text{total labor hours}}, \\qquad \\text{target} \\ge 50$$ The numerator counts good parts only, so scrap and rework are not output. Both lines used the same scheduled labor hours denominator, which keeps the comparison consistent. Baseline: 34.9 on the manual line and 7.94 on the automated cell, so on this basis the cell looks about 4.4 times less productive. The trap: the automated cell needs a supervising technician for only part of a shift, and measured on engaged technician minutes its figure is roughly an order of magnitude higher. The dashboard therefore shows both the standard figure and a cell specific cycles per engaged hour measure, rather than letting 7.94 stand as a verdict. Cycle time derived by the pipeline is a direct input to this measure. Interview line: the one number on the baseline table that should not be read straight across.",
+      "evidence": [
+        "portfolio: Parts per Labor HourTotal good parts / total labor hours>= 50",
+        "portfolio: Parts per Labor Hour34.917.9450",
+        "portfolio: Parts per Labor Hour is the one number on that table that should not be read straight across.",
+        "portfolio: Both lines use the same scheduled labor hours denominator so the comparison is consistent, but the automated cell only needs a supervising technician for part of a shift.",
+        "portfolio: Measured on engaged technician minutes, the automated figure is roughly an order of magnitude higher, so the dashboard exposes both that figure and a cell specific cycles per engaged hour measure rather than letting 7.94 stand as a verdict.",
+        "portfolio: It also computes cycle time in seconds as a direct input to the Uptime and Parts per Labor Hour measures. The output is under 5 MB and loads instantly."
+      ],
+      "sources": [],
+      "tags": [
+        "kpi",
+        "pplh",
+        "labor-productivity"
+      ]
+    },
+    {
+      "id": "jma-06",
+      "type": "formula",
+      "level": 1,
+      "q": "Define Uptime as the sponsor approved it, and say what it does and does not capture.",
+      "easy": "Uptime is the time a line was running divided by the time it was either running or down. The target was at least 85%.",
+      "deep": "$$\\text{Uptime} = \\frac{\\text{runtime}}{\\text{runtime} + \\text{downtime}}, \\qquad \\text{target} \\ge 85\\%$$ Baseline: 31.3% on the manual line, 97.3% on the automated cell. It is an availability style measure, and what it captures depends on how each minute is classified as runtime or downtime, which is exactly what the definition interviews had to settle. It does not capture speed (a slow cycle still counts as runtime) or quality (a failed part still counts as runtime), and, depending on classification, it may not capture time the cell sits idle with no work. In OEE (Overall Equipment Effectiveness = Availability x Performance x Quality), waiting for input counts as an availability loss; if the cell's state logs did not book starved time as downtime, high Uptime and low Schedule Attainment can coexist, which is the pattern that pointed upstream. Tanay should be ready to state how starved time was classified on each line. The pipeline's cycle time feeds this measure.",
+      "evidence": [
+        "portfolio: UptimeRuntime / (runtime + downtime)>= 85%",
+        "portfolio: Uptime31.3%97.3%85%",
+        "portfolio: It also computes cycle time in seconds as a direct input to the Uptime and Parts per Labor Hour measures. The output is under 5 MB and loads instantly."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Overall_equipment_effectiveness"
+      ],
+      "tags": [
+        "kpi",
+        "uptime",
+        "availability",
+        "oee"
+      ]
+    },
+    {
+      "id": "jma-07",
+      "type": "formula",
+      "level": 1,
+      "q": "Define First Time Throughput and give the baseline.",
+      "easy": "First Time Throughput is the share of parts that pass testing on the first try, with no rework. The target was at least 95%, and both lines missed it.",
+      "deep": "$$\\text{FTT} = \\frac{\\text{good parts}}{\\text{total parts tested}}, \\qquad \\text{target} \\ge 95\\%$$ For jumpers, a part is good when it passes continuity, return loss, and visual inspection on the first attempt. Baseline: 87.9% manual, 92.5% automated. Counting first pass only exposes the hidden factory of rework that a final yield figure conceals, since a part that fails and passes after rework does not count as good here. Related measure: rolled throughput yield, the product of first pass yields across sequential steps. The Analyze Pareto on manual line first time failures found torque and return loss together at 74%, which points at tooling and torque training on one side and connector seating on the other.",
+      "evidence": [
+        "portfolio: First Time ThroughputGood parts / total parts tested>= 95%",
+        "portfolio: First Time Throughput87.9%92.5%95%",
+        "portfolio: every cable must pass continuity, return loss, and visual inspection before it ships",
+        "portfolio: Torque and return loss are 74% of all first time failures",
+        "portfolio: which points at tooling and torque training on one side and connector seating on the other"
+      ],
+      "sources": [],
+      "tags": [
+        "kpi",
+        "ftt",
+        "quality"
+      ]
+    },
+    {
+      "id": "jma-08",
+      "type": "formula",
+      "level": 1,
+      "q": "Define Schedule Attainment and explain why both baseline values are surprising.",
+      "easy": "Schedule Attainment is how many parts a line actually built divided by its weekly target. At least 100% means the line hit plan.",
+      "deep": "$$\\text{Schedule Attainment} = \\frac{\\text{actual parts}}{\\text{weekly target}}, \\qquad \\text{target} \\ge 100\\%$$ Baseline: 139.7% on the manual line, 46.3% on the automated cell. The automated cell runs 97.3% of the time and makes less than half its target, so the gap sits upstream or in the target itself; the fishbone found both (kitting batches sized for the manual line, batched connector subassemblies, and a weekly target set at commissioning and never revisited). The manual line beats plan by 39.7 points, which looks like heroics but masks the demand signal going back to planning and depresses labor productivity. The measure is only as good as its denominator, which is why one of the three recommendations reset the cell's target to roughly 1,150 cables per week, ramping by about 200 per week as kitting improves.",
+      "evidence": [
+        "portfolio: Schedule AttainmentActual parts / weekly target>= 100%",
+        "portfolio: Schedule Attainment139.7%46.3%100%",
+        "portfolio: Uptime31.3%97.3%85%",
+        "portfolio: A fishbone on that gap put the leading causes in Method, Material, and Measurement: kitting batches sized for the manual line, connector subassemblies arriving batched rather than continuously, and a weekly target set at commissioning that had never been revisited against demonstrated capability.",
+        "portfolio: The manual line was quietly absorbing the shortfall at 139.7% of its own target.",
+        "portfolio: That looks like heroics and reads well on a weekly report, but it depresses labor productivity, strains the operator pool, and masks the real demand signal going back to planning.",
+        "portfolio: Resetting it to roughly 1,150 cables per week and ramping by about 200 per week as the kitting fix lands means the team can see progress it is actually making."
+      ],
+      "sources": [],
+      "tags": [
+        "kpi",
+        "schedule-attainment"
+      ]
+    },
+    {
+      "id": "jma-09",
+      "type": "formula",
+      "level": 2,
+      "q": "How was the Culture and Engagement index defined, and what went wrong with it?",
+      "easy": "It combined a short employee pulse survey (60% of the score) with how many named people actually opened the dashboard each week (40%), with a target index of at least 75. It was built and wired in, but no baseline was collected before the engagement ended.",
+      "deep": "$$\\text{C\\&E index} = 0.6 \\times \\text{pulse score} + 0.4 \\times \\text{weekly active dashboard users}, \\qquad \\text{target} \\ge 75$$ Pulse: a five question, two minute survey. Usage: a passive count of distinct named users who open the dashboard at least twice a week. For the sum to be an index out of 100, both parts must be on a 0 to 100 scale (for example pulse as percent of maximum score, users as a share of a defined population); be ready with the exact scaling. Why include culture: both JMA and Whitman treat it as a real lean variable, and standard manufacturing data never captures it; the usage count is a behavioral check that the KPI system is used, which a survey cannot fake. What went wrong: it was scoped late and is the one KPI with no baseline value, because the first administration slipped past the end of the engagement. Weaknesses to admit: the 60 and 40 weights are a judgment, and opening a dashboard is not the same as acting on it.",
+      "evidence": [
+        "portfolio: Culture and EngagementPulse score (60%) + weekly active dashboard users (40%)Index >= 75",
+        "portfolio: Both JMA and Whitman treat culture as a real lean variable, but standard manufacturing data never captures it",
+        "portfolio: so I specified a five question two minute pulse survey plus a passive count of distinct named users who open the dashboard at least twice a week",
+        "portfolio: The Culture and Engagement metric was scoped late and is the one KPI with no baseline value",
+        "portfolio: the instrument is built and wired into the dashboard but the first administration slipped past the engagement"
+      ],
+      "sources": [],
+      "tags": [
+        "kpi",
+        "culture",
+        "survey"
+      ]
+    },
+    {
+      "id": "jma-10",
+      "type": "how",
+      "level": 1,
+      "q": "What did the automated cell's data look like, and why could nobody use it?",
+      "easy": "The machine wrote one record per test event, with lists inside lists inside lists. Loaded straight into Power BI, two small files ballooned past 31 GB, and no machine with less than 64 GB of memory could open the result.",
+      "deep": "Structure: one JSON record per test event; each record nests an array of tests; each test nests an array of measurements; each measurement nests an array of channel readings. That is three levels of one to many relationships under every event. Two raw datasets of 809 and 1,000 records expanded to more than 31 GB inside Power BI, which made the data unusable twice over: Power BI expanded the nesting on every visual that touched the data, and nobody with less than 64 GB of RAM could open the file at all. So before this pipeline the automated line was effectively unmeasurable, which is why the write up says the pipeline made it measurable at all. The fix was to flatten once, upstream, in Python, to the grain the KPIs need: one row per test event.",
+      "evidence": [
+        "portfolio: The automated cell publishes one JSON record per test event, and each record nests an array of tests, each nesting an array of measurements, each nesting an array of channel readings.",
+        "portfolio: Two raw datasets of 809 and 1,000 records expanded to more than 31 GB when loaded straight into Power BI.",
+        "portfolio: That is unusable twice over: Power BI expands the nesting on every visual that touches the data, and nobody with less than 64 GB of RAM can open the file at all.",
+        "portfolio: into Power BI, which no machine under 64 GB of RAM could even open.",
+        "portfolio: I built a Python pipeline with pandas and openpyxl that walks the nesting with explicit json_normalize record paths and writes one flat row per test event."
+      ],
+      "sources": [],
+      "tags": [
+        "nested-json",
+        "plc-data",
+        "measure-phase"
+      ]
+    },
+    {
+      "id": "jma-11",
+      "type": "concept",
+      "level": 2,
+      "q": "How can 1,809 JSON records become more than 31 GB?",
+      "easy": "Each record holds lists of tests, each test lists of measurements, each measurement lists of readings. Expanding all of it into a flat table multiplies the rows, and every row repeats all the parent information, so size grows with the product of the list lengths.",
+      "deep": "Expanding nested arrays in place (Power Query's expand to new rows) multiplies rows at each level: a record with $T$ tests, $M$ measurements per test, and $C$ readings per measurement becomes $T \\cdot M \\cdot C$ rows, and every row repeats every parent field (ids, timestamps, test names, limits). Size scales roughly as $\\text{records} \\times T \\times M \\times C \\times \\text{row width}$, so moderate list lengths compound quickly. Expanding two sibling arrays from the same parent independently makes a cross product of unrelated lists, which is both larger and wrong. Untyped text columns make it worse, because Power BI's columnar engine compresses typed, low cardinality columns well and long JSON strings badly, and here the expansion was repeated on every visual. The cure has three parts: pick the output grain deliberately (one row per test event), walk the nesting along one explicit record path per output table so no accidental cross product happens, and cast types before load. The write up gives the inputs (809 and 1,000 records) and the result (more than 31 GB); know the actual list lengths from the data.",
+      "evidence": [
+        "portfolio: Two raw datasets of 809 and 1,000 records expanded to more than 31 GB when loaded straight into Power BI.",
+        "portfolio: That is unusable twice over: Power BI expands the nesting on every visual that touches the data, and nobody with less than 64 GB of RAM can open the file at all.",
+        "portfolio: The automated cell publishes one JSON record per test event, and each record nests an array of tests, each nesting an array of measurements, each nesting an array of channel readings."
+      ],
+      "sources": [],
+      "tags": [
+        "row-explosion",
+        "denormalization",
+        "power-bi"
+      ]
+    },
+    {
+      "id": "jma-12",
+      "type": "how",
+      "level": 1,
+      "q": "Walk through the Python pipeline stage by stage.",
+      "easy": "Load the raw JSON, flatten it with pandas into one row per test event, set every column's data type, compute cycle time, and write a small Excel workbook for Power BI.",
+      "deep": "Extract: load the raw test report JSON. Parse: walk the nesting with explicit `pandas.json_normalize` record paths. `record_path` names the list that becomes rows, `meta` carries parent fields onto each row (nested ones as lists such as ['tests', 'name']), `record_prefix` or `meta_prefix` avoids name collisions, and `errors='ignore'` is reserved for meta keys that are legitimately optional. Shape: one flat row per test event. Type cast: timestamps to datetime64, channel readings to float64, pass and fail to boolean, so Power Query never coerces anything (Power Query infers types from a sample of rows and can guess wrong silently, for example reading a numeric code as text or misreading a locale formatted date). Calculate: cycle time in seconds from start and end timestamps, a direct input to the Uptime and Parts per Labor Hour measures. Load: write a Power BI ready workbook with openpyxl. Result: under 5 MB, instant refresh. Why Python rather than Power Query for flattening: the transformation is explicit and versionable, runs once instead of on every visual, and fixes the types at the source.",
+      "evidence": [
+        "portfolio: I built a Python pipeline with pandas and openpyxl that walks the nesting with explicit json_normalize record paths and writes one flat row per test event.",
+        "portfolio: It casts timestamps to datetime, channel readings to float, and pass and fail to boolean, so Power Query never has to coerce anything.",
+        "portfolio: It also computes cycle time in seconds as a direct input to the Uptime and Parts per Labor Hour measures. The output is under 5 MB and loads instantly.",
+        "portfolio: ParseWalk the nesting with explicit json_normalize record paths",
+        "portfolio: Type castdatetime64, float64, boolean, so Power BI needs no coercion",
+        "portfolio: CalculateDerive cycle time in seconds from start and end timestamps",
+        "portfolio: LoadWrite a Power BI ready workbook via openpyxl"
+      ],
+      "sources": [
+        "https://pandas.pydata.org/docs/reference/api/pandas.json_normalize.html"
+      ],
+      "tags": [
+        "etl",
+        "pandas",
+        "json-normalize",
+        "openpyxl"
+      ]
+    },
+    {
+      "id": "jma-13",
+      "type": "code",
+      "level": 2,
+      "q": "Sketch the json_normalize and type casting code for records that nest tests, measurements, and readings.",
+      "easy": "One explicit record path per table you want, parent fields carried down as meta, then explicit type conversion and a computed cycle time column, written out with openpyxl.",
+      "deep": "Illustrative sketch with placeholder field names (the real schema is in the project files):\n\n```python\nimport json\nimport pandas as pd\n\nwith open(\"test_reports.json\") as f:\n    events = json.load(f)                      # list of test event records\n\n# Event grain: one row per test event; nested lists stay out of this table\nev = pd.json_normalize(events, max_level=1)\nev = ev[[\"event_id\", \"station\", \"start_time\", \"end_time\", \"result\"]]\n\n# Reading grain, only if a drill down needs it: walk ONE path explicitly\nreadings = pd.json_normalize(\n    events,\n    record_path=[\"tests\", \"measurements\", \"readings\"],\n    meta=[\"event_id\", [\"tests\", \"name\"]],\n    record_prefix=\"reading.\",\n)\n\n# Type contract, so Power Query never guesses\nev[\"start_time\"] = pd.to_datetime(ev[\"start_time\"], errors=\"raise\")\nev[\"end_time\"] = pd.to_datetime(ev[\"end_time\"], errors=\"raise\")\nev[\"passed\"] = ev[\"result\"].map({\"PASS\": True, \"FAIL\": False}).astype(\"boolean\")\nev[\"cycle_time_s\"] = (ev[\"end_time\"] - ev[\"start_time\"]).dt.total_seconds()\nreadings[\"reading.value\"] = pd.to_numeric(readings[\"reading.value\"], errors=\"raise\")\n\nwith pd.ExcelWriter(\"jumper2_events.xlsx\", engine=\"openpyxl\") as xw:\n    ev.to_excel(xw, sheet_name=\"events\", index=False)\n```\n\nDesign points: `record_path` names the list that becomes rows; `meta` carries parent fields down (nested ones as lists); one explicit path per output table prevents a cross product of sibling arrays. Mapping pass and fail into a nullable boolean leaves any unmapped value as `<NA>`, which a check can catch; `errors=\"raise\"` makes a bad timestamp or reading fail loudly. The assertions Tanay says were missing would sit right after this: `ev[\"event_id\"].is_unique`, no null timestamps, `(ev[\"cycle_time_s\"] > 0).all()`, no `<NA>` in `passed`, and `len(ev) == len(events)`.",
+      "evidence": [
+        "portfolio: I built a Python pipeline with pandas and openpyxl that walks the nesting with explicit json_normalize record paths and writes one flat row per test event.",
+        "portfolio: It casts timestamps to datetime, channel readings to float, and pass and fail to boolean, so Power Query never has to coerce anything.",
+        "portfolio: CalculateDerive cycle time in seconds from start and end timestamps",
+        "portfolio: LoadWrite a Power BI ready workbook via openpyxl",
+        "portfolio: I also did not write unit tests for the Python pipeline."
+      ],
+      "sources": [
+        "https://pandas.pydata.org/docs/reference/api/pandas.json_normalize.html"
+      ],
+      "tags": [
+        "code",
+        "pandas",
+        "json-normalize"
+      ]
+    },
+    {
+      "id": "jma-14",
+      "type": "define",
+      "level": 2,
+      "q": "Define Power BI, Power Query, DAX, and the VertiPaq engine, and say where each sat in this project.",
+      "easy": "Power BI is Microsoft's dashboard tool. Power Query is its data import and cleaning step, DAX is its formula language for measures, and VertiPaq is the in memory engine that stores and compresses the data.",
+      "deep": "Power Query (the M language) runs at refresh: it connects to sources, applies transformation steps, and assigns column types; here it only had to load a clean, typed workbook. VertiPaq stores each column separately with dictionary and run length encoding, so typed, low cardinality columns compress well and wide, repeated, text heavy tables do not, which is part of why the flat, typed table came in under 5 MB. DAX defines measures evaluated at query time in filter context, for example Uptime as DIVIDE(SUM(runtime), SUM(runtime) + SUM(downtime)), which returns blank instead of an error on a zero denominator and lets one definition serve both lines through a line slicer. The engineering principle: do heavy reshaping upstream (Python here), keep Power Query thin, and keep business logic in a small set of named measures whose formulas match the sponsor approved definitions word for word. Minitab is also in the project's toolset for the statistical work.",
+      "evidence": [
+        "portfolio: It also computes cycle time in seconds as a direct input to the Uptime and Parts per Labor Hour measures. The output is under 5 MB and loads instantly.",
+        "portfolio: TAGS: DMAIC, Power BI, DAX, Python, Pandas, openpyxl, ETL, Minitab, SIPOC, Pugh Matrix, FMEA, Control Plan",
+        "portfolio: It casts timestamps to datetime, channel readings to float, and pass and fail to boolean, so Power Query never has to coerce anything."
+      ],
+      "sources": [],
+      "tags": [
+        "power-bi",
+        "dax",
+        "power-query",
+        "vertipaq"
+      ]
+    },
+    {
+      "id": "jma-15",
+      "type": "number",
+      "level": 1,
+      "q": "What was the data reduction, and what exactly does it compare?",
+      "easy": "The automated line's data went from more than 31 GB when expanded inside Power BI to under 5 MB after Tanay's pipeline flattened and typed it, and the dashboard refreshed instantly.",
+      "deep": "Before: two raw datasets of 809 and 1,000 test event records expanded past 31 GB when loaded straight into Power BI, and could not be opened on any machine with less than 64 GB of RAM. After: one flat, typed row per test event, written to a workbook under 5 MB that loads instantly. Honest framing: this compares Power BI's expanded representation of the nested data with a flat table at a chosen grain, so it measures the cost of letting Power BI do the flattening on every visual, and no compression algorithm is involved. The reduction is real and is what made the automated line measurable at all, but the precise sentence is that the pipeline chose the grain the KPIs need and fixed the types, and the size followed.",
+      "evidence": [
+        "portfolio: Two raw datasets of 809 and 1,000 records expanded to more than 31 GB when loaded straight into Power BI.",
+        "portfolio: That is unusable twice over: Power BI expands the nesting on every visual that touches the data, and nobody with less than 64 GB of RAM can open the file at all.",
+        "portfolio: It also computes cycle time in seconds as a direct input to the Uptime and Parts per Labor Hour measures. The output is under 5 MB and loads instantly.",
+        "portfolio: 31 GB of nested PLC JSON reduced to under 5 MB"
+      ],
+      "sources": [],
+      "tags": [
+        "data-reduction",
+        "result"
+      ]
+    },
+    {
+      "id": "jma-16",
+      "type": "number",
+      "level": 1,
+      "q": "Recite the standardized baseline for both lines against target.",
+      "easy": "Manual line: first time throughput 87.9%, uptime 31.3%, schedule attainment 139.7%, 34.9 parts per labor hour. Automated cell: 92.5%, 97.3%, 46.3%, and 7.94. Targets: 95%, 85%, 100%, and 50.",
+      "deep": "First Time Throughput: 87.9% manual, 92.5% automated, target 95%. Uptime: 31.3% manual, 97.3% automated, target 85%. Schedule Attainment: 139.7% manual, 46.3% automated, target 100%. Parts per Labor Hour: 34.9 manual, 7.94 automated, target 50. Reading it: both lines miss FTT; the automated cell beats the Uptime target and misses Schedule Attainment by more than half; the manual line misses Uptime badly yet beats plan; PPLH should not be read across because of the scheduled hours denominator. Caveat: these are the baseline under the new definitions, measured during the engagement; the write up does not state the measurement window, so do not supply one.",
+      "evidence": [
+        "portfolio: First Time Throughput87.9%92.5%95%",
+        "portfolio: Uptime31.3%97.3%85%",
+        "portfolio: Schedule Attainment139.7%46.3%100%",
+        "portfolio: Parts per Labor Hour34.917.9450",
+        "portfolio: First Time ThroughputGood parts / total parts tested>= 95%",
+        "portfolio: UptimeRuntime / (runtime + downtime)>= 85%",
+        "portfolio: Schedule AttainmentActual parts / weekly target>= 100%",
+        "portfolio: Parts per Labor HourTotal good parts / total labor hours>= 50",
+        "portfolio: Parts per Labor Hour is the one number on that table that should not be read straight across."
+      ],
+      "sources": [],
+      "tags": [
+        "baseline",
+        "kpi",
+        "result"
+      ]
+    },
+    {
+      "id": "jma-17",
+      "type": "define",
+      "level": 2,
+      "q": "What is an RF jumper cable, and what do continuity, return loss, and torque mean in its testing?",
+      "easy": "A jumper is a short radio frequency cable connecting a transmitter to an antenna. Continuity checks the conductors are connected, return loss measures how much signal bounces back at the connectors, and torque is how tightly each connector is fastened.",
+      "deep": "Jumpers are short coaxial assemblies terminated with RF connectors; the write up calls them functionally simple and precision sensitive, with every connector terminated to tight torque and electrical specification. Continuity: center conductor and shield are each continuous and not shorted to each other. Return loss: incident over reflected power at the port, $\\text{RL} = 10\\log_{10}(P_{inc}/P_{ref}) = -20\\log_{10}|\\Gamma|$ dB, where $\\Gamma$ is the reflection coefficient; higher is better, and any impedance discontinuity (a poorly seated connector, a deformed dielectric, a bad termination) reflects power and lowers it. Torque: connectors are tightened to a specified torque; too little leaves an unstable contact and too much deforms parts, and either can surface as a return loss failure, so torque and return loss plausibly share causes. Visual inspection catches assembly and cosmetic defects. Passing all three on the first attempt is what counts as good for First Time Throughput.",
+      "evidence": [
+        "portfolio: Its Jumper Department produces the radio frequency jumper cables that connect transmitters to the antennas on towers and small cells.",
+        "portfolio: The parts are functionally simple and precision sensitive: every connector must be terminated to tight torque and electrical specification",
+        "portfolio: every cable must pass continuity, return loss, and visual inspection before it ships"
+      ],
+      "sources": [],
+      "tags": [
+        "domain",
+        "rf",
+        "return-loss"
+      ]
+    },
+    {
+      "id": "jma-18",
+      "type": "concept",
+      "level": 1,
+      "q": "Explain the main finding: 97.3% uptime against 46.3% schedule attainment.",
+      "easy": "The automated cell was almost never broken, yet it built less than half of what it was supposed to. A machine that is ready to run but does not produce is being starved of work, so the problem sat upstream, in getting kits and connectors to it.",
+      "deep": "Two standardized numbers for one cell: 97.3% uptime and 46.3% of weekly target. If the equipment were the constraint, low output would come with low uptime (faults, stoppages). High uptime with low output means the cell is input limited: what enters it, in the right quantity at the right time, caps output. The fishbone on that gap put the leading causes in Method, Material, and Measurement: kitting batches sized for the manual line, connector subassemblies arriving batched rather than continuously, and a weekly target set at commissioning and never checked against demonstrated capability. So two things were wrong at once: the cell was starved by batch kitting, and the target overstated what it could do even when fed. This contradicted the shared assumption that the equipment was the problem. The recommendations follow from it: two bin continuous kitting for the starvation, a target reset with a documented ramp for the measurement error, and a daily standup so red status gets an owner.",
+      "say": "The automated cell had 97.3% uptime and still delivered 46.3% of its weekly target. Those can't both describe a machine problem. A cell that's ready almost all the time but misses plan by half is starved, so we looked upstream and found kitting batched for the manual line and connector subassemblies arriving in batches.",
+      "evidence": [
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem.",
+        "portfolio: A cell that runs almost all of the time and still misses plan by more than half is input limited rather than equipment limited. The binding constraint was what entered the cell, not the cell itself.",
+        "portfolio: A fishbone on that gap put the leading causes in Method, Material, and Measurement: kitting batches sized for the manual line, connector subassemblies arriving batched rather than continuously, and a weekly target set at commissioning that had never been revisited against demonstrated capability.",
+        "portfolio: upstream, not the equipment everyone suspected. The manual line was absorbing the shortfall at"
+      ],
+      "sources": [],
+      "tags": [
+        "finding",
+        "constraint",
+        "root-cause"
+      ]
+    },
+    {
+      "id": "jma-19",
+      "type": "define",
+      "level": 1,
+      "q": "What is the theory of constraints, and how does it apply here?",
+      "easy": "The theory of constraints says every system's output is limited by one bottleneck, and improving anything else does not raise output. Here the bottleneck was the material feed into the automated cell, while the cell itself had spare capacity.",
+      "deep": "Goldratt (The Goal, 1984): the whole system's throughput is set by its constraint, and only increasing flow through the constraint raises throughput. Five focusing steps: identify the constraint; exploit it (get the most from it without spending, for example never letting it starve); subordinate everything else to that decision; raise its capacity if it still binds (the investment step); then return to step one without letting inertia become the new constraint. Drum buffer rope schedules to the constraint's pace (drum), protects it with a time buffer of work in front of it (buffer), and releases material only as the constraint consumes it (rope). Constraint types: equipment, people, policy. Applied: identify, 97.3% uptime with 46.3% attainment says the cell is not the constraint and the kitting feed is; exploit and subordinate, a two bin continuous feed is a buffer in front of the cell, and kitting batches sized for the manual line are a policy constraint (a rule, not a machine). Only after that would added capacity make sense. Policy and method constraints are typical and cheap to fix.",
+      "evidence": [
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem.",
+        "portfolio: A cell that runs almost all of the time and still misses plan by more than half is input limited rather than equipment limited. The binding constraint was what entered the cell, not the cell itself.",
+        "portfolio: a fifteen minute daily standup held at a wall mounted screen showing the dashboard, a two bin continuous kitting feed so the automated cell is never starved of inputs",
+        "portfolio: A fishbone on that gap put the leading causes in Method, Material, and Measurement: kitting batches sized for the manual line, connector subassemblies arriving batched rather than continuously, and a weekly target set at commissioning that had never been revisited against demonstrated capability."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Theory_of_constraints"
+      ],
+      "tags": [
+        "theory-of-constraints",
+        "bottleneck",
+        "drum-buffer-rope"
+      ]
+    },
+    {
+      "id": "jma-20",
+      "type": "why",
+      "level": 2,
+      "q": "Why is the manual line beating its target by 39.7 points a problem rather than good news?",
+      "easy": "The manual line was making up the automated cell's shortfall with extra effort. On a weekly report that looks heroic, but it hid the real problem from planning and wore on the operators.",
+      "deep": "At 139.7% of its own target, the manual line was absorbing the automated cell's gap. Consequences: labor productivity falls, since the manual line is the labor intensive way to build a jumper (34.9 parts per labor hour against a target of 50); the operator pool of eight people across two ten hour shifts is strained; and the demand signal going back to planning is masked, because department output looks close to plan and nobody upstream sees that the cell is starved. In systems terms, local overperformance at a non constraint hides the constraint. It also suggests the manual line's own target was soft, which is worth conceding if pressed. The pattern only became visible once both lines were measured with the same definitions.",
+      "evidence": [
+        "portfolio: The manual line was quietly absorbing the shortfall at 139.7% of its own target.",
+        "portfolio: That looks like heroics and reads well on a weekly report, but it depresses labor productivity, strains the operator pool, and masks the real demand signal going back to planning.",
+        "portfolio: Schedule Attainment139.7%46.3%100%",
+        "portfolio: Parts per Labor Hour34.917.9450",
+        "portfolio: Parts per Labor HourTotal good parts / total labor hours>= 50",
+        "portfolio: Jumper 1.0 is manual, staffed by eight operators across two ten hour shifts. Jumper 2.0 is a fully automated cell with PLC level data capture.",
+        "portfolio: The pattern only became visible because standardizing the definitions made the two numbers comparable."
+      ],
+      "sources": [],
+      "tags": [
+        "finding",
+        "demand-signal",
+        "systems-thinking"
+      ]
+    },
+    {
+      "id": "jma-21",
+      "type": "how",
+      "level": 2,
+      "q": "How was root cause analysis done, and what is a fishbone diagram?",
+      "easy": "A fishbone diagram lists possible causes of a problem under standard headings such as Method, Material, Machine, Man, Measurement, and Environment. On the automated cell's gap, the leading causes fell under Method, Material, and Measurement.",
+      "deep": "An Ishikawa (fishbone) diagram puts the effect at the head, here the gap between 97.3% uptime and 46.3% attainment, and arranges candidate causes on bones, conventionally the 6Ms: Method, Material, Machine, Man (people), Measurement, Mother Nature (environment). Its job is to widen the search before narrowing, and each candidate then needs data. Leading causes: Method, kitting batches sized for the manual line; Material, connector subassemblies arriving batched rather than continuously; Measurement, a weekly target set at commissioning and never revisited against demonstrated capability. Machine was not a leading bone, which is the contradiction with the floor's assumption. Validation: DMAIC requires each root cause to survive data, and on this engagement one candidate did not and went back for re analysis; know which one it was and what data ruled it out. Two Paretos supported Analyze, one on first time failures and one on manual line downtime.",
+      "evidence": [
+        "portfolio: A fishbone on that gap put the leading causes in Method, Material, and Measurement: kitting batches sized for the manual line, connector subassemblies arriving batched rather than continuously, and a weekly target set at commissioning that had never been revisited against demonstrated capability.",
+        "portfolio: A root cause that did not survive validation went back for re analysis, and a target the data showed was unreachable went back to be revalidated rather than left red on a dashboard forever.",
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/DMAIC"
+      ],
+      "tags": [
+        "fishbone",
+        "ishikawa",
+        "root-cause",
+        "analyze-phase"
+      ]
+    },
+    {
+      "id": "jma-22",
+      "type": "number",
+      "level": 2,
+      "q": "What did the first time failure Pareto show, and what is a Pareto chart?",
+      "easy": "A Pareto chart sorts problem categories from largest to smallest so the few biggest stand out. On the manual line, torque and return loss failures together made up 74% of all first time failures.",
+      "deep": "A Pareto chart is a bar chart sorted in descending order with a cumulative percentage line, built on the observation that a few categories usually account for most occurrences (80/20 is a heuristic, not a law). Finding: on Jumper 1.0, torque and return loss are 74% of first time failures, roughly three quarters. Interpretation in the write up: this points at tooling and torque training on one side and connector seating on the other, rather than at a diffuse quality problem. Mechanism: incorrect torque and poorly seated connectors both create impedance discontinuities that reflect RF power and fail return loss, so the two categories plausibly share causes and one fix (torque tooling with training) can move both. Caveats: manual line only; the write up gives the combined share, while the split between torque and return loss is in the figure and is worth knowing.",
+      "evidence": [
+        "portfolio: Torque and return loss are 74% of all first time failures",
+        "portfolio: On quality, torque and return loss together account for roughly three quarters of all first time failures",
+        "portfolio: which points at tooling and torque training on one side and connector seating on the other"
+      ],
+      "sources": [],
+      "tags": [
+        "pareto",
+        "quality",
+        "analyze-phase"
+      ]
+    },
+    {
+      "id": "jma-23",
+      "type": "number",
+      "level": 2,
+      "q": "Where did the manual line's lost time go, and what arithmetic should Tanay have ready?",
+      "easy": "Waiting for material was the biggest category at 38%, then setup and changeover at 27%, tool calibration and maintenance at 19%, operators absent or long breaks at 12%, and other at 4%.",
+      "deep": "Jumper 1.0 downtime by category, with typical event length and frequency: material wait (cable, connectors) 38%, 18 minutes, about 24 per week; setup and changeover 27%, 32 minutes, about 9; tool calibration and maintenance 19%, 22 minutes, about 9; operator absent or break overrun 12%, 11 minutes, about 11; other 4%. Reading: material wait is the same upstream flow problem that starves the automated cell, in a different shape, and changeover is the next lever (setup reduction in the SMED style would target it). Arithmetic a sharp interviewer may do: the five shares sum to 100%, so they are shares of recorded downtime; the prose says the line loses more than a third of its scheduled hours to material wait, which reads correctly as a share of lost time. Duration times frequency gives about 432 minutes a week for material wait and about 17 hours a week across the four named categories, far below the non running time implied by 31.3% uptime, so the duration and frequency columns describe typical events and do not reconcile to the uptime figure on their own. Know the basis of each column before quoting them together.",
+      "evidence": [
+        "portfolio: Material wait (cable, connectors)38%18 min~24",
+        "portfolio: Setup and changeover27%32 min~9",
+        "portfolio: Tool calibration and maintenance19%22 min~9",
+        "portfolio: Operator absent or break overrun12%11 min~11",
+        "portfolio: Other4%mixedmixed",
+        "portfolio: On time, the manual line loses more than a third of its scheduled hours waiting for material and another quarter to changeover.",
+        "portfolio: That is the same upstream flow problem that starves the automated cell, in a different shape.",
+        "portfolio: Uptime31.3%97.3%85%"
+      ],
+      "sources": [],
+      "tags": [
+        "pareto",
+        "downtime",
+        "analyze-phase",
+        "arithmetic-check"
+      ]
+    },
+    {
+      "id": "jma-24",
+      "type": "how",
+      "level": 2,
+      "q": "How were the recommendations chosen, and what were they?",
+      "easy": "The team listed six possible fixes, compared them in a Pugh matrix, ordered the winners by benefit and effort, and recommended three: a daily standup at a dashboard screen, a two bin kitting feed for the automated cell, and a realistic weekly target with a planned ramp.",
+      "deep": "Generate: six candidate improvements. Select: a Pugh matrix compares each candidate with a reference option criterion by criterion (better, same, worse), which forces explicit criteria and makes the choice auditable. Sequence: a benefit and effort grid orders quick wins before larger changes. The three: (1) a fifteen minute daily standup at a wall mounted screen showing the dashboard, which attacks response time to red KPIs and makes the dashboard part of the routine; (2) a two bin continuous kitting feed so the automated cell is never starved, which attacks the binding constraint; (3) a reset of the cell's weekly target from the commissioning number to demonstrated capability with a documented ramp, which fixes the measurement error that kept the dashboard permanently red. The standup was the one piloted; it is the natural pilot because it is cheap, reversible, and measurable within weeks on one shift. Know the other three candidates and the matrix criteria.",
+      "evidence": [
+        "portfolio: Three recommendations came out of Improve, selected against six candidates with a Pugh matrix and sequenced on a benefit and effort grid",
+        "portfolio: a fifteen minute daily standup held at a wall mounted screen showing the dashboard, a two bin continuous kitting feed so the automated cell is never starved of inputs",
+        "portfolio: with a documented ramp as kitting improves",
+        "portfolio: I piloted the standup for two weeks on the manual line first shift and measured it rather than asserting it worked."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Decision-matrix_method"
+      ],
+      "tags": [
+        "improve-phase",
+        "pugh-matrix",
+        "recommendations"
+      ]
+    },
+    {
+      "id": "jma-25",
+      "type": "define",
+      "level": 2,
+      "q": "What is a Pugh matrix, and what are its weaknesses?",
+      "easy": "A Pugh matrix compares several options against one reference option, criterion by criterion, marking each as better, the same, or worse. It is a quick, transparent way to pick among candidates.",
+      "deep": "Setup: choose criteria (for an engagement like this, plausible ones are impact on schedule attainment, cost, implementation time, operator burden, and sustainability; the real list is in the project files), choose a reference candidate (the datum, often the current state), and score each other candidate as better (+1), same (0), or worse (-1) on each criterion; the weighted variant multiplies by criterion weights. Read the counts of better and worse, then strengthen the leading candidate by borrowing strengths from others and iterate. Strengths: forces explicit criteria, fast, works in a room with stakeholders. Weaknesses: the criteria list is arbitrary and may be incomplete; several minor criteria can outvote a must have; the scores are ordinal judgments that look more quantitative than they are; and the result depends on which reference was chosen. A defensible use fixes criteria and weights in advance, treats must haves as gates, and checks the winner survives a change of reference.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Decision-matrix_method"
+      ],
+      "tags": [
+        "pugh-matrix",
+        "decision-making"
+      ]
+    },
+    {
+      "id": "jma-26",
+      "type": "define",
+      "level": 2,
+      "q": "What is a two bin continuous kitting feed, and why does it fix starvation?",
+      "easy": "Parts sit in two bins at the point of use. When the first bin empties it goes back to be refilled while work continues from the second, and the empty bin is itself the signal to replenish, so the machine always has parts.",
+      "deep": "Two bin is the simplest kanban: a visual pull signal in which consumption, rather than a forecast or a large batch schedule, triggers replenishment. Each bin holds enough to cover consumption during the replenishment lead time plus a safety margin, so bin size is roughly demand rate times lead time plus buffer. Why it fits: kitting batches sized for the manual line delivered material to the automated cell in lumps, so the cell alternated between running and waiting; small, continuous replenishment matches the cell's consumption. In theory of constraints terms it is a buffer in front of the constraint with a rope tied to consumption. Risks: bins sized too small starve the cell anyway, the kitting area must respond within the lead time, and connector subassemblies arriving batched from upstream would also have to change, since the fishbone flagged them.",
+      "evidence": [
+        "portfolio: a fifteen minute daily standup held at a wall mounted screen showing the dashboard, a two bin continuous kitting feed so the automated cell is never starved of inputs",
+        "portfolio: A fishbone on that gap put the leading causes in Method, Material, and Measurement: kitting batches sized for the manual line, connector subassemblies arriving batched rather than continuously, and a weekly target set at commissioning that had never been revisited against demonstrated capability."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Kanban",
+        "https://en.wikipedia.org/wiki/Theory_of_constraints"
+      ],
+      "tags": [
+        "kanban",
+        "two-bin",
+        "lean",
+        "material-flow"
+      ]
+    },
+    {
+      "id": "jma-27",
+      "type": "pushback",
+      "level": 2,
+      "q": "Isn't resetting the target to what the cell already does just moving the goalposts?",
+      "easy": "It would be if the target stayed there. The reset went to the cell's demonstrated capability with a planned ramp upward as the kitting fix landed, so progress shows up instead of a dashboard that is red forever.",
+      "deep": "Concede: lowering a target can hide a problem, and a reviewer should be suspicious. Defend: the old weekly target was set at commissioning and never checked against demonstrated capability, so it measured an aspiration. A target the cell cannot currently hit makes the dashboard permanently red, and a permanently red dashboard is one people stop reading. The reset went to roughly 1,150 cables per week with a ramp of about 200 per week as the kitting fix lands, documented so the original ambition stays visible and the path to it is explicit. That is also how DMAIC treated it: a target the data showed was unreachable went back to be revalidated instead of being left red. The commissioning number remains the long term goal; the reset changes the near term signal from always failing to improving at a known rate.",
+      "say": "It would be moving the goalposts if it stopped there. The old target came from commissioning and had never been checked against what the cell could actually do, so the dashboard was permanently red and people stopped reading it. We reset to roughly 1,150 cables a week with a documented ramp of about 200 a week as kitting improves.",
+      "evidence": [
+        "portfolio: A target the cell cannot currently hit makes the dashboard permanently red, and a permanently red dashboard is one people stop reading.",
+        "portfolio: Resetting it to roughly 1,150 cables per week and ramping by about 200 per week as the kitting fix lands means the team can see progress it is actually making.",
+        "portfolio: A fishbone on that gap put the leading causes in Method, Material, and Measurement: kitting batches sized for the manual line, connector subassemblies arriving batched rather than continuously, and a weekly target set at commissioning that had never been revisited against demonstrated capability.",
+        "portfolio: A root cause that did not survive validation went back for re analysis, and a target the data showed was unreachable went back to be revalidated rather than left red on a dashboard forever."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "targets",
+        "goalposts"
+      ]
+    },
+    {
+      "id": "jma-28",
+      "type": "number",
+      "level": 1,
+      "q": "What did the standup pilot measure, and what were the results?",
+      "easy": "Over a two week pilot on the manual line's first shift, the median time from a KPI turning red to a named person taking action fell from about 4 hours to about 25 minutes. Operators' self rated familiarity with the five KPIs rose from 2.4 to 4.1 out of 5.",
+      "deep": "Design: a fifteen minute daily standup at a wall mounted dashboard screen, run for two weeks on Jumper 1.0 first shift, measured instead of asserted. Metric 1: median time from a KPI going red to a named owner taking the first action, from about 4 hours to about 25 minutes. Mechanism: the standup surfaces red status at a fixed time with an owner assigned, where before a supervisor had to discover it on a floor walk. Median suits response times because they are right skewed (a few reds sit for a whole shift). Metric 2: operator self reported familiarity with the five KPIs, from 2.4 to 4.1 on a five point scale. Caveats: one shift, one line, two weeks, no concurrent control group, a before baseline from the same line rather than a randomized comparison, and a self reported familiarity score, so novelty and observer effects are plausible.",
+      "evidence": [
+        "portfolio: I piloted the standup for two weeks on the manual line first shift and measured it rather than asserting it worked.",
+        "portfolio: Median time from a KPI going red to a named owner taking the first action fell from about 4 hours to about 25 minutes, because the standup surfaced the red status instead of a supervisor finding it on a walk.",
+        "portfolio: Operator self reported familiarity with the five KPIs rose from 2.4 to 4.1 on a five point scale.",
+        "portfolio: a fifteen minute daily standup held at a wall mounted screen showing the dashboard, a two bin continuous kitting feed so the automated cell is never starved of inputs",
+        "portfolio: Pilot: red to first action 4 h to 25 min"
+      ],
+      "sources": [],
+      "tags": [
+        "pilot",
+        "result",
+        "standup"
+      ]
+    },
+    {
+      "id": "jma-29",
+      "type": "pushback",
+      "level": 2,
+      "q": "Two weeks, one shift, no control group. Why should anyone believe the 4 hours to 25 minutes?",
+      "easy": "As proof of a lasting effect, nobody should yet. It is strong evidence for the mechanism (red status gets an owner within the hour), and the next step is a staggered rollout with a comparison shift.",
+      "deep": "Concede: small sample (one shift, two weeks), no concurrent control, plausible novelty and Hawthorne effects, and a self reported familiarity score. Defend: the effect is large (median response from about 4 hours to about 25 minutes), the mechanism is direct and observable (the standup surfaces red status at a fixed time with an owner named, where before a supervisor had to find it on a walk), and the metric is behavioral and timestamped, so it is hard to fake. What would make it convincing: roll out to second shift later than first for a stepped comparison, keep tracking after the novelty fades, use the Control Plan's escalation log as the data source, report the full distribution and not only the median, and test before against after with a nonparametric test such as Mann Whitney on response times.",
+      "say": "As proof that it lasts, two weeks on one shift isn't enough, and I wrote it up as a pilot. The effect was large and the mechanism is simple: red status gets an owner at a fixed time instead of whenever a supervisor walks by. I'd make it convincing by staggering the rollout to second shift and tracking the same timestamped metric for months.",
+      "evidence": [
+        "portfolio: I piloted the standup for two weeks on the manual line first shift and measured it rather than asserting it worked.",
+        "portfolio: Median time from a KPI going red to a named owner taking the first action fell from about 4 hours to about 25 minutes, because the standup surfaced the red status instead of a supervisor finding it on a walk.",
+        "portfolio: Operator self reported familiarity with the five KPIs rose from 2.4 to 4.1 on a five point scale."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "pilot",
+        "experiment-design"
+      ]
+    },
+    {
+      "id": "jma-30",
+      "type": "number",
+      "level": 1,
+      "q": "Derive the roughly $355,000 projected annual opportunity.",
+      "easy": "About 27,000 extra cables a year from the automated line at an assumed $12 margin each is about $324,000. About 48 analyst hours a week saved at an assumed $12.50 an hour is about $31,200 a year. Together that is about $355,000, a projection JMA Finance still has to confirm.",
+      "deep": "Cables: closing the automated line's schedule attainment gap to plan recovers roughly 27,000 cables per year with no added labor; at an assumed $12 contribution margin per cable that is about $324,000. Reporting: retiring the manual weekly reporting cycle frees about 48 analyst hours per week; 48 x 52 x $12.50 (assumed fully loaded rate) is about $31,200. Sum: about $355,000 of recurring annual opportunity. Status: both rates are conservative assumptions adopted pending JMA Finance confirmation and listed in an assumptions table, so any figure can be revised without re deriving the analysis; the cable recovery is a projection from demonstrated capability, not an observed post implementation result. Sanity arithmetic: 27,000 a year is about 520 cables a week over 52 weeks. Contribution margin (price minus variable cost) is the right multiplier because extra units on existing labor add margin, not revenue. Dependencies: the kitting fix must close the gap, and demand must exist for the extra output.",
+      "evidence": [
+        "portfolio: The headline number is a projection, not money in the bank.",
+        "portfolio: recovers roughly 27,000 cables per year with no added labor. At an assumed $12 contribution margin per cable that is about $324,000 a year.",
+        "portfolio: Retiring the manual weekly reporting cycle frees about 48 analyst hours per week, roughly $31,200 a year at an assumed $12.50 fully loaded hourly rate. Together that is about $355,000 of recurring annual opportunity.",
+        "portfolio: Both of those rates are conservative assumptions the team adopted pending confirmation from JMA Finance",
+        "portfolio: The cable recovery is a projection from demonstrated capability, not an observed post implementation result.",
+        "portfolio: Projected annual opportunity ~$355K",
+        "portfolio: still need JMA Finance to confirm, so they are a sized opportunity rather than a realized saving."
+      ],
+      "sources": [],
+      "tags": [
+        "business-case",
+        "projection",
+        "result"
+      ]
+    },
+    {
+      "id": "jma-31",
+      "type": "pushback",
+      "level": 2,
+      "q": "The $355K is a student estimate built on assumed rates. Why put it on a resume?",
+      "easy": "Because it is labelled for what it is: a sized opportunity with written assumptions, pending JMA Finance's confirmation, and never claimed as realized savings.",
+      "deep": "Concede: no money has been saved; both rates are assumptions; the cable figure assumes the kitting fix closes the gap and that the market takes the extra units. Defend: sizing an opportunity is a normal and necessary step in an improvement project; the arithmetic is transparent (27,000 cables at $12 plus 48 hours a week at $12.50); the team chose conservative rates and put them in an assumptions table so Finance can substitute real numbers without redoing the analysis; and the write up calls it a projection even though a bigger number was available. The right resume word is projected or sized, and the right interview sentence names the two components and the confirmation still owed.",
+      "say": "I always say projected, because that's what it is. It's 27,000 recoverable cables at an assumed $12 margin plus 48 analyst hours a week at an assumed $12.50, written into an assumptions table so JMA Finance can replace either rate. We chose conservative rates on purpose, and none of it is claimed as realized savings.",
+      "evidence": [
+        "portfolio: recovers roughly 27,000 cables per year with no added labor. At an assumed $12 contribution margin per cable that is about $324,000 a year.",
+        "portfolio: Retiring the manual weekly reporting cycle frees about 48 analyst hours per week, roughly $31,200 a year at an assumed $12.50 fully loaded hourly rate. Together that is about $355,000 of recurring annual opportunity.",
+        "portfolio: Both of those rates are conservative assumptions the team adopted pending confirmation from JMA Finance",
+        "portfolio: the projection is labelled as a projection even though a bigger number was available for the taking",
+        "portfolio: still need JMA Finance to confirm, so they are a sized opportunity rather than a realized saving."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "business-case",
+        "metric-honesty"
+      ]
+    },
+    {
+      "id": "jma-32",
+      "type": "how",
+      "level": 2,
+      "q": "What did the Control Plan contain, and why does a dashboard need one?",
+      "easy": "A named person owns refreshing the dashboard on a schedule, a risk analysis lists how the dashboard could mislead people, and a red KPI triggers a defined escalation, so the dashboard keeps working after the student team leaves.",
+      "deep": "The dashboard shipped with a Control Plan rather than a handshake: a named refresh owner and cadence, so stale data has an accountable person; an FMEA on the dashboard itself covering the ways a stale or broken feed could mislead a supervisor (for example a failed refresh that keeps last week's green, an upstream schema change that zeroes a measure, a filter left on); and a tiered escalation framework that triggers on red KPI status, so a red light has a defined next action instead of being ambient. Rationale: dashboards decay after handover because nobody owns the feed, and a decision tool that silently shows stale numbers is worse than none. The gap Tanay names: no unit tests on the pipeline, so catching a bad upstream schema change depends on an analyst noticing; in FMEA terms, that failure mode has poor detection.",
+      "evidence": [
+        "portfolio: a named refresh owner and cadence, an FMEA on the dashboard itself covering the ways a stale or broken feed could mislead a supervisor, and a tiered escalation framework that triggers on red KPI status",
+        "portfolio: We handed over with a Control Plan that names a refresh owner, a dashboard FMEA, and tiered",
+        "portfolio: and wrote the Control Plan that governs the dashboard after handover",
+        "portfolio: I also did not write unit tests for the Python pipeline.",
+        "portfolio: the only thing standing between a schema change upstream and a silently wrong dashboard is an analyst noticing"
+      ],
+      "sources": [],
+      "tags": [
+        "control-phase",
+        "control-plan",
+        "sustainment"
+      ]
+    },
+    {
+      "id": "jma-33",
+      "type": "define",
+      "level": 2,
+      "q": "What is an FMEA, and what does one look like for a dashboard?",
+      "easy": "Failure Mode and Effects Analysis lists every way something can fail, what happens when it does, and how likely and how detectable each failure is, then ranks them so the worst get fixed first.",
+      "deep": "For each function, list failure modes, effects, and causes; score Severity, Occurrence, and Detection on ordinal scales (a higher Detection score means harder to detect); rank by Risk Priority Number $\\text{RPN} = S \\times O \\times D$ and act on the highest first. Illustrative rows for a KPI dashboard (the real rows are in the project's Control Plan): refresh fails silently and shows last week's numbers (high severity, poor detectability; mitigate with a visible data as of timestamp and an owner check); an upstream PLC schema change makes a measure return zeros or blanks (mitigate with validation assertions in the pipeline, the missing unit tests); a target changes in the document but not in the measure; a slicer left on hides one line. Criticisms: multiplying ordinal scores treats them as ratio data, different combinations can rank in surprising orders, and the 2019 AIAG and VDA handbook replaced RPN with Action Priority for that reason.",
+      "evidence": [
+        "portfolio: a named refresh owner and cadence, an FMEA on the dashboard itself covering the ways a stale or broken feed could mislead a supervisor, and a tiered escalation framework that triggers on red KPI status"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Failure_mode_and_effects_analysis"
+      ],
+      "tags": [
+        "fmea",
+        "risk",
+        "control-phase"
+      ]
+    },
+    {
+      "id": "jma-34",
+      "type": "concept",
+      "level": 2,
+      "q": "Which DMAIC loops fired on this engagement, and why do they matter?",
+      "easy": "Twice the team went backwards on purpose: once when a suspected root cause failed the data check and went back for re analysis, and once when the data showed a target could not be met, so the target was revalidated instead of left red.",
+      "deep": "DMAIC is drawn as a line, but sound projects loop: Analyze can send you back to Measure when a hypothesis fails, and Improve can send you back to Define when a target turns out to be wrong. Here: (1) a root cause that did not survive validation went back for re analysis, meaning the fishbone produced candidates and data eliminated at least one; (2) a target the data showed was unreachable, the commissioning era weekly target, went back to be revalidated, which became the reset to demonstrated capability (roughly 1,150 cables per week) with a ramp of about 200 per week. Both loops are evidence that conclusions were tested rather than asserted. Be ready to name the root cause that failed and the data that ruled it out.",
+      "evidence": [
+        "portfolio: A root cause that did not survive validation went back for re analysis, and a target the data showed was unreachable went back to be revalidated rather than left red on a dashboard forever.",
+        "portfolio: Resetting it to roughly 1,150 cables per week and ramping by about 200 per week as the kitting fix lands means the team can see progress it is actually making.",
+        "portfolio: A fishbone on that gap put the leading causes in Method, Material, and Measurement: kitting batches sized for the manual line, connector subassemblies arriving batched rather than continuously, and a weekly target set at commissioning that had never been revisited against demonstrated capability."
+      ],
+      "sources": [],
+      "tags": [
+        "dmaic",
+        "validation",
+        "iteration"
+      ]
+    },
+    {
+      "id": "jma-35",
+      "type": "behavioral",
+      "level": 1,
+      "q": "Tell me about managing senior stakeholders on this project.",
+      "easy": "Lead with getting the KPI definitions approved by the sponsor before any build, the interviews across three functions, and presenting the dollar figure honestly to a senior sponsor.",
+      "deep": "Situation: a client engagement sponsored by the SVP of Global Operations with a named project champion; functions used Uptime and Schedule Attainment differently, so leadership could not connect the floor to the financial plan. Task: one set of definitions everyone would accept. Action: Tanay ran definition interviews across manufacturing, quality, and production supervision, wrote one document with one formula and one target per KPI, and had it approved by the sponsor before anything was built; with weekly on site access, day to day work ran through the champion. The dollar figure went to the sponsor as a projection with an assumptions table pending JMA Finance. Result: comparable numbers across both lines, which produced the main finding. Interview tip: have one concrete moment ready (a function that disagreed with a definition, and how the document settled it); the write up does not record one, so use a real memory rather than an invented one.",
+      "say": "The most important thing I did with the sponsor happened before any code. I interviewed manufacturing, quality, and production supervision, wrote one definition per KPI, and got the SVP to approve it before we built anything. After that, a disputed number could be checked against the document. When it came to money, I gave the sponsor a projection with every assumption written down for Finance to check.",
+      "evidence": [
+        "portfolio: was a client engagement sponsored by the SVP of Global Operations, with a named project champion.",
+        "portfolio: Attainment meant different things to different functions. I ran the definition interviews across",
+        "portfolio: manufacturing, quality, and production supervision and wrote a sponsor approved document that",
+        "portfolio: The most important Define deliverable was a written, sponsor approved definition document: five KPIs, each with one agreed formula and one agreed target, confirmed by the sponsor before anything was built.",
+        "portfolio: sponsored by JMA’s SVP of Global Operations with a named project champion and weekly on site access",
+        "portfolio: Both of those rates are conservative assumptions the team adopted pending confirmation from JMA Finance"
+      ],
+      "sources": [],
+      "tags": [
+        "behavioral",
+        "stakeholders",
+        "sponsor"
+      ]
+    },
+    {
+      "id": "jma-36",
+      "type": "behavioral",
+      "level": 1,
+      "q": "How did you lead the four person team over 15 weeks?",
+      "easy": "Lead with the cadence (weekly on site), what Tanay personally owned, how the work was sequenced, and the team's standard of measured claims.",
+      "deep": "Facts available: Project Lead of a four person Whitman team, 15 weeks, weekly on site, a full DMAIC cycle. Tanay personally owned the charter, SIPOC, CTQC tree, KPI definition interviews, the Python pipeline, and the Control Plan, and piloted the standup. Structure the answer as STAR: the situation (two lines, no comparable metrics, a fixed semester), the leadership task (sequence the phases so definitions were signed off before anything was built), the actions (taking the riskiest technical piece, the pipeline, personally; running the definition interviews; holding the team to measured claims, so the pilot was measured and the projection labelled), and the result. The write up does not describe how work was split among the other three members or any team conflict; bring real examples and do not improvise them.",
+      "say": "I was project lead for a four person team over fifteen weeks, on site every week. I took the riskiest parts myself: the definition interviews and the pipeline that made the automated line's data usable. I sequenced the work so the sponsor approved the definitions before we built anything. And I held us to measured claims: we piloted the standup and measured it, and we labelled the dollar figure as a projection.",
+      "evidence": [
+        "portfolio: Role Project lead, 4 person team",
+        "portfolio: Duration 15 weeks, on site weekly",
+        "portfolio: I was Project Lead on a four person Whitman School team running a full DMAIC engagement from January to May 2026",
+        "portfolio: I wrote the charter, SIPOC, and CTQC tree, ran the KPI definition interviews, built the Python pipeline that made the automated line",
+        "portfolio: and wrote the Control Plan that governs the dashboard after handover",
+        "portfolio: I piloted the standup for two weeks on the manual line first shift and measured it rather than asserting it worked.",
+        "portfolio: The most important Define deliverable was a written, sponsor approved definition document: five KPIs, each with one agreed formula and one agreed target, confirmed by the sponsor before anything was built."
+      ],
+      "sources": [],
+      "tags": [
+        "behavioral",
+        "leadership",
+        "team"
+      ]
+    },
+    {
+      "id": "jma-37",
+      "type": "why",
+      "level": 2,
+      "q": "What would Tanay do differently?",
+      "easy": "Two things: start the culture survey early enough to get a baseline, and write automated tests for the data pipeline before handing it over.",
+      "deep": "Culture and Engagement: scoped late, so the instrument (pulse survey plus dashboard usage count) is built and wired into the dashboard, but the first administration slipped past the engagement and it is the one KPI with no baseline value. Fix: run the first survey in Measure, alongside the other baselines. Pipeline tests: the pipeline produces correct output today, but the only thing standing between an upstream schema change and a silently wrong dashboard is an analyst noticing. A small set of assertions would remove that dependency: expected columns and dtypes present, one row per test event id, no null timestamps, cycle time positive and in a plausible range, every pass or fail value mapped, and a row count that reconciles to the number of raw records. In FMEA terms that raises the detectability of the most dangerous failure mode, a quietly wrong number. A third improvement, prompted by the uptime pushback: record starved time as its own measure, so the input limited diagnosis is measured directly instead of inferred.",
+      "evidence": [
+        "portfolio: The Culture and Engagement metric was scoped late and is the one KPI with no baseline value",
+        "portfolio: the instrument is built and wired into the dashboard but the first administration slipped past the engagement",
+        "portfolio: I also did not write unit tests for the Python pipeline.",
+        "portfolio: the only thing standing between a schema change upstream and a silently wrong dashboard is an analyst noticing"
+      ],
+      "sources": [],
+      "tags": [
+        "retrospective",
+        "testing",
+        "lessons"
+      ]
+    },
+    {
+      "id": "jma-38",
+      "type": "pushback",
+      "level": 3,
+      "q": "If the cell was starved of material, why wasn't that starved time counted as downtime, which would have made uptime low?",
+      "easy": "It depends on how the cell's states were classified. If waiting for parts was not booked as downtime, uptime measures whether the machine works when it has parts, and starvation shows up only as low output. Tanay has to know which way it was classified.",
+      "deep": "This is the sharpest technical challenge to the finding. In OEE accounting, waiting for input (starved) is an availability loss, so under OEE conventions a starved cell shows low availability. The sponsor approved formula is runtime over runtime plus downtime, and the inference from 97.3% uptime with 46.3% attainment holds when starved idle time sits in neither runtime nor downtime (the ratio then measures equipment reliability while it has work) or when runtime includes ready but idle time. Under either reading the conclusion stands: the equipment rarely faulted, so output was limited by something other than the equipment, and the fishbone found kitting batches, batched connector subassemblies, and an inflated target. What the uptime number cannot do alone is separate starvation from a slow cycle, a performance loss in OEE terms. The pipeline's derived cycle time can: compare per event cycle time with the design rate, and measure idle gaps between consecutive test events. Prepare the exact state classification from the PLC data before the interview.",
+      "say": "Fair challenge, and it comes down to how the cell's states were classified. Under our formula, 97.3% uptime says the equipment almost never faulted while it was running work. Low output from a healthy machine means the limit was somewhere else, and the fishbone found it in kitting and in an inflated target. I'd add starved time as its own measure, so the diagnosis is measured directly.",
+      "evidence": [
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem.",
+        "portfolio: A cell that runs almost all of the time and still misses plan by more than half is input limited rather than equipment limited. The binding constraint was what entered the cell, not the cell itself.",
+        "portfolio: UptimeRuntime / (runtime + downtime)>= 85%",
+        "portfolio: A fishbone on that gap put the leading causes in Method, Material, and Measurement: kitting batches sized for the manual line, connector subassemblies arriving batched rather than continuously, and a weekly target set at commissioning that had never been revisited against demonstrated capability.",
+        "portfolio: It also computes cycle time in seconds as a direct input to the Uptime and Parts per Labor Hour measures. The output is under 5 MB and loads instantly."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Overall_equipment_effectiveness"
+      ],
+      "tags": [
+        "pushback",
+        "oee",
+        "uptime",
+        "constraint"
+      ]
+    },
+    {
+      "id": "jma-39",
+      "type": "pushback",
+      "level": 2,
+      "q": "The manual line ran at 31.3% uptime and still hit 139.7% of target. Doesn't that mean its target was wrong too?",
+      "easy": "Very likely the manual line's target was soft, and that is part of the same planning problem: targets set at different times for different lines. The project reset the automated cell's target first because that one kept the dashboard permanently red.",
+      "deep": "Concede: a line at 31.3% uptime by the standard formula that still beats plan by 39.7 points has a target well below its capability, or a runtime classification that undercounts productive time, or both. Defend the priorities: the automated cell's target was the one distorting decisions (permanently red, so ignored), and the manual line's overperformance was already diagnosed as absorbing the cell's shortfall, which is what matters for planning. Revalidating the manual target belongs in the same loop the team ran for the cell, once kitting flows continuously and the manual line no longer has to compensate; resetting it during the shortfall would bake the compensation into the plan. Also check the uptime denominator on a manual line: scheduled hours across two ten hour shifts versus hours with operators assigned.",
+      "say": "Probably, yes. A line at 31% uptime that beats plan by nearly forty points has a soft target or an uptime definition that undercounts its productive time. We fixed the automated cell's target first because that one was keeping the dashboard permanently red. The manual line's target should go through the same revalidation once kitting stops forcing it to compensate.",
+      "evidence": [
+        "portfolio: Uptime31.3%97.3%85%",
+        "portfolio: Schedule Attainment139.7%46.3%100%",
+        "portfolio: The manual line was quietly absorbing the shortfall at 139.7% of its own target.",
+        "portfolio: Jumper 1.0 is manual, staffed by eight operators across two ten hour shifts. Jumper 2.0 is a fully automated cell with PLC level data capture.",
+        "portfolio: A target the cell cannot currently hit makes the dashboard permanently red, and a permanently red dashboard is one people stop reading."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "targets",
+        "manual-line"
+      ]
+    },
+    {
+      "id": "jma-40",
+      "type": "pushback",
+      "level": 2,
+      "q": "This is a Power BI dashboard and a spreadsheet pipeline. Why is it relevant to an ML or data engineering role?",
+      "easy": "The hard parts are the same ones: turning messy nested machine data into a typed table at the right grain, getting agreement on what a metric means, and reaching the conclusion the data supports instead of the one people expected.",
+      "deep": "Concede: no model was trained, the stack is pandas, openpyxl, and Power BI, and the data is small once flattened. Defend: the pipeline problem (three levels of nested arrays in event JSON, choosing the grain, explicit record paths, a type contract so the consumer never coerces) is the same problem as building features or warehouse tables from event data; the definition work is metric design, which is what an ML evaluation spec or an analytics engineering semantic layer is; the finding is a diagnosis from two metrics that contradicted the floor's belief; and the engagement shows judgment with senior stakeholders, a measured pilot, and a projection labelled as a projection. The gaps Tanay states plainly (no unit tests, no culture baseline) reflect the same discipline expected in production data work.",
+      "say": "No model here, and I don't pretend otherwise. The pipeline problem is the one I'd face in any feature or warehouse job: deeply nested event data, choosing the grain, and typing it so nothing downstream guesses. The definition work is metric design. And the finding came from two numbers that contradicted what everyone on the floor believed.",
+      "evidence": [
+        "portfolio: The automated cell publishes one JSON record per test event, and each record nests an array of tests, each nesting an array of measurements, each nesting an array of channel readings.",
+        "portfolio: I built a Python pipeline with pandas and openpyxl that walks the nesting with explicit json_normalize record paths and writes one flat row per test event.",
+        "portfolio: It casts timestamps to datetime, channel readings to float, and pass and fail to boolean, so Power Query never has to coerce anything.",
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "relevance",
+        "career-narrative"
+      ]
+    },
+    {
+      "id": "jma-41",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limits of what was delivered, what breaks at 10x, and what would come next?",
+      "easy": "The pipeline is an untested script that writes a workbook, which is fine for two datasets and one dashboard but not for many lines or plants. Next would be tests, scheduled loads into a proper database, and following through on the kitting change and the culture baseline.",
+      "deep": "Limits: a Python script without tests, run on demand, writing an Excel workbook; definitions live in a document and in DAX measures with no single governed metric layer; Culture and Engagement has no baseline; the pilot was two weeks on one shift; the $355,000 is a projection. At 10x (ten lines or several plants, continuous PLC feeds): workbooks stop working as the interface, so land flattened events in a database or warehouse table partitioned by date and line, load incrementally keyed on test event id, validate the schema at ingest so an upstream change fails loudly, and schedule refreshes with an orchestrator. Keep the KPI formulas in one governed layer (dbt models or a shared Power BI semantic model) so every plant computes Uptime the same way, which is the original problem at larger scale. Business next steps: implement two bin kitting and track attainment against the ramp of about 200 cables a week, run the first culture survey for a baseline, roll the standup to second shift as a staggered comparison, and get JMA Finance to confirm or replace the two rates.",
+      "evidence": [
+        "portfolio: The Culture and Engagement metric was scoped late and is the one KPI with no baseline value",
+        "portfolio: I also did not write unit tests for the Python pipeline.",
+        "portfolio: Resetting it to roughly 1,150 cables per week and ramping by about 200 per week as the kitting fix lands means the team can see progress it is actually making.",
+        "portfolio: Both of those rates are conservative assumptions the team adopted pending confirmation from JMA Finance",
+        "portfolio: I piloted the standup for two weeks on the manual line first shift and measured it rather than asserting it worked."
+      ],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "scale",
+        "next-steps"
+      ]
+    },
+    {
+      "id": "jma-42",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this engagement to a hiring manager in under a minute.",
+      "easy": "Ownership, the definitions, the finding with its two numbers, and one measured result.",
+      "deep": "Hiring managers screen for ownership and judgment. Lead with the role and sponsor, the problem (incomparable lines), what Tanay built, the contradiction that located the constraint, and the measured pilot. Keep the dollar figure out of the first minute unless asked, and label it a projection if it comes up.",
+      "say": "I led a four person Lean Six Sigma team at JMA Wireless for fifteen weeks, sponsored by their SVP of Global Operations. Their two lines couldn't be compared, so I got five KPI definitions signed off and built the pipeline that made the automated line measurable. That showed the automated cell at 97.3% uptime but 46.3% of target, which put the constraint in kitting, upstream of the machine. We piloted a daily standup that cut red to first action from about four hours to about 25 minutes.",
+      "evidence": [
+        "portfolio: Role Project lead, 4 person team",
+        "portfolio: Duration 15 weeks, on site weekly",
+        "portfolio: was a client engagement sponsored by the SVP of Global Operations, with a named project champion.",
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem.",
+        "portfolio: Median time from a KPI going red to a named owner taking the first action fell from about 4 hours to about 25 minutes, because the standup surfaced the red status instead of a supervisor finding it on a walk."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "jma-43",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the data pipeline to a staff data engineer.",
+      "easy": "Grain, record paths, type contract, size, and the missing tests.",
+      "deep": "A staff data engineer wants the shape of the data, the grain decision, where types are enforced, and how failure is detected. Volunteer the gap (no unit tests) before being asked.",
+      "say": "The cell's PLC wrote one JSON record per test event, with three levels of arrays inside: tests, measurements, channel readings. Power BI expanded that on every visual, and two small files blew past 31 GB. I flattened it in pandas with explicit json_normalize record paths to one row per test event, cast timestamps, floats, and booleans in Python so Power Query never guessed, and derived cycle time. It came out under 5 MB. The gap I'd close is tests, because a schema change upstream would only be caught by someone noticing a wrong dashboard.",
+      "evidence": [
+        "portfolio: The automated cell publishes one JSON record per test event, and each record nests an array of tests, each nesting an array of measurements, each nesting an array of channel readings.",
+        "portfolio: Two raw datasets of 809 and 1,000 records expanded to more than 31 GB when loaded straight into Power BI.",
+        "portfolio: I built a Python pipeline with pandas and openpyxl that walks the nesting with explicit json_normalize record paths and writes one flat row per test event.",
+        "portfolio: It casts timestamps to datetime, channel readings to float, and pass and fail to boolean, so Power Query never has to coerce anything.",
+        "portfolio: It also computes cycle time in seconds as a direct input to the Uptime and Parts per Labor Hour measures. The output is under 5 MB and loads instantly.",
+        "portfolio: the only thing standing between a schema change upstream and a silently wrong dashboard is an analyst noticing"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer",
+        "data-engineering"
+      ]
+    },
+    {
+      "id": "jma-44",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the project to a product manager.",
+      "easy": "Users, the definition decision, the insight, and the tested feature with its metric.",
+      "deep": "PMs care about who used it, what decision changed, and whether the change was tested. The definitions were the first product decision; the standup was the one tested feature with a behavioral metric.",
+      "say": "The users were supervisors and leadership who couldn't compare two lines, because every function defined uptime its own way. The first product decision was the definitions: five KPIs with one formula and one target each, approved by the sponsor. The dashboard then answered a question nobody had asked, that the automated cell was healthy and starved. We tested one feature, a daily standup at the dashboard screen, for two weeks, and time to act on a red KPI dropped from about four hours to about 25 minutes.",
+      "evidence": [
+        "portfolio: Before this project there was no way to compare them, because terms like Uptime and Schedule Attainment meant different things to different functions.",
+        "portfolio: The most important Define deliverable was a written, sponsor approved definition document: five KPIs, each with one agreed formula and one agreed target, confirmed by the sponsor before anything was built.",
+        "portfolio: The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem.",
+        "portfolio: Median time from a KPI going red to a named owner taking the first action fell from about 4 hours to about 25 minutes, because the standup surfaced the red status instead of a supervisor finding it on a walk."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "product-manager"
+      ]
+    },
+    {
+      "id": "jma-45",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this role to a recruiter with no manufacturing background.",
+      "easy": "Plain words, team lead, one outcome in hours to minutes.",
+      "deep": "Recruiters need a repeatable story: led a team, real company, senior sponsor, data plus dashboard, one clear outcome. Avoid DMAIC, PPLH, and JSON unless asked.",
+      "say": "I led a four person student consulting team for a cell tower equipment maker in New York for a semester. Their two production lines measured performance differently, so nobody could compare them. I got everyone to agree on five measures, wrote the code that cleaned the machine data, and built the dashboard. It showed the automated line was waiting on parts rather than breaking down, and our fix for responding to problems cut reaction time from hours to minutes.",
+      "evidence": [
+        "portfolio: Role Project lead, 4 person team",
+        "portfolio: The most important Define deliverable was a written, sponsor approved definition document: five KPIs, each with one agreed formula and one agreed target, confirmed by the sponsor before anything was built.",
+        "portfolio: Median time from a KPI going red to a named owner taking the first action fell from about 4 hours to about 25 minutes, because the standup surfaced the red status instead of a supervisor finding it on a walk."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "DMAIC (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/DMAIC",
+      "why": "Phase by phase description of DMAIC and the standard tools in each phase."
+    },
+    {
+      "title": "Theory of constraints (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Theory_of_constraints",
+      "why": "Goldratt's five focusing steps, drum buffer rope, and constraint types."
+    },
+    {
+      "title": "Overall equipment effectiveness (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Overall_equipment_effectiveness",
+      "why": "Availability, performance, and quality, and why starved time is an availability loss."
+    },
+    {
+      "title": "pandas.json_normalize documentation",
+      "url": "https://pandas.pydata.org/docs/reference/api/pandas.json_normalize.html",
+      "why": "record_path, meta, prefixes, and errors for flattening nested JSON."
+    },
+    {
+      "title": "Decision matrix method, Pugh matrix (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Decision-matrix_method",
+      "why": "How Pugh concept selection works and its known weaknesses."
+    },
+    {
+      "title": "Kanban (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Kanban",
+      "why": "Origins of the two bin system and pull replenishment."
+    },
+    {
+      "title": "Failure mode and effects analysis (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Failure_mode_and_effects_analysis",
+      "why": "Severity, occurrence, detection, RPN, and its criticisms."
+    }
+  ]
+}
