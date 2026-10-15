@@ -1,0 +1,985 @@
+{
+  "deck_id": "p-energy-demand",
+  "title": "July Energy Demand Under a Warming Climate",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/energy-usage-prediction",
+  "summary_easy": "A group project (IST 687, Jan to May 2025) for a South Carolina electricity provider: model how much electricity homes use each hour in July, then ask what a 5°C hotter July and a small thermostat change would do to demand. A Random Forest explained about half the variation (R² 0.48) and projected a 25.4% rise in the busiest evening hour under +5°C. A review of the code shows the thermostat savings figure is not isolated from the warming, which the deck explains.",
+  "summary_deep": "Per building hourly end use electricity (summed over nine end uses into total_energy_usage) was joined to county weather on timestamp and to building characteristics on bldg_id, filtered to July 2018, one row per house hour. Linear regression, ranger Random Forest (100 trees, mtry 2 by default), and XGBoost (100 rounds, defaults) were fit on five features (dry bulb temperature, sqft, occupants, cooling setpoint, hour) with a random 70/30 caret split; the forest scored RMSE 0.500 kWh and caret R² (squared correlation) 0.48, XGBoost 0.503 and 0.47, OLS 0.583 and 0.29. A uniform +5°C delta on the test rows raised mean predicted usage from 1.09 to 1.25 kWh (14.7%) and the 9 PM hour's summed prediction from 81,600 to 102,355 kWh (25.4%), with the caveat that trees cannot extrapolate past the hottest observed hour. The setpoint scenario applies +1 to the setpoint on unwarmed rows and subtracts from the warmed prediction, so its 9.2% saving mixes the warming reversal with the policy; the setpoint is also labeled °F in the team's app. Validation is a random row split, and the Shiny app serves a different model with a °F input fed to a °C feature.",
+  "cards": [
+    {
+      "id": "en-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What problem does this project solve, in one plain sentence and then technically?",
+      "easy": "It estimates how much more electricity homes in a South Carolina utility's territory would use in July if it were 5°C hotter, and how much a small thermostat change could claw back, so the utility can manage the peak without building a power plant.",
+      "deep": "A course client, eSC, a residential electricity provider in South Carolina, wants to know whether July peak demand under a warmer climate can be met by shifting demand instead of adding generation. The team joined building characteristics, hourly per building end use electricity, and county weather, filtered to July 2018, and modeled hourly total electricity per house from five predictors (dry bulb temperature, square footage, occupants, cooling setpoint, hour of day). They compared linear regression, a ranger Random Forest, and XGBoost on a 70/30 random split, picked the Random Forest (RMSE 0.500 kWh, R² 0.48), and ran two counterfactuals through it: temperature plus 5, and cooling setpoint plus 1 during 16:00 to 21:00. It was an IST 687 group project, January to May 2025.",
+      "say": "We asked how much more power homes would draw in a July that's 5°C hotter, and whether a one degree thermostat nudge could offset it. We modeled hourly usage per house from weather and house traits, then pushed a warmer July through the model. The headline was a 25.4% rise in the peak hour, from a model with R squared 0.48.",
+      "evidence": [
+        "portfolio: META: Predictive Modeling / Jan 2025 to May 2025",
+        "repo:energy-usage-prediction/README.md: Group project for IST 687, Introduction to Data Science, at Syracuse University.",
+        "portfolio: Three models were trained on five features (dry bulb temperature, square footage, occupants, cooling setpoint, hour of day):",
+        "portfolio: Random Forest0.5000.48Selected for forecasting",
+        "portfolio: 102,355 kWh aggregate, a 25.4% surge."
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "problem framing",
+        "energy"
+      ]
+    },
+    {
+      "id": "en-02",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager in under a minute.",
+      "easy": "A team model of July household electricity use, stress tested with a +5°C scenario and a thermostat policy, with honest caveats about how the scenarios were run.",
+      "deep": "Lead with the decision (meet a hotter peak by shifting demand rather than building capacity), the model and its fit, the two scenario numbers, then the caveat you found in the setpoint script. Keep the R² of 0.48 in the same sentence as the scenario results.",
+      "say": "For a class project with a utility style brief, we modeled hourly July electricity use per house from temperature, size, occupants, thermostat setpoint, and hour. A Random Forest won with R squared 0.48. Pushing a 5°C warmer July through it raised the busiest hour by 25.4%. When I reread the code later, I found the thermostat savings number wasn't isolated from the warming, and I'd say that up front.",
+      "evidence": [
+        "portfolio: Random Forest0.5000.48Selected for forecasting",
+        "portfolio: 102,355 kWh aggregate, a 25.4% surge.",
+        "repo:energy-usage-prediction/CODE/10_1 degree coolsetpoint.R: test_df_peak_adj <- test_df"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring manager"
+      ]
+    },
+    {
+      "id": "en-03",
+      "type": "concept",
+      "level": 1,
+      "q": "What data went in, how was it joined, and what is one row?",
+      "easy": "Three sources: a table of house characteristics, an hourly electricity file per house, and an hourly weather file per county. Each house's electricity was matched to its county's weather by timestamp, then to its house record by building ID, for July only. One row is one house in one hour.",
+      "deep": "static_house_info.parquet holds building characteristics (bldg_id, in.county, in.sqft, in.occupants, in.cooling_setpoint, insulation, HVAC types, appliances, vintage, income). Energy comes from one parquet per building, {bldg_id}.parquet, with end use columns such as out.electricity.cooling.energy_consumption and a time column. Weather is one CSV per county code, with dry bulb temperature, relative humidity, and wind speed. A data_dictionary.csv documents columns. All three live in a course S3 bucket (intro-datascience, SC-data). generate_clean_july_df(building_id, county_code) filters energy and weather to timestamps in 2018-07, merges them on time, then merges house attributes on bldg_id. The column conventions (in.* inputs, out.* outputs, county codes such as G4500010) match NREL's ResStock building stock simulations, which would make the usage simulated rather than metered; the repo does not name the upstream source, so confirm before saying so.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/01_generate_function.R: filter(format(time, \"%Y-%m\") == \"2018-07\")",
+        "repo:energy-usage-prediction/CODE/01_generate_function.R: energy_weather_df <- merge(energy_df_clean, weather_df_clean, by = \"time\")",
+        "portfolio: The combined data was filtered to July to focus on peak cooling season, then merged into one record per house per hour."
+      ],
+      "sources": [],
+      "tags": [
+        "data",
+        "joins",
+        "provenance"
+      ]
+    },
+    {
+      "id": "en-04",
+      "type": "how",
+      "level": 2,
+      "q": "Walk through generate_clean_july_df line by line. What does it keep, drop, and compute?",
+      "easy": "For one building, it loads the house table, the building's hourly electricity, and its county's weather; keeps selected columns; drops any row with a missing value; adds up nine electricity end uses into one total; keeps July 2018; and merges everything.",
+      "deep": "House table: bldg_id plus 30 in.* columns selected, then na.omit() over the whole table (a house missing any of them is dropped entirely). Energy: nine end use columns (cooling, heating, interior lighting, plug loads, refrigerator, clothes dryer, clothes washer, dishwasher, hot water) plus time; na.omit(); total_energy_usage = rowSums of the nine; time parsed with as.POSIXct(..., tz = \"UTC\"); filter to 2018-07. Weather: date_time, Dry Bulb Temperature [°C], Relative Humidity [%], Wind Speed [m/s]; na.omit(); same UTC parse and July filter. merge(energy, weather, by = \"time\") is an inner join, so any hour missing in either source silently disappears; then merge with the house row on bldg_id. If output_dir is given it writes july_bldg_{id}.csv. Note the month is hard coded, so the write up's claim that the function can run other months needs an edit to the filter first.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/01_generate_function.R: total_energy_usage = rowSums(select(., -time)),",
+        "repo:energy-usage-prediction/CODE/01_generate_function.R: generate_clean_july_df <- function(building_id, county_code, output_dir = NULL) {",
+        "portfolio: A reusable merge function lets the same pipeline run on other months and seasons."
+      ],
+      "sources": [],
+      "tags": [
+        "code",
+        "r",
+        "data pipeline"
+      ]
+    },
+    {
+      "id": "en-05",
+      "type": "define",
+      "level": 2,
+      "q": "What exactly is the target variable, total_energy_usage?",
+      "easy": "The electricity one house used in one hour, in kWh, added up from nine appliance and system categories such as cooling, lighting, and water heating.",
+      "deep": "total_energy_usage is the row sum of nine out.electricity.*.energy_consumption columns per hour. It is household electricity across those end uses, not whole building metered load: any end use not in the list (and any non electric fuel) is excluded. It is energy (kWh) per hour, which numerically equals average power (kW) over that hour for one house. Because cooling is one of nine components, the temperature signal is diluted by temperature insensitive loads such as refrigeration and plug loads, which caps how much variance weather can explain. 08_adding_removing_cols.R later drops the clothes dryer and washer output columns from the dataset, but total_energy_usage was already computed with them included.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/01_generate_function.R: total_energy_usage = rowSums(select(., -time)),",
+        "repo:energy-usage-prediction/CODE/08_adding_removing_cols.R: \"out.electricity.clothes_dryer.energy_consumption\","
+      ],
+      "sources": [],
+      "tags": [
+        "target",
+        "define",
+        "units"
+      ]
+    },
+    {
+      "id": "en-06",
+      "type": "how",
+      "level": 2,
+      "q": "How were the per building files batched and combined, and what is missing from the committed pipeline?",
+      "easy": "A map of building to county was built, each building was processed into its own CSV, and the CSVs were stacked into one dataset. The script that should loop over buildings stops before the loop, and every path points at a teammate's Windows drive.",
+      "deep": "02_prepare_building_map.R writes distinct (bldg_id, in.county) pairs to building_id_county_map.csv. 03_batch_process_buildings.R sources the function, reads the map, and creates an outputs folder, but the committed file contains no loop calling generate_clean_july_df, so the batch step cannot be rerun from the repo as is. 04_combine_all_outputs.R reads every CSV with purrr::map_dfr, coerces four inconsistently typed columns to numeric (in.cooling_setpoint_offset_magnitude, in.vintage, in.vintage_acs, in.occupants), and saves final_combined_dataset.rds. The README warns that modeling scripts use absolute Windows paths such as C:/Users/PRASAD/... and should be pointed at DATA/final_combined_dataset01.rds.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/04_combine_all_outputs.R: df$in.occupants <- as.numeric(df$in.occupants)",
+        "repo:energy-usage-prediction/CODE/03_batch_process_buildings.R: output_dir <- \"C:/Users/PRASAD/Desktop/Syracuse/Academic/IST687.M001.IDS/Project/outputs\"",
+        "repo:energy-usage-prediction/README.md: The modelling scripts read data through absolute Windows paths from the original author's machine"
+      ],
+      "sources": [],
+      "tags": [
+        "pipeline",
+        "reproducibility"
+      ]
+    },
+    {
+      "id": "en-07",
+      "type": "how",
+      "level": 2,
+      "q": "What did 08_adding_removing_cols.R change?",
+      "easy": "It added each house's climate zone and removed twelve columns judged irrelevant, saving the result as final_combined_dataset01.rds, the file every model reads.",
+      "deep": "It left joins in.building_america_climate_zone from the static house table on bldg_id, then drops: in.federal_poverty_level, in.cooling_setpoint_offset_magnitude, in.heating_setpoint, in.hvac_heating_efficiency, in.hvac_cooling_efficiency, in.ceiling_fan, in.clothes_dryer, in.dishwasher, in.water_heater_fuel, in.infiltration, and the clothes dryer and washer consumption outputs. Two removals matter for the conclusions: dropping in.hvac_cooling_efficiency and in.cooling_setpoint_offset_magnitude removes exactly the information an HVAC upgrade or a thermostat offset policy would act on, so the later HVAC recommendation cannot come from the model. The cut was by judgment; the modeling then used only five columns anyway.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/08_adding_removing_cols.R: \"in.hvac_cooling_efficiency\",",
+        "repo:energy-usage-prediction/CODE/08_adding_removing_cols.R: \"in.cooling_setpoint_offset_magnitude\",",
+        "repo:energy-usage-prediction/CODE/08_adding_removing_cols.R: select(bldg_id, in.building_america_climate_zone )"
+      ],
+      "sources": [],
+      "tags": [
+        "feature selection",
+        "data"
+      ]
+    },
+    {
+      "id": "en-08",
+      "type": "why",
+      "level": 3,
+      "q": "Is this metered data? What would change if it is simulated?",
+      "easy": "The repo does not say. The column naming matches a well known national building simulation dataset, which would mean the electricity numbers come from physics simulations of representative houses rather than real meters.",
+      "deep": "Evidence for simulation: in.* characteristic columns, out.electricity.<end use>.energy_consumption outputs, and county identifiers like G4500010 follow NREL ResStock conventions, and the weather files look like the per county weather that drives those simulations. If simulated: (1) the temperature response is the simulator's thermostat and HVAC physics, so a model fit to it learns the simulator, which is fine for scenario analysis but not evidence of real household behavior; (2) setpoints are fixed schedule inputs per house, so a setpoint effect estimated across houses is a property of the simulator's population; (3) noise levels and R² differ from metered data. In an interview, say the provenance is unconfirmed and that the analysis would need validation on metered smart meter data before a utility acts on it.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/01_generate_function.R: out.electricity.cooling.energy_consumption,"
+      ],
+      "sources": [],
+      "tags": [
+        "provenance",
+        "simulation",
+        "data quality"
+      ]
+    },
+    {
+      "id": "en-09",
+      "type": "concept",
+      "level": 1,
+      "q": "What did the exploratory analysis find about the drivers of July usage?",
+      "easy": "Outside temperature drives usage most, bigger houses use proportionally more, more occupants helps only up to a point, and wall insulation type makes little visible difference.",
+      "deep": "From the write up: outdoor temperature is the dominant driver, consumption scales near linearly with square footage, occupant count matters but plateaus quickly, and usage varies only modestly across wall insulation types. 05_EDA.R draws these with one reusable function, plot_energy_relationship(df, var, type), on a 50,000 row random sample (set.seed(42)): scatter plus loess smoother for numeric variables, boxplots with outliers hidden and y clipped to 0 to 5 kWh for categorical ones. Thirteen plots cover sqft, income, poverty level, heating and cooling type, refrigerator, lighting, wall insulation, plug loads, temperature, humidity, wind, and a temperature bin. These are bivariate views; they do not control for anything.",
+      "evidence": [
+        "portfolio: Outdoor temperature is the dominant driver, and consumption scales near linearly with square footage. Occupant count matters but plateaus quickly.",
+        "repo:energy-usage-prediction/CODE/05_EDA.R: sample_df <- final_all_df %>% sample_n(50000)",
+        "repo:energy-usage-prediction/CODE/05_EDA.R: coord_cartesian(ylim = c(0, bin_y)) +"
+      ],
+      "sources": [],
+      "tags": [
+        "eda",
+        "drivers"
+      ]
+    },
+    {
+      "id": "en-10",
+      "type": "pushback",
+      "level": 2,
+      "q": "Your write up says envelope upgrades have lower marginal return than HVAC and setpoint changes. Does a boxplot by insulation type support that?",
+      "easy": "Only weakly. A boxplot compares houses that differ in many ways at once, so it cannot isolate what insulation does. And the model never included insulation or HVAC efficiency, so it cannot rank those levers.",
+      "deep": "The insulation boxplot is bivariate: older houses, smaller houses, and different cooling systems are spread unevenly across insulation categories, so the comparison is confounded. The plot also hides outliers and clips the y axis at 5 kWh, which compresses differences in the tail where peak cooling lives. The five feature model omits insulation and HVAC efficiency (the latter was dropped in 08_adding_removing_cols.R), so no model based estimate of envelope versus HVAC return exists. A defensible version would fit the model with insulation and HVAC efficiency included and compare partial dependence or counterfactual predictions, or better, use within house before and after data.",
+      "say": "It's a weak basis, and I'd say so. The boxplot compares different houses, and insulation travels with age, size, and cooling type. The model never had insulation or HVAC efficiency as inputs, so it can't rank those levers. I'd present that line as a hypothesis.",
+      "evidence": [
+        "portfolio: Usage varies only modestly across wall insulation types in the housing stock, which suggests envelope upgrades have lower marginal return than HVAC and setpoint interventions on this dataset.",
+        "repo:energy-usage-prediction/CODE/05_EDA.R: geom_boxplot(outlier.shape = NA, fill = \"lightblue\") +"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "confounding",
+        "eda"
+      ]
+    },
+    {
+      "id": "en-11",
+      "type": "concept",
+      "level": 1,
+      "q": "Which features did the models use, and which weather variables were left out?",
+      "easy": "Five inputs: outdoor dry bulb temperature, square footage, number of occupants, cooling setpoint, and hour of day. Humidity and wind speed were pulled into the data and plotted, but never used in a model.",
+      "deep": "07_modelling.R builds model_df from total_energy_usage plus Dry Bulb Temperature [°C] (renamed temp), in.sqft (sqft), in.occupants (occupants), in.cooling_setpoint (setpoint), and hour = hour(as.POSIXct(time)), then na.omit(). Relative humidity matters for cooling load in South Carolina because air conditioners also remove moisture (latent load), so leaving it out puts that variation in the residual, and the +5°C scenario implicitly holds humidity fixed. Hour enters as a single number 0 to 23, which a linear model treats as a straight line in time of day; tree models can split it into windows. No lag, day of week, or cooling degree hour features are in the committed model code.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/07_modelling.R: mutate(hour = hour(as.POSIXct(time)))",
+        "repo:energy-usage-prediction/CODE/01_generate_function.R: `Relative Humidity [%]`,",
+        "portfolio: Three models were trained on five features (dry bulb temperature, square footage, occupants, cooling setpoint, hour of day):"
+      ],
+      "sources": [],
+      "tags": [
+        "features",
+        "weather"
+      ]
+    },
+    {
+      "id": "en-12",
+      "type": "number",
+      "level": 1,
+      "q": "Recall the model comparison with its caveat.",
+      "easy": "Random Forest RMSE 0.500 kWh and R² 0.48, XGBoost 0.503 and 0.47, linear regression 0.583 and 0.29, all on one random 70/30 split of house hours.",
+      "deep": "Write up table: Linear Regression RMSE 0.583, R² 0.29; XGBoost 0.503, 0.47; Random Forest 0.500, 0.48, selected for forecasting. All three use the same five features and the same createDataPartition(p = 0.7) split with set.seed(42). Caveats in the same breath: (1) R² from caret's R2() is the squared correlation between predictions and actuals, not 1 minus SSE over SST; (2) the split is random over house hours, so the same houses and the same weather hours sit in train and test; (3) Random Forest and XGBoost differ by 0.003 kWh RMSE, inside what a single split can resolve; (4) XGBoost ran at default settings with 100 rounds. The R scripts print these values to the console; no saved output in the repo records them, so the numbers trace to the write up.",
+      "evidence": [
+        "portfolio: Linear Regression0.5830.29Cannot capture non linear temperature response",
+        "portfolio: XGBoost0.5030.47Strong on non linear patterns, close second",
+        "portfolio: Random Forest0.5000.48Selected for forecasting",
+        "repo:energy-usage-prediction/CODE/07_modelling.R: split_index <- createDataPartition(model_df$total_energy_usage, p = 0.7, list = FALSE)"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "model comparison"
+      ]
+    },
+    {
+      "id": "en-13",
+      "type": "formula",
+      "level": 2,
+      "q": "Define RMSE and R², and explain what caret's R2() actually computes.",
+      "easy": "RMSE is the typical size of an error in kWh, with big misses weighted more. R² is the share of the variation in usage the model explains. caret computes R² as the square of the correlation between predictions and actual values.",
+      "deep": "$\\mathrm{RMSE} = \\sqrt{\\frac1n\\sum_i (y_i-\\hat y_i)^2}$. Textbook $R^2 = 1 - \\frac{\\sum (y_i-\\hat y_i)^2}{\\sum (y_i-\\bar y)^2}$, which can go negative on test data for a bad model. caret's R2(pred, obs) by default squares the Pearson correlation, $R^2_{corr} = \\mathrm{corr}(\\hat y, y)^2$, which is never negative and ignores bias and scale: a model whose predictions are all off by a constant, or all doubled, keeps the same $R^2_{corr}$. For a well calibrated model on held out data the two are close, but they are not the same number. RMSE 0.500 kWh against an average predicted hour of 1.09 kWh means typical errors around half the mean, which is expected for single house hourly data.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/07_modelling.R: lm_r2   <- R2(lm_preds, test_df$total_energy_usage)",
+        "portfolio: Random Forest0.5000.48Selected for forecasting",
+        "portfolio: Average July hour, baseline: 1.09 kWh predicted."
+      ],
+      "sources": [
+        "https://topepo.github.io/caret/measuring-performance.html"
+      ],
+      "tags": [
+        "metrics",
+        "formula",
+        "caret"
+      ]
+    },
+    {
+      "id": "en-14",
+      "type": "concept",
+      "level": 2,
+      "q": "Why does ordinary linear regression do worst here?",
+      "easy": "Electricity rises sharply only once it is hot enough to run the air conditioner, and it follows a daily rhythm. A straight line in temperature and in hour cannot bend to follow either.",
+      "deep": "lm(total_energy_usage ~ ., data = train_df) fits $\\hat y = \\beta_0 + \\beta_1 T + \\beta_2\\,\\mathrm{sqft} + \\beta_3\\,\\mathrm{occ} + \\beta_4\\,\\mathrm{setpoint} + \\beta_5\\,\\mathrm{hour}$ by least squares, assuming additive, linear effects. Cooling load behaves like a hinge: roughly $\\max(0, T - T_{bal})$ above a balance point, and steeper for larger homes, an interaction OLS lacks. Hour 23 and hour 0 are adjacent in reality but far apart as numbers, so a linear hour term is wrong; sine and cosine of $2\\pi h/24$ or hour dummies fix that. Even so, OLS got R² 0.29 and gives a useful baseline: the trees gain about 0.19 of R² from nonlinearity and interactions. A linear model with a hinge temperature term, sqft interaction, and hour dummies would be a fairer baseline and would also extrapolate under +5°C, which trees cannot.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/07_modelling.R: lm_model <- lm(total_energy_usage ~ ., data = train_df)",
+        "portfolio: Linear Regression0.5830.29Cannot capture non linear temperature response"
+      ],
+      "sources": [],
+      "tags": [
+        "linear regression",
+        "nonlinearity"
+      ]
+    },
+    {
+      "id": "en-15",
+      "type": "concept",
+      "level": 2,
+      "q": "How was the Random Forest configured, and what do ranger's defaults imply?",
+      "easy": "100 trees from the ranger package on the five features, otherwise defaults. Each split looks at 2 random features out of 5, and trees grow until leaves hold about 5 rows.",
+      "deep": "ranger(total_energy_usage ~ ., data = train_df, num.trees = 100). Defaults: mtry = $\\lfloor\\sqrt{5}\\rfloor = 2$ candidate variables per split, min.node.size = 5 for regression, unlimited depth, bootstrap sampling with replacement at sample.fraction 1. Each tree fits a bootstrap sample by recursive variance reducing splits; the forest averages $B = 100$ trees, with variance $\\rho\\sigma^2 + \\frac{1-\\rho}{B}\\sigma^2$, and mtry = 2 lowers $\\rho$. Trees handle the temperature hinge and size interactions without specification. Two consequences: predictions are averages of training targets, so they cannot exceed the observed range, which matters for +5°C; and 100 trees is modest but adequate for five features. The deployed app uses a different ranger fit (50 trees, max.depth 10, five different inputs, a 50,000 or 40,000 row sample).",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/07_modelling.R: rf_model <- ranger(total_energy_usage ~ ., data = train_df, num.trees = 100)",
+        "repo:energy-usage-prediction/CODE/final_rf_model_fast.R: num.trees = 50,",
+        "repo:energy-usage-prediction/CODE/final_rf_model_fast.R: max.depth = 10,"
+      ],
+      "sources": [
+        "https://imbs-hl.github.io/ranger/reference/ranger.html"
+      ],
+      "tags": [
+        "random forest",
+        "ranger"
+      ]
+    },
+    {
+      "id": "en-16",
+      "type": "concept",
+      "level": 2,
+      "q": "How was XGBoost set up, and why might it have lost by a hair?",
+      "easy": "100 boosting rounds with the package defaults on the same five features. It nearly tied the Random Forest, which is what untuned boosting often does on a small number of features.",
+      "deep": "model.matrix(total_energy_usage ~ . - 1) builds the numeric design matrix; xgboost(nrounds = 100, objective = \\\"reg:squarederror\\\") with defaults (learning rate eta 0.3, max_depth 6, no subsampling). Boosting adds trees that fit the gradient of squared error, with second order (Newton) leaf weights $w_j = -\\frac{\\sum g_i}{\\sum h_i + \\lambda}$ and a split gain penalized by $\\gamma$. Untuned, with no early stopping or validation set, 100 rounds at eta 0.3 can under or overfit. Result: RMSE 0.503 against the forest's 0.500, R² 0.47 against 0.48. The write up's \\\"close second\\\" is right; the selection between them is a coin flip on one split. Tuning eta, depth, and rounds with grouped cross validation could reverse it.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/07_modelling.R: xgb_model <- xgboost(data = dtrain, nrounds = 100, objective = \"reg:squarederror\", verbose = 0)",
+        "portfolio: XGBoost0.5030.47Strong on non linear patterns, close second",
+        "portfolio: Random Forest0.5000.48Selected for forecasting"
+      ],
+      "sources": [],
+      "tags": [
+        "xgboost",
+        "gradient boosting"
+      ]
+    },
+    {
+      "id": "en-17",
+      "type": "compare",
+      "level": 2,
+      "q": "Random Forest 0.500 versus XGBoost 0.503 RMSE. Is choosing the forest justified?",
+      "easy": "On accuracy alone, no: the gap is too small to mean anything on one split. The forest is a reasonable default because it needed no tuning, but the choice should be framed as a tie.",
+      "deep": "The difference is 0.003 kWh RMSE and 0.01 R². The test split is large (one row per house hour), so the sampling error of each RMSE is small, but the correlated structure (same houses and hours in train and test) means the real uncertainty is about generalization to new houses or new weather, which a single random split does not measure. Fair reasons to prefer the forest: fewer knobs, stable defaults, built in importance. Fair reasons for XGBoost: usually stronger after tuning, and it can be constrained to be monotone increasing in temperature, which suits a warming scenario. A fair comparison is grouped CV by house with tuned models and a paired test on fold level errors.",
+      "evidence": [
+        "portfolio: Random Forest0.5000.48Selected for forecasting",
+        "portfolio: XGBoost0.5030.47Strong on non linear patterns, close second"
+      ],
+      "sources": [],
+      "tags": [
+        "model selection",
+        "compare"
+      ]
+    },
+    {
+      "id": "en-18",
+      "type": "pushback",
+      "level": 1,
+      "q": "Was any of this validated over time or on unseen houses?",
+      "easy": "No. The split was random over house hours, so every house and every hour of July appears on both sides. The scores measure filling in gaps for familiar houses and weather, not predicting new houses or a future month.",
+      "deep": "createDataPartition(p = 0.7) stratifies on the target's quantiles but otherwise samples rows at random. Rows from one house share sqft, occupants, and setpoint exactly, and rows from one county hour share temperature, so the forest can memorize house level means and weather hour patterns. That inflates test scores relative to the deployment question, which is about a hotter future July for the same stock. Temporal validation would train on July 1 to 24 and test on July 25 to 31 (or train on 2018 and test another year); grouped validation would hold out whole houses (group by bldg_id) or whole counties. Expect RMSE to rise; that is the honest number.",
+      "say": "No. We split rows at random, so every house and every July hour is on both sides. I'd redo it two ways: hold out the last week of July, and hold out whole houses. I'd expect the error to go up, and that's the number I'd report.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/07_modelling.R: split_index <- createDataPartition(model_df$total_energy_usage, p = 0.7, list = FALSE)"
+      ],
+      "sources": [],
+      "tags": [
+        "validation",
+        "leakage",
+        "time series"
+      ]
+    },
+    {
+      "id": "en-19",
+      "type": "how",
+      "level": 2,
+      "q": "Design the temporal and grouped validation you would run.",
+      "easy": "Train on earlier days and test on later ones, hold out whole houses and whole counties, and compare against a simple baseline so the scores mean something.",
+      "deep": "(1) Forward chaining within July: train days 1 to 21, test 22 to 31; or roll the cut forward weekly. (2) Grouped K fold by bldg_id, five folds, so a test house was never seen. (3) Leave one county out, since weather is per county. (4) If more years exist in the source, train 2018 and test another July with different heat, which is the closest test of a warming scenario. (5) Baselines: per house mean by hour of day, and a hinge temperature linear model. (6) Metrics: RMSE, MAE, and error on the hottest decile of hours, since the peak is the decision. Tune hyperparameters inside training folds only.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "validation",
+        "evaluation design"
+      ]
+    },
+    {
+      "id": "en-20",
+      "type": "why",
+      "level": 2,
+      "q": "Why is R² only about 0.48, and is that bad?",
+      "easy": "Single houses in single hours are noisy: whether someone runs the dryer or cooks at 6 PM is not in the data. Five coarse features can explain only part of that, so a moderate R² is expected.",
+      "deep": "Unexplained variance sources: occupant behavior and appliance timing; HVAC type and efficiency (dropped); insulation, vintage, infiltration (not in the model); humidity (not modeled); and temperature insensitive loads inside the target. Aggregating to feeder or county level would average idiosyncratic noise away and raise R² sharply, which is the level a utility plans at. So 0.48 at the house hour level is not alarming, but it bounds how much faith to put in house level scenario deltas, and it should travel with every scenario number.",
+      "evidence": [
+        "portfolio: Random Forest0.5000.48Selected for forecasting",
+        "repo:energy-usage-prediction/CODE/08_adding_removing_cols.R: \"in.hvac_cooling_efficiency\","
+      ],
+      "sources": [],
+      "tags": [
+        "metrics",
+        "noise",
+        "interpretation"
+      ]
+    },
+    {
+      "id": "en-21",
+      "type": "pushback",
+      "level": 2,
+      "q": "With R² of 0.48, why should anyone trust a scenario projection from this model?",
+      "easy": "Fair concern. The scenario relies on the model's temperature response, not on its overall fit, so the right check is whether that response is believable, which a single R² does not show.",
+      "deep": "Concede: half the variance is unexplained, the split is optimistic, and trees cannot extrapolate past observed temperatures. Defend: the scenario takes a difference, $f(T+5) - f(T)$, on the same rows, so house level noise partly cancels; what matters is the shape of the learned temperature response. Strengthen it with a partial dependence plot of usage against temperature, a check that the response rises monotonically, a comparison against a hinge model that can extrapolate, and an uncertainty band from bootstrapped forests or quantile forests.",
+      "say": "It's a fair hit. The scenario is a difference on the same rows, so a lot of the noise cancels, and what matters is the temperature response. I'd show that response directly, compare it with a model that can extrapolate, and put a band on the 25.4%.",
+      "evidence": [
+        "portfolio: Random Forest0.5000.48Selected for forecasting",
+        "repo:energy-usage-prediction/CODE/09_5_degree warmer.R: test_df_warmer$temp <- test_df_warmer$temp + 5"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "scenario analysis"
+      ]
+    },
+    {
+      "id": "en-22",
+      "type": "concept",
+      "level": 1,
+      "q": "How was the +5°C warming scenario run?",
+      "easy": "Take the test set, add 5 degrees to every hour's temperature, predict usage again with the same model, and compare against the predictions at actual temperatures.",
+      "deep": "09_5_degree warmer.R refits ranger (100 trees) on the 70% split, predicts the 30% test rows as is (predicted_actual), copies them, adds 5 to temp (degrees Celsius, the dry bulb column), and predicts again (predicted_warmer). delta_energy is the row difference. The summary reports mean predicted_actual, mean predicted_warmer, mean delta, and percent increase as the ratio of means $100 \\cdot \\overline{\\Delta}/\\overline{\\hat y_0}$. Then it groups by hour, sums both predictions per hour of day, and reports the hour with the largest warmed total as the peak. This is a uniform delta, or perturbation, scenario: everything else (houses, setpoints, humidity, behavior, hour profile) is held at July 2018 values.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/09_5_degree warmer.R: test_df_warmer$temp <- test_df_warmer$temp + 5",
+        "repo:energy-usage-prediction/CODE/09_5_degree warmer.R: pct_increase = mean(delta_energy) / mean(predicted_actual) * 100",
+        "repo:energy-usage-prediction/CODE/09_5_degree warmer.R: test_df$delta_energy <- test_df$predicted_warmer - test_df$predicted_actual"
+      ],
+      "sources": [],
+      "tags": [
+        "scenario analysis",
+        "counterfactual"
+      ]
+    },
+    {
+      "id": "en-23",
+      "type": "number",
+      "level": 1,
+      "q": "Recall the average hour result of the +5°C scenario.",
+      "easy": "The model predicts an average July house hour of 1.09 kWh at actual temperatures and 1.25 kWh at +5°C, a 14.7% increase.",
+      "deep": "Both numbers are model predictions on the 30% test rows, not measured usage, from the Random Forest with R² 0.48 on a random split. 14.7% is the ratio of mean delta to mean baseline prediction. 1.25/1.09 rounds to 14.7%, so the figures are internally consistent. Caveats in the same sentence: uniform +5°C on every hour with humidity fixed, the same housing stock and thermostat settings, and a tree model that predicts no further increase for temperatures above the hottest July 2018 hour it saw, so the true response at the hot end is likely understated by the method.",
+      "evidence": [
+        "portfolio: Average July hour, baseline: 1.09 kWh predicted.",
+        "portfolio: 1.25 kWh predicted (a 14.7% increase)"
+      ],
+      "sources": [],
+      "tags": [
+        "number",
+        "scenario"
+      ]
+    },
+    {
+      "id": "en-24",
+      "type": "number",
+      "level": 1,
+      "q": "Recall the peak hour result of the +5°C scenario.",
+      "easy": "At the busiest hour of the day, 9 PM, summed predicted usage went from 81,600 kWh to 102,355 kWh, a 25.4% surge.",
+      "deep": "The script groups test rows by hour of day and sums predictions; hour 21 had the largest warmed total. Both sums are over the 30% test split, across every July day and every test house at that hour, so they are monthly totals for that hour of day, not an instantaneous peak load in kW. 102,355/81,600 is about 1.254, matching 25.4%. The percentage is the usable number; the absolute kWh scale depends on how many rows landed in the test split. The peak hour increase exceeds the 14.7% average because the hours where cooling dominates gain most from heat.",
+      "evidence": [
+        "portfolio: Peak hour (9 PM) baseline: 81,600 kWh aggregate across the sample.",
+        "portfolio: 102,355 kWh aggregate, a 25.4% surge.",
+        "repo:energy-usage-prediction/CODE/09_5_degree warmer.R: total_actual = sum(predicted_actual, na.rm = TRUE),"
+      ],
+      "sources": [],
+      "tags": [
+        "number",
+        "peak demand"
+      ]
+    },
+    {
+      "id": "en-25",
+      "type": "why",
+      "level": 2,
+      "q": "What does \"peak hour load\" mean in this script, and why does it matter to a utility?",
+      "easy": "It is the total of predicted usage for the 9 PM hour added up over all 31 July days and all test houses. A utility's peak is the single highest hour on the hottest day, in kW across the whole system, which this number does not measure.",
+      "deep": "peak_hour_summary = test_df grouped by hour, sum(predicted_actual) and sum(predicted_warmer). Summing across days turns the busiest hour of the day on average into the statistic, which blurs the hottest days where the grid actually peaks; the coincident system peak is a max over individual hours, not a sum. kWh per hour across houses equals average kW, so a peak measure would be max over (day, hour) of the summed kW across houses, scaled from the sample to the customer base. For planning, the right outputs are the distribution of daily peaks and the top 1% hours under each scenario, with uncertainty. The ratio of 25.4% is still informative about how much more heat sensitive the evening hour is.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/09_5_degree warmer.R: group_by(hour) %>%",
+        "portfolio: Peak hour (9 PM) baseline: 81,600 kWh aggregate across the sample."
+      ],
+      "sources": [],
+      "tags": [
+        "peak demand",
+        "utility planning",
+        "metric definition"
+      ]
+    },
+    {
+      "id": "en-26",
+      "type": "why",
+      "level": 3,
+      "q": "Can a Random Forest predict what happens at temperatures hotter than any it has seen?",
+      "easy": "No. A tree forest predicts by averaging training examples, so past the hottest observed hour it treats every hotter hour like that hottest one. Adding 5°C pushes many hours past the edge, so the method likely understates the increase on the hottest hours.",
+      "deep": "Each tree's prediction is a leaf mean of training targets, so $\\hat f(T)$ is constant for $T > \\max T_{train}$ along the temperature axis. Shifting all July 2018 hours by +5°C moves a large share above the training maximum, where the predicted response flattens. The scenario therefore measures the response up to the edge of the data and assumes saturation beyond, which is physically backward: cooling load keeps rising with temperature until equipment hits capacity. Remedies: a model with an explicit, extrapolating temperature term (a hinge or spline GAM, or XGBoost with a linear booster or monotone constraint), training on hotter years or regions as analogs, or a physics based model for the tail. At minimum, report the share of scenario hours outside the training range.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/09_5_degree warmer.R: test_df_warmer$temp <- test_df_warmer$temp + 5",
+        "repo:energy-usage-prediction/CODE/07_modelling.R: rf_model <- ranger(total_energy_usage ~ ., data = train_df, num.trees = 100)"
+      ],
+      "sources": [],
+      "tags": [
+        "extrapolation",
+        "random forest",
+        "scenario"
+      ]
+    },
+    {
+      "id": "en-27",
+      "type": "pushback",
+      "level": 2,
+      "q": "Adding 5°C to every hour isn't a climate scenario. Why is this defensible?",
+      "easy": "It is a stress test, not a forecast, and should be labeled that way. Real warming changes nights more than days, raises humidity, and lengthens heat waves, none of which a flat +5 captures.",
+      "deep": "Concede: a uniform shift ignores diurnal asymmetry (nighttime minimums warm faster), humidity changes, heat wave persistence, and adaptation (more AC installs, setpoint changes). Defend: the business question was the sensitivity of the July peak to sustained heat, and a uniform delta is the standard first pass (the delta method) because it isolates temperature with everything else fixed. Improvements: use morphed weather files from downscaled climate projections, apply hour specific deltas, include humidity in the model, and simulate heat wave sequences.",
+      "say": "It's a stress test, and I'd call it that. A flat +5 ignores warmer nights, humidity, and longer heat waves. It answers one question cleanly: how sensitive is the evening peak to sustained heat with everything else fixed. For planning I'd use projected weather files instead.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/09_5_degree warmer.R: test_df_warmer$temp <- test_df_warmer$temp + 5"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "climate scenario"
+      ]
+    },
+    {
+      "id": "en-28",
+      "type": "why",
+      "level": 3,
+      "q": "The script reports the peak at 9 PM. What should you check before telling a utility that?",
+      "easy": "Check the timezone. The code reads timestamps as UTC, and if the source files are in UTC, 9 PM UTC is 5 PM in South Carolina in July, which matches the usual late afternoon cooling peak.",
+      "deep": "01_generate_function.R parses both energy and weather times with as.POSIXct(..., tz = \"UTC\") and hour() is taken from that. If the source timestamps are local standard time, hour 21 really is 9 PM Eastern standard time (10 PM daylight time). If they are UTC, hour 21 is 17:00 EDT. The answer changes the policy window: the setpoint scenario targets hours 16 to 21 in the same coordinate. Timestamp convention (period beginning or ending, standard versus daylight) also shifts the hour by one. This deck cannot settle it from the repo; confirm against the data dictionary before quoting a clock time.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/01_generate_function.R: time = as.POSIXct(time, format = \"%Y-%m-%d %H:%M:%S\", tz = \"UTC\")",
+        "portfolio: Peak hour (9 PM) baseline: 81,600 kWh aggregate across the sample."
+      ],
+      "sources": [],
+      "tags": [
+        "timezones",
+        "data quality",
+        "peak demand"
+      ]
+    },
+    {
+      "id": "en-29",
+      "type": "concept",
+      "level": 1,
+      "q": "What does the write up claim for the 1°C setpoint policy?",
+      "easy": "That raising the cooling setpoint by one degree from 4 PM to 9 PM, on top of the +5°C warming, cuts average peak window usage from 1.30 to 1.18 kWh per hour, a 0.12 kWh or 9.2% saving.",
+      "deep": "Claimed figures: average usage at +5°C in the 16:00 to 21:00 window 1.30 kWh per hour; with the setpoint raised 1.18 kWh per hour; savings 0.12 kWh per hour, 9.2% of peak hour demand. The write up frames this as the simplest intervention available, delivered via smart thermostats, with no infrastructure investment. The next card explains why the committed code does not compute the quantity described here.",
+      "evidence": [
+        "portfolio: cooling setpoint increase during peak hours (16:00 to 21:00) on top of the",
+        "portfolio: 1.30 kWh per hour",
+        "portfolio: setpoint adjustment: 1.18 kWh per hour",
+        "portfolio: Average savings: 0.12 kWh per hour, or 9.2% of peak hour demand"
+      ],
+      "sources": [],
+      "tags": [
+        "policy",
+        "setpoint",
+        "demand response"
+      ]
+    },
+    {
+      "id": "en-30",
+      "type": "pushback",
+      "level": 1,
+      "q": "Does the code actually apply the setpoint change on top of the warming scenario?",
+      "easy": "No. The script raises the setpoint on a copy of the test set at actual temperatures, then subtracts that prediction from the +5°C prediction. So the 9.2% mixes two things: removing the warming and raising the setpoint. It is not the setpoint's effect.",
+      "deep": "10_1 degree coolsetpoint.R: test_df_peak_adj <- test_df, where test_df still holds the original temp (the +5 was applied to a separate copy, test_df_warmer). It sets setpoint + 1 for hours 16 to 21 and predicts predicted_peak_reduced $= f(T, s+1)$. Then kwh_saved = predicted_warmer minus predicted_peak_reduced $= f(T+5, s) - f(T, s+1)$, which equals the warming increase $[f(T+5,s) - f(T,s)]$ plus the setpoint effect $[f(T,s) - f(T,s+1)]$. The quantity the write up describes is $f(T+5, s) - f(T+5, s+1)$. The fix is one line: build test_df_peak_adj from test_df_warmer. Until rerun, the 9.2% should not be quoted as a setpoint saving.",
+      "say": "When I reread the script, the setpoint change was applied at today's temperatures, then compared with the warmer prediction. So the 9.2% includes undoing the warming. The fix is one line, starting from the warmed copy, and until it's rerun I wouldn't quote that number as a thermostat saving.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/10_1 degree coolsetpoint.R: test_df_peak_adj <- test_df",
+        "repo:energy-usage-prediction/CODE/10_1 degree coolsetpoint.R: test_df$kwh_saved <- test_df$predicted_warmer - test_df$predicted_peak_reduced",
+        "repo:energy-usage-prediction/CODE/09_5_degree warmer.R: test_df_warmer$temp <- test_df_warmer$temp + 5",
+        "portfolio: Average savings: 0.12 kWh per hour, or 9.2% of peak hour demand"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "bug",
+        "counterfactual"
+      ]
+    },
+    {
+      "id": "en-31",
+      "type": "pushback",
+      "level": 2,
+      "q": "Is the setpoint change really 1°C?",
+      "easy": "Probably not. The team's own app labels the cooling setpoint in °F, so adding 1 to that column is a 1°F change, about 0.56°C. The write up calls it 1°C.",
+      "deep": "app.R asks for \"Cooling Setpoint (°F)\" with a range of 60 to 85 and a default of 72, values that only make sense in Fahrenheit, and the scenario script adds 1 to the same in.cooling_setpoint column. The temperature column, by contrast, is Dry Bulb Temperature [°C], so the +5 warming is in Celsius. Mixing the two scales in one narrative makes the policy look stronger per degree than it is. State it as a 1°F setpoint raise unless the data dictionary says otherwise.",
+      "say": "The setpoint column looks like Fahrenheit, since our own app asks for it in °F from 60 to 85. So the script's plus one is one degree Fahrenheit, about half a degree Celsius. The warming is in Celsius. I'd fix the label before quoting either.",
+      "evidence": [
+        "repo:energy-usage-prediction/eSc_july_pred/app.R: numericInput(\"cooling_setpoint\", \"Cooling Setpoint (°F)",
+        "repo:energy-usage-prediction/CODE/10_1 degree coolsetpoint.R: test_df_peak_adj$setpoint + 1,",
+        "portfolio: a 1&deg;C cooling setpoint shift"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "units"
+      ]
+    },
+    {
+      "id": "en-32",
+      "type": "why",
+      "level": 3,
+      "q": "Even with the code fixed, what does the model's setpoint effect actually measure?",
+      "easy": "How usage differs between houses that happen to have different thermostat settings, which is not the same as what happens when one house turns its thermostat up.",
+      "deep": "In this data each house has one fixed in.cooling_setpoint, so the forest learns the cross sectional association between setpoint and usage across houses. Houses with higher setpoints may differ in size, income, occupancy, or equipment, and only some of that is in the five features, so the association is confounded. If the data is simulated, the simulator's thermostat logic does make the within house response real inside the simulator, which strengthens the estimate for a simulated stock but not for real customers, who also pre cool, override, or rebound after the window. Validating a thermostat program needs a randomized or staggered rollout with smart meter data, measuring the window reduction and the post window rebound.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/10_1 degree coolsetpoint.R: test_df_peak_adj <- test_df"
+      ],
+      "sources": [],
+      "tags": [
+        "causal inference",
+        "confounding",
+        "policy"
+      ]
+    },
+    {
+      "id": "en-33",
+      "type": "formula",
+      "level": 2,
+      "q": "The two scenario scripts compute percentages differently. What is the difference, and does it matter?",
+      "easy": "The warming script divides the average increase by the average baseline. The setpoint script averages each row's own percentage saving. Those two can give noticeably different answers when rows vary a lot in size.",
+      "deep": "Warming: $\\text{pct} = 100\\cdot\\frac{\\frac1n\\sum \\Delta_i}{\\frac1n\\sum \\hat y_{0,i}}$, a ratio of means, dominated by high usage rows, which is what a utility cares about (system kWh). Setpoint: pct_saved_i $= 100\\cdot \\Delta_i/\\hat y_{w,i}$ then mean over rows in hours 16 to 21, a mean of ratios, which weights a tiny house's 30% saving the same as a big house's 5%, and explodes when $\\hat y_{w,i}$ is near zero. By Jensen style arguments the two diverge whenever savings and usage are correlated. Report system level ratios of sums for planning.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/09_5_degree warmer.R: pct_increase = mean(delta_energy) / mean(predicted_actual) * 100",
+        "repo:energy-usage-prediction/CODE/10_1 degree coolsetpoint.R: test_df$pct_saved <- test_df$kwh_saved / test_df$predicted_warmer * 100"
+      ],
+      "sources": [],
+      "tags": [
+        "formula",
+        "metrics",
+        "aggregation"
+      ]
+    },
+    {
+      "id": "en-34",
+      "type": "how",
+      "level": 2,
+      "q": "How would you correctly estimate the thermostat policy's effect?",
+      "easy": "Start from the warmed scenario, raise the setpoint only in the policy hours, predict again, and compare against the warmed prediction on the same rows, at system level, with an uncertainty band.",
+      "deep": "(1) warmed = test rows with temp + 5; (2) policy = warmed with setpoint + 1 (in the column's real units) for hours 16 to 21; (3) saving $= \\sum f(\\text{warmed}) - \\sum f(\\text{policy})$ over policy hours, divided by $\\sum f(\\text{warmed})$; (4) check the setpoint's partial dependence is monotone and nonzero across its observed range, since a forest with mtry 2 and few distinct setpoint values may barely use it; (5) bootstrap the forest or use grouped CV refits to get an interval; (6) add a rebound term or at least report hours 22 to 23, since real thermostats recover after the window. Report in kW at the peak hour scaled to customers.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "counterfactual",
+        "policy evaluation"
+      ]
+    },
+    {
+      "id": "en-35",
+      "type": "concept",
+      "level": 2,
+      "q": "What did the project recommend to eSC, and which recommendations does the model actually support?",
+      "easy": "Four: time of use pricing at peak, a smart thermostat rollout, incentives for modern air conditioners, and passive cooling design for new homes. Only the thermostat one connects to a modeled lever, and that number needs the fix described above.",
+      "deep": "Time of use pricing shifts discretionary load with price signals; the model has no price or behavior response, so this rests on general demand response evidence. Smart thermostats automate the setpoint raise; the model's setpoint scenario is the only quantified lever, and its 9.2% is not isolated in the current code. Modern HVAC incentives target older, inefficient units; HVAC efficiency was dropped from the dataset, so no model estimate exists. Passive cooling for new builds is a long horizon lever outside the model. In an interview, separate what the model quantified (sensitivity to heat) from what is domain judgment.",
+      "evidence": [
+        "portfolio: Time of use pricing during peak hours.",
+        "portfolio: Smart thermostat rollout.",
+        "portfolio: Modern HVAC incentives.",
+        "portfolio: Passive cooling design for new builds."
+      ],
+      "sources": [],
+      "tags": [
+        "recommendations",
+        "policy"
+      ]
+    },
+    {
+      "id": "en-36",
+      "type": "define",
+      "level": 2,
+      "q": "Define peak demand, kW versus kWh, demand response, and time of use pricing.",
+      "easy": "Peak demand is the highest power the grid must supply at one moment. kW measures power at an instant; kWh measures energy over time. Demand response pays or nudges customers to cut use at peak. Time of use pricing charges more per kWh during peak hours.",
+      "deep": "Utilities size generation and wires for the coincident system peak (MW), usually a late afternoon on the hottest days, while energy (MWh) drives fuel cost. One house using 1.25 kWh in an hour averages 1.25 kW over that hour, but its instantaneous draw swings as the compressor cycles. Demand response programs include direct load control of thermostats, peak time rebates, and critical peak pricing; their value is measured as the kW reduction at the system peak and the energy rebound afterward. Time of use rates set fixed peak windows such as 4 PM to 9 PM, the same window the setpoint scenario used.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "define",
+        "energy",
+        "utility"
+      ]
+    },
+    {
+      "id": "en-37",
+      "type": "define",
+      "level": 2,
+      "q": "Define dry bulb temperature, cooling setpoint, and cooling degree hours.",
+      "easy": "Dry bulb temperature is ordinary air temperature. The cooling setpoint is the thermostat temperature above which the air conditioner runs. Cooling degree hours add up how far each hour's temperature sits above a base, a standard measure of how much cooling a period needs.",
+      "deep": "Dry bulb is measured by a thermometer shielded from moisture and radiation, as opposed to wet bulb, which reflects humidity. The setpoint defines when cooling turns on; raising it reduces runtime and load. Cooling degree hours: $\\mathrm{CDH} = \\sum_h \\max(0, T_h - T_{base})$, often with $T_{base}$ near 18 to 24°C; usage is roughly linear in CDH above the balance point. A CDH feature (or a hinge in temperature) would let a linear model capture the cooling response and extrapolate under warming. The committed model code does not compute CDH; it feeds raw temperature to the trees.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/07_modelling.R: temp = `Dry Bulb Temperature [°C]`,"
+      ],
+      "sources": [],
+      "tags": [
+        "define",
+        "weather",
+        "features"
+      ]
+    },
+    {
+      "id": "en-38",
+      "type": "case",
+      "level": 2,
+      "q": "What does the Shiny app do, and does it match the evaluated model?",
+      "easy": "It shows exploratory plots on the left and a prediction form on the right, deployed on shinyapps.io by a teammate. The prediction uses a smaller, different model, takes temperature in °F while the model expects °C, and labels an hourly prediction as daily.",
+      "deep": "app.R loads sample_df_small.rds and final_rf_model_fast_clean.rds. That model was trained by final_rf_model_fast.R on a 50,000 row sample (40,000 in the app folder copy) with ranger(num.trees = 50, max.depth = 10) on in.cooling_setpoint, in.sqft, in.occupants, in.income, and temperature_c: no hour, plus income, so it differs from the evaluated five feature forest. The form asks for \"Outside Temperature (°F)\" from 70 to 110 and passes it as temperature_c, so 85°F enters as 85°C, far above any training value, where the forest's prediction is flat. The help text calls the output average daily kWh, while the target is hourly. Treat the app as a demo of the EDA, and fix the unit conversion, the label, and the model before showing predictions.",
+      "evidence": [
+        "repo:energy-usage-prediction/eSc_july_pred/app.R: numericInput(\"temp\", \"Outside Temperature (°F)",
+        "repo:energy-usage-prediction/eSc_july_pred/app.R: temperature_c = input$temp",
+        "repo:energy-usage-prediction/eSc_july_pred/app.R: This value represents the predicted average **daily** energy usage (in kWh)",
+        "repo:energy-usage-prediction/CODE/final_rf_model_fast.R: sample_n(50000)",
+        "repo:energy-usage-prediction/eSc_july_pred/final_rf_model_fast.R: sample_n(40000)",
+        "repo:energy-usage-prediction/README.md: **Live Shiny app:** https://prasadshimpi.shinyapps.io/eSc_july_pred/"
+      ],
+      "sources": [],
+      "tags": [
+        "deployment",
+        "shiny",
+        "training serving skew"
+      ]
+    },
+    {
+      "id": "en-39",
+      "type": "pushback",
+      "level": 2,
+      "q": "Your app feeds Fahrenheit into a model trained on Celsius. How did that get through?",
+      "easy": "It was never tested end to end against known inputs. The form's label and the model's training column were written separately, and nothing checked that a typical July input produced a typical prediction.",
+      "deep": "Concede: an 85°F input is passed as temperature_c = 85, which is 85°C to the model, outside the training range, so every realistic input lands in the forest's flat hot extreme. The help text also says daily kWh for an hourly target. Defend what holds: the EDA panel and its plots are correct, and the scenario scripts use the Celsius column consistently. Prevention: a unit conversion at the input boundary, a range check that warns when inputs fall outside the training distribution, and a smoke test that compares app predictions with notebook predictions for a few fixed rows.",
+      "say": "Nothing tested the app end to end. The form says Fahrenheit and passes it straight into a Celsius feature, so 85°F becomes 85°C. I'd convert at the input, add a range check, and add one smoke test comparing app and script predictions on fixed rows.",
+      "evidence": [
+        "repo:energy-usage-prediction/eSc_july_pred/app.R: temperature_c = input$temp"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "units",
+        "testing"
+      ]
+    },
+    {
+      "id": "en-40",
+      "type": "how",
+      "level": 2,
+      "q": "What testing or validation exists in the repo beyond the single split?",
+      "easy": "Very little: a held out 30% for the model scores, a three feature ablation in the modeling script, and visual checks. No unit tests, no saved outputs, no checks on joins or units.",
+      "deep": "07_modelling.R also fits all three models on a reduced set (temp, setpoint, hour) to see how much the house characteristics add; the resulting scores appear only in the PDF report, so this deck does not quote them. 04_combine coerces types for four known inconsistent columns. There are no assertions on row counts after the inner join on time, no checks that each house has 744 July hours, no unit checks, and the scripts print metrics to the console without saving them, so the write up's numbers cannot be traced to a stored artifact. Cheap additions: row count assertions per merge, a units table, saved metrics files per run, and a golden test that reproduces the scenario summary.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/07_modelling.R: ## 3 Variables approach"
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "reproducibility"
+      ]
+    },
+    {
+      "id": "en-41",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations, and what breaks at 10x or 100x scale or in production?",
+      "easy": "One month of one year, a random split, no humidity, trees that cannot extrapolate, scenario code that mixes effects, an app with unit errors, and possibly simulated data.",
+      "deep": "Method limits: July 2018 only; random row split; five features; caret R² is squared correlation; +5°C beyond the training range; setpoint scenario not isolated; setpoint likely in °F; peak defined as a sum over days. Scale: 10x houses or all months means many more per building files fetched over HTTP; the per building R function and in memory merges should become a partitioned parquet dataset with Arrow or DuckDB joins on (bldg_id, time). 100x (a full state stock at 15 minute resolution) needs distributed processing and aggregated features. Production: the utility needs system peak in MW by feeder with uncertainty, driven by weather forecasts, recalibrated against meter data each season, with a registry so the served model is the evaluated one.",
+      "evidence": [
+        "repo:energy-usage-prediction/CODE/01_generate_function.R: filter(format(time, \"%Y-%m\") == \"2018-07\")",
+        "repo:energy-usage-prediction/CODE/07_modelling.R: split_index <- createDataPartition(model_df$total_energy_usage, p = 0.7, list = FALSE)"
+      ],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "scale",
+        "production"
+      ]
+    },
+    {
+      "id": "en-42",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next?",
+      "easy": "Fix the setpoint script, redo validation by house and by time, add humidity, use a model that can extrapolate, and report peak in kW with an interval.",
+      "deep": "Ordered: (1) one line fix so the policy runs on the warmed data, with the setpoint unit stated; (2) grouped by house and forward in time validation with baselines; (3) add relative humidity and a CDH or hinge term, and compare a monotone constrained XGBoost or a GAM against the forest; (4) quantify the share of scenario hours outside the training range; (5) compute the coincident peak (max over day hour of summed kW) scaled to the customer base, with bootstrap intervals; (6) replace the uniform +5 with hour specific deltas from projected weather; (7) fix the app's units and label and serve the evaluated model.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next steps"
+      ]
+    },
+    {
+      "id": "en-43",
+      "type": "behavioral",
+      "level": 2,
+      "q": "This was a group project. What was your part?",
+      "easy": "The repo does not record individual roles; the scripts carry a teammate's file paths and the app is hosted on that teammate's account. Tanay should state their own contribution precisely and say we for the rest.",
+      "deep": "Facts in the sources: README says group project for IST 687 at Syracuse, with the Shiny deployment and report hosted by a teammate; the Rmd lists Prasad as author; scripts use C:/Users/PRASAD/ paths. The portfolio write up uses we throughout. Prepare a specific answer (for example which scripts, analyses, or sections of the report were yours) and pair it with the review findings in this deck, since spotting the setpoint and unit issues is something Tanay can own now.",
+      "say": "It was a four month group project for IST 687, and the code in the repo was committed from a teammate's machine. My answer should be specific about my part. What I own fully now is the review: I found that the thermostat scenario wasn't isolated from the warming and that the app mixes up units.",
+      "evidence": [
+        "repo:energy-usage-prediction/README.md: Group project for IST 687, Introduction to Data Science, at Syracuse University.",
+        "repo:energy-usage-prediction/README.md: The Shiny"
+      ],
+      "sources": [],
+      "tags": [
+        "teamwork",
+        "ownership"
+      ]
+    },
+    {
+      "id": "en-44",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the project to a staff engineer, including what is wrong with it.",
+      "easy": "Hourly house level forest, uniform +5°C delta scenario, and two code level issues worth naming.",
+      "deep": "Lead with data shape and join keys, the five feature model and its random split, the scenario mechanics and the extrapolation limit, then the setpoint bug, the unit mismatch, and the fixes.",
+      "say": "It's one row per house hour for July 2018, joined by building ID and county weather on timestamp. A ranger forest on five features got R squared 0.48 on a random row split. The warming scenario adds 5°C to the test rows and diffs predictions, but trees go flat past the hottest observed hour, so it understates the tail. The setpoint script diffs against the unwarmed data, so its 9.2% isn't a thermostat effect. I'd fix that, then validate by house and by week.",
+      "evidence": [
+        "portfolio: Random Forest0.5000.48Selected for forecasting",
+        "repo:energy-usage-prediction/CODE/10_1 degree coolsetpoint.R: test_df_peak_adj <- test_df",
+        "portfolio: Average savings: 0.12 kWh per hour, or 9.2% of peak hour demand"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff engineer"
+      ]
+    },
+    {
+      "id": "en-45",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the project to a product manager.",
+      "easy": "A heat stress test for a utility's July demand, with one cheap lever tested and an honest flag on how solid each number is.",
+      "deep": "Frame the decision (build capacity or shift demand), the two scenarios, the headline percentages, and which recommendation the analysis actually supports. Avoid model jargon.",
+      "say": "The utility wanted to know if a hotter July breaks its peak and whether thermostats could help instead of a new plant. Our model says the busiest evening hour grows about a quarter with 5°C more heat. We also tested a small thermostat raise in the evening, but the way that test was coded mixes it with the warming, so I'd rerun it before anyone budgets a thermostat program on it.",
+      "evidence": [
+        "portfolio: 102,355 kWh aggregate, a 25.4% surge."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "product manager"
+      ]
+    },
+    {
+      "id": "en-46",
+      "type": "narrate",
+      "level": 3,
+      "q": "Explain the project to a recruiter in plain words.",
+      "easy": "Tanay's team predicted how much more electricity homes would use in a hotter summer and tested a thermostat idea to reduce it.",
+      "deep": "One sentence each: the question, what was built, the headline, the lesson. No technical terms.",
+      "say": "In a group class project, we predicted how much more electricity South Carolina homes would use if July were five degrees hotter. The busiest evening hour went up about a quarter in our model. We also tested whether nudging thermostats up a degree could offset it. Looking back, I found a flaw in how that test was set up, and catching it taught me to check scenario code as carefully as the model.",
+      "evidence": [
+        "portfolio: 102,355 kWh aggregate, a 25.4% surge."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "caret: Measuring Performance",
+      "url": "https://topepo.github.io/caret/measuring-performance.html",
+      "why": "Documents that caret's R2 squares the correlation between observed and predicted values rather than using 1 minus SSE over SST."
+    },
+    {
+      "title": "ranger() reference",
+      "url": "https://imbs-hl.github.io/ranger/reference/ranger.html",
+      "why": "Defaults for mtry, min.node.size, depth, and sampling that define the project's Random Forest."
+    }
+  ],
+  "sheet": {
+    "easy": "## What it is\n- Group project (IST 687, Jan to May 2025) for eSC, a South Carolina residential electricity provider.\n- Question: if July is 5°C hotter, how much does demand rise, and can a thermostat nudge offset it without a new power plant?\n\n## Data\n- House characteristics (size, occupants, setpoint, insulation, HVAC), hourly electricity per house, hourly weather per county.\n- Filtered to July 2018. One row = one house in one hour. Target = electricity from nine end uses added together (kWh).\n\n## What drives usage (exploratory plots)\n- Temperature most. Size scales almost linearly. Occupants plateau. Wall insulation barely differs (but plots are not controlled comparisons).\n\n## Models (5 inputs: temperature, sqft, occupants, setpoint, hour; random 70/30 split)\n| Model | RMSE (kWh) | R² |\n|---|---|---|\n| Linear regression | 0.583 | 0.29 |\n| XGBoost | 0.503 | 0.47 |\n| Random Forest | 0.500 | 0.48 (selected) |\n\n## +5°C stress test (model predictions on the test rows)\n- Average house hour: 1.09 to 1.25 kWh (+14.7%).\n- Busiest hour of day (9 PM), summed over the test rows: 81,600 to 102,355 kWh (+25.4%).\n\n## Thermostat lever (as written up)\n- +1 degree setpoint, 4 PM to 9 PM: 1.30 to 1.18 kWh per hour, 9.2%.\n- Code review: the script compares the warmed prediction with a raised setpoint at today's temperatures, so 9.2% mixes the policy with undoing the warming. The setpoint also looks like °F.\n\n## Recommendations\n- Time of use pricing, smart thermostats, modern HVAC incentives, passive cooling for new builds.\n\n## Honest limits\n- Random split (same houses on both sides), one month, no humidity, trees cannot predict beyond the hottest hour seen, \"peak\" is a sum over days, the app mixes °F and °C and serves a different model, data may be simulated.\n",
+    "deep": "## Pipeline (R)\n| Script | What it does |\n|---|---|\n| 01_generate_function.R | generate_clean_july_df(building_id, county_code): select 31 house columns, na.omit; 9 end use columns, na.omit, total_energy_usage = rowSums; weather (dry bulb °C, RH, wind), na.omit; parse time as UTC; filter 2018-07; merge energy and weather on time (inner), then house on bldg_id |\n| 02 / 03 / 04 | building to county map; batch (loop not committed); map_dfr combine, coerce 4 columns numeric, save final_combined_dataset.rds |\n| 08_adding_removing_cols.R | add in.building_america_climate_zone; drop 12 columns incl. HVAC cooling efficiency and setpoint offset; save final_combined_dataset01.rds |\n| 05_EDA.R | plot_energy_relationship on 50,000 sampled rows, 13 plots |\n| 07_modelling.R | 5 feature and 3 feature (temp, setpoint, hour) comparisons |\n| 09 / 10 | +5°C scenario; setpoint scenario |\n| final_rf_model_fast.R | app model: ranger 50 trees, max.depth 10, 5 inputs incl. income, no hour |\n\n## Models\nSplit: caret createDataPartition(total_energy_usage, p = 0.7), set.seed(42), stratified on target quantiles, random over house hours.\n- OLS: $\\hat y = \\beta_0 + \\beta^\\top x$ on temp, sqft, occupants, setpoint, hour (hour linear, not cyclic).\n- ranger: num.trees 100; defaults mtry $=\\lfloor\\sqrt5\\rfloor = 2$, min.node.size 5, unlimited depth, bootstrap. $\\mathrm{Var}(\\bar f)=\\rho\\sigma^2+\\frac{1-\\rho}{B}\\sigma^2$.\n- XGBoost: model.matrix, nrounds 100, reg:squarederror, defaults (eta 0.3, max_depth 6). Leaf weight $w_j=-\\sum g_i/(\\sum h_i+\\lambda)$.\n\n| Model | RMSE (kWh) | R² (caret) |\n|---|---|---|\n| Linear Regression | 0.583 | 0.29 |\n| XGBoost | 0.503 | 0.47 |\n| Random Forest | 0.500 | 0.48 |\ncaret R2 $=\\mathrm{corr}(\\hat y,y)^2$, not $1-\\mathrm{SSE}/\\mathrm{SST}$. Metrics are printed only; the numbers trace to the write up.\n\n## +5°C scenario (09_5_degree warmer.R)\n$\\Delta_i = f(T_i+5, x_i) - f(T_i, x_i)$ on the 30% test rows; pct $=100\\,\\bar\\Delta/\\bar{\\hat y}_0$ (ratio of means).\n- Mean house hour 1.09 to 1.25 kWh, +14.7%.\n- group_by(hour), sum: hour 21 largest, 81,600 to 102,355 kWh, +25.4% (sum over all July days and test houses at that hour, not a coincident kW peak).\n- Trees: $\\hat f$ constant for $T>\\max T_{train}$, so the hot tail response is understated.\n- Timestamps parsed as UTC; confirm the source convention before quoting 9 PM.\n\n## Setpoint scenario (10_1 degree coolsetpoint.R)\n- Code: test_df_peak_adj <- test_df (unwarmed); setpoint + 1 for hours 16 to 21; kwh_saved $= f(T+5,s) - f(T,s+1) = [f(T+5,s)-f(T,s)] + [f(T,s)-f(T,s+1)]$.\n- Intended: $f(T+5,s) - f(T+5,s+1)$. One line fix: start from test_df_warmer.\n- Reported: 1.30 to 1.18 kWh per hour in hours 16 to 21, 0.12, 9.2% (pct is a mean of per row ratios).\n- Units: app labels setpoint °F (60 to 85, default 72), so +1 is likely 1°F; temperature is °C.\n- Cross sectional setpoint association, confounded across houses.\n\n## App (eSc_july_pred/app.R)\n- Left: EDA plots; right: prediction form. Model inputs in.cooling_setpoint, in.sqft, in.occupants, in.income, temperature_c.\n- Form temperature labeled °F (70 to 110) passed as temperature_c; help text says daily kWh for an hourly target; deployed on shinyapps.io by a teammate.\n\n## Write up vs code\n| Write up | Code |\n|---|---|\n| 1°C setpoint layered on +5°C | +1 on setpoint column (likely °F) applied to unwarmed rows |\n| reusable merge for other months | July 2018 hard coded in the filter |\n| peak hour load | sum over days and test houses for hour 21 |\n\n## Validation gaps and fixes\n- Random row split: use forward in time within July and GroupKFold by bldg_id or county; baselines (per house hourly mean, hinge model); error on hottest decile.\n- Add RH and a CDH or hinge term; monotone XGBoost or GAM for extrapolation; bootstrap intervals; kW peak scaled to customers.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "It was a group project for a South Carolina utility brief. We modeled hourly July electricity use per house from temperature, size, occupants, thermostat setpoint, and hour. A Random Forest won with R squared 0.48. Pushing a 5°C hotter July through it raised the busiest evening hour by 25.4%. Rereading the code later, I found our thermostat savings number wasn't isolated from the warming, so I'd present that one as needing a rerun.",
+      "keypoints": [
+        "Utility brief: meet a hotter peak without new capacity",
+        "Hourly per house model on five features",
+        "Random Forest R² 0.48",
+        "+25.4% at the busiest hour under +5°C",
+        "Flags the setpoint scenario bug"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "The client was eSC, a residential power provider in South Carolina. July is their peak month, and the question was whether a hotter climate breaks that peak, and whether they could manage it by shifting demand instead of building generation.\n\nWe joined three sources: building characteristics, an hourly electricity file per house, and hourly weather per county. Each house's usage was matched to its county's weather by timestamp and to its house record by building ID, and filtered to July 2018. One row is one house in one hour, and the target is electricity summed over nine end uses.\n\nThe exploratory plots said temperature dominates, size scales almost linearly, and occupants plateau. We fit linear regression, a Random Forest, and XGBoost on five features: temperature, square footage, occupants, cooling setpoint, and hour. On a random 70/30 split, the forest had RMSE 0.500 kWh and R squared 0.48. XGBoost was a hair behind, and linear regression trailed at 0.29.\n\nThen the scenarios. We added 5°C to every test hour and predicted again. The average house hour went from 1.09 to 1.25 kWh, plus 14.7%. The busiest hour of day rose 25.4%.\n\nHere's what I'd flag now. The thermostat scenario, a one degree raise from 4 to 9 PM, reported 9.2% savings. But the script raises the setpoint on the unwarmed data and subtracts from the warmed prediction, so that number includes undoing the warming. The setpoint column also looks like Fahrenheit. And the split is random over house hours, so the scores are optimistic.\n\nNext, I'd fix that one line, validate by house and by week, add humidity, and use a model that can extrapolate past the hottest hour it saw.",
+      "keypoints": [
+        "Client question: hotter peak, demand shifting versus capacity",
+        "Data join: bldg_id and county weather on timestamp, July 2018, house hour rows",
+        "Models and numbers: RF 0.500 and 0.48, XGBoost close, OLS 0.29",
+        "Scenario results: 1.09 to 1.25 kWh, +25.4% busiest hour",
+        "Setpoint script compares against unwarmed data; units likely °F",
+        "Next: fix, grouped and temporal validation, humidity, extrapolating model"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "The brief came from a course client, eSC, a South Carolina residential provider. July is the peak, and they wanted to know how a warmer climate moves it and which levers cut it without new generation.\n\nData. Three sources in a course S3 bucket: a static house table with building characteristics, one hourly electricity parquet per building with end use columns, and one weather CSV per county. A function, generate_clean_july_df, takes a building ID and county code, selects about thirty house columns, sums nine electricity end uses into total_energy_usage, drops any row with a missing value, parses timestamps as UTC, filters to July 2018, inner joins energy and weather on time, and joins house attributes on building ID. The outputs get stacked into one dataset, and a cleanup script drops twelve columns, including HVAC cooling efficiency, and adds climate zone. The column names follow NREL ResStock conventions, so the usage may be simulated rather than metered. The repo doesn't say, and I'd confirm before claiming either.\n\nModels. Five features: dry bulb temperature in Celsius, square footage, occupants, cooling setpoint, and hour. A caret createDataPartition split, 70/30, seed 42, random over house hours. Linear regression got RMSE 0.583 and R squared 0.29. ranger with 100 trees and default mtry of two got 0.500 and 0.48. XGBoost with 100 default rounds got 0.503 and 0.47. Two details matter. caret's R squared is the squared correlation, not one minus SSE over SST. And a forest versus XGBoost gap of 0.003 is a tie on one split.\n\nScenario. The warming script predicts the test rows, copies them, adds 5 to temperature, predicts again, and diffs. Mean predicted usage went from 1.09 to 1.25 kWh, 14.7%, as a ratio of means. Grouping by hour and summing, hour 21 was the largest, 81,600 to 102,355 kWh, plus 25.4%. That's a sum over every July day and test house at that hour, so it's not a coincident peak in kW. And forests are flat beyond the hottest training hour, so adding 5°C pushes many hours into a region where the model predicts no further increase. The method understates the hot tail.\n\nPolicy. The setpoint script raises the setpoint by one for hours 16 to 21, but it starts from the unwarmed test rows. So the saving it computes is f at T plus 5 with the original setpoint, minus f at T with the setpoint raised. That's the warming increase plus the setpoint effect. The intended quantity starts from the warmed rows; it's a one line fix. The app labels the setpoint in Fahrenheit, so the plus one is likely one degree Fahrenheit, while the write up says Celsius. And because each house has one fixed setpoint, the model's setpoint effect is a cross sectional association across houses.\n\nServing. The Shiny app loads a different ranger model, fifty trees, depth ten, with income and without hour. Its form takes temperature in Fahrenheit and passes it into a Celsius feature, and it labels an hourly prediction as daily.\n\nWhat I'd do: fix the setpoint line and state units; validate forward in time within July and grouped by house; add humidity and a hinge or degree hour term; compare a monotone constrained booster or a GAM that can extrapolate; compute the coincident peak in kW scaled to customers with bootstrap intervals; and serve the evaluated model with unit checks at the input.",
+      "keypoints": [
+        "Data join and target construction, including na.omit and UTC parse",
+        "Possible simulation provenance stated as unconfirmed",
+        "Model configs and numbers; caret R² is squared correlation; RF versus XGBoost is a tie",
+        "Warming method, ratio of means, peak as sum over days",
+        "Trees cannot extrapolate past the hottest hour",
+        "Setpoint bug written as f(T+5,s) minus f(T,s+1); units; confounding",
+        "App skew and unit bug; ordered fixes"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to me like I'm not technical.",
+      "script": "Picture a power company in South Carolina. July is when everyone runs their air conditioning, and that's when the grid is most stretched. The company asked: if summers get five degrees hotter, how much more power will homes need, and can we avoid building a new power plant? We used a year of hour by hour electricity data from thousands of homes, plus the weather, and taught a model how usage moves with heat and house size. When we made July five degrees hotter in the model, the busiest evening hour needed about a quarter more power. We also tried nudging thermostats up a degree in the evening. Later I found the way we coded that test mixed it up with the warming, so that part needs to be redone.",
+      "keypoints": [
+        "Utility, July peak, air conditioning",
+        "Hourly data from many homes plus weather",
+        "About a quarter more power at the busiest hour",
+        "Thermostat nudge tested",
+        "Honest that the thermostat test needs redoing"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw it for me.",
+      "script": "First I draw three boxes on the left: house table keyed by building ID, hourly electricity per building, and hourly weather per county. Arrows show electricity joined to weather on timestamp, then to the house table on building ID, into one box labeled house hour rows, July 2018. Under it I write the target as the sum of nine end uses in kWh.\n\nSecond, the model box: five inputs, temperature, square footage, occupants, setpoint, hour, going into a Random Forest. Beside it a small table: forest 0.500 and 0.48, XGBoost 0.503 and 0.47, linear 0.583 and 0.29. I draw the split as a random scatter of rows and write random, not by house or time.\n\nThird, the warming scenario. A temperature axis with a curve that rises and then goes flat at the right edge, with a vertical line marking the hottest observed hour. I shade the region past it and say that's where the forest stops responding. Then the result: 1.09 to 1.25 average, and at hour 21, plus 25.4%.\n\nFourth, the setpoint bug. I write two expressions side by side: what the code computes, f of T plus 5 and s, minus f of T and s plus 1, and what we meant, f of T plus 5 and s, minus f of T plus 5 and s plus 1. I circle the difference and say the 9.2% includes undoing the warming. I add a note: setpoint probably in °F.\n\nLast, in a corner, the fixes: grouped and forward validation, humidity, an extrapolating model, peak in kW with an interval.",
+      "keypoints": [
+        "Join diagram with keys and grain",
+        "Model inputs and comparison table; random split marked",
+        "Flat tree response past the training maximum",
+        "Scenario numbers",
+        "Setpoint bug written as two expressions",
+        "Fix list"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why did you pick the Random Forest over XGBoost?",
+      "script": "Honestly, on accuracy it's a tie. RMSE was 0.500 against 0.503 and R squared 0.48 against 0.47, on one random split, with XGBoost at default settings. The forest needed no tuning and gave stable results, which is a fair reason to pick it for a class deliverable. But I wouldn't defend it as the better model. If I redid it, I'd tune both under grouped cross validation, and I'd look hard at a monotone constrained XGBoost, because it can be forced to keep rising with temperature, which matters for a warming scenario.",
+      "keypoints": [
+        "Numbers: 0.500 vs 0.503, 0.48 vs 0.47",
+        "Tie on one split, XGBoost untuned",
+        "Forest chosen for simplicity",
+        "Would tune both; monotone XGBoost for warming"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you validate the model over time?",
+      "script": "We didn't, and that's the biggest methodological gap. The split was random over house hours, so every house and every July hour shows up on both sides. That rewards memorizing house averages and weather patterns. I'd run two checks: train on the first three weeks of July and test on the last, and hold out whole houses with grouped folds. I'd also compare against a simple per house hourly average baseline, and report error on the hottest hours, since that's where the decision lives.",
+      "keypoints": [
+        "Random split over house hours",
+        "Forward in time holdout",
+        "Grouped by house holdout",
+        "Baselines and hottest hour error"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Walk me through exactly how the warming scenario computes the 25.4%.",
+      "script": "The script predicts the 30% test rows at real temperatures, copies them, adds 5 to the Celsius temperature, and predicts again. Then it groups by hour of day and sums both predictions. Hour 21 had the largest warmed total, 81,600 kilowatt hours rising to 102,355, which is 25.4%. Two caveats. That's a sum over every July day and test house at that hour, so it's not a peak load in kW. And the forest stops responding past the hottest hour it saw, so the real increase on extreme hours is probably larger.",
+      "keypoints": [
+        "Copy test rows, add 5, predict, diff",
+        "Group by hour and sum; hour 21 largest",
+        "81,600 to 102,355, +25.4%",
+        "Sum over days, not kW peak; extrapolation understates"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What's wrong with the thermostat savings number?",
+      "script": "The script raises the setpoint on the original, unwarmed test rows, then subtracts that prediction from the warmed one. So the saving it reports is the warming increase plus the setpoint effect together. What we meant was to raise the setpoint on the warmed rows and compare. It's a one line change. There's also a units issue: our own app labels the setpoint in Fahrenheit, so plus one is likely one degree Fahrenheit, while the write up says Celsius. Until it's rerun, I wouldn't quote the 9.2% as a thermostat saving.",
+      "keypoints": [
+        "Setpoint applied to unwarmed rows",
+        "Reported saving mixes warming reversal and policy",
+        "One line fix from the warmed copy",
+        "Setpoint likely °F; do not quote 9.2% yet"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your headline policy number is wrong. Why should I trust anything else in this project?",
+      "script": "You're right that the 9.2% doesn't measure what we said, and I found that by rereading our own script. The rest stands on different code. The warming scenario applies the +5 correctly to its own copy, and the model comparison doesn't touch the policy code. What I'd concede more broadly is that the validation is optimistic and the forest can't extrapolate, so the 25.4% is a lower bound style estimate from an R squared 0.48 model. I'd rather tell you that than have you find it.",
+      "keypoints": [
+        "Concedes the 9.2% is not a policy effect",
+        "Found it by reviewing own code",
+        "Warming scenario code is separate and correct",
+        "Broader caveats: validation, extrapolation, R² 0.48"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "R squared of 0.48 is weak. Isn't this model too inaccurate to plan a grid with?",
+      "script": "For single houses in single hours, half the variance being unexplained is normal: whether someone runs the dryer at six isn't in the data. Utilities plan on aggregates, where that noise averages out, and the scenario takes a difference on the same rows, so a lot of it cancels too. What I'd concede is that nobody should plan on this model as is. It needs validation by house and over time, humidity, and an interval on the peak estimate before a utility uses it.",
+      "keypoints": [
+        "House hour noise makes moderate R² expected",
+        "Aggregation and differencing reduce noise",
+        "Concedes it is not plan ready",
+        "Lists what would make it usable"
+      ]
+    }
+  ]
+}
