@@ -1,10 +1,10 @@
 {
- "generated_at": "2026-10-15T20:56:03Z",
+ "generated_at": "2026-10-15T21:12:23Z",
  "totals": {
-  "decks": 20,
+  "decks": 26,
   "planned": 29,
-  "cards": 1057,
-  "narrations": 238
+  "cards": 1260,
+  "narrations": 304
  },
  "decks": [
   {
@@ -299,16 +299,27 @@
   },
   {
    "id": "p-comms-agent",
-   "title": "comms-agent",
+   "title": "comms-agent: Agent Orchestration for Communications Monitoring",
    "group": "Portfolio",
-   "blurb": "Agent orchestration for communications monitoring.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-comms-agent.json",
+   "count": 33,
+   "narrations": 11,
+   "types": {
+    "concept": 5,
+    "narrate": 4,
+    "how": 9,
+    "number": 1,
+    "pushback": 5,
+    "define": 2,
+    "why": 3,
+    "formula": 1,
+    "compare": 1,
+    "case": 2
+   },
+   "summary_easy": "An agent that runs a weekly media monitoring job for a brand: it collects mentions, labels each for topic and tone, sends the uncertain ones to a person, and writes a short brief from the checked labels. It runs on a small synthetic sample with a stand in model and a simulated reviewer, because the point is the orchestration and the human review gate.",
+   "repo": "https://github.com/TanayPratapSingh/comms-agent",
+   "ready": true,
+   "blurb": "Agent orchestration for communications monitoring."
   },
   {
    "id": "p-project-mark",
@@ -336,16 +347,27 @@
   },
   {
    "id": "p-media-pulse",
-   "title": "media-pulse",
+   "title": "media-pulse: Communications Measurement with Review",
    "group": "Portfolio",
-   "blurb": "Communications measurement with human in the loop QA.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-media-pulse.json",
+   "count": 34,
+   "narrations": 11,
+   "types": {
+    "concept": 6,
+    "narrate": 4,
+    "how": 8,
+    "pushback": 5,
+    "why": 4,
+    "number": 1,
+    "formula": 2,
+    "compare": 1,
+    "define": 1,
+    "case": 2
+   },
+   "summary_easy": "A communications measurement tool for a fictional brand: it labels each media mention for tone and topic with a confidence, sends the uncertain labels to a reviewer, and reports share of voice, key message pull through, and a quality check of the model itself. On a synthetic sample with a simulated reviewer, held out topic accuracy rose from 0.88 to 0.96 and sentiment from 0.50 to 0.85.",
+   "repo": "https://github.com/TanayPratapSingh/media-pulse",
+   "ready": true,
+   "blurb": "Communications measurement with human in the loop QA."
   },
   {
    "id": "p-kp-prediction",
@@ -397,16 +419,28 @@
   },
   {
    "id": "p-energy-demand",
-   "title": "July Energy Demand",
+   "title": "July Energy Demand Under a Warming Climate",
    "group": "Portfolio",
-   "blurb": "Predicting peak summer demand under a warming climate.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-energy-demand.json",
+   "count": 46,
+   "narrations": 11,
+   "types": {
+    "concept": 10,
+    "narrate": 4,
+    "how": 6,
+    "define": 3,
+    "why": 6,
+    "pushback": 7,
+    "number": 3,
+    "formula": 2,
+    "compare": 1,
+    "case": 3,
+    "behavioral": 1
+   },
+   "summary_easy": "A group project (IST 687, Jan to May 2025) for a South Carolina electricity provider: model how much electricity homes use each hour in July, then ask what a 5°C hotter July and a small thermostat change would do to demand. A Random Forest explained about half the variation (R² 0.48) and projected a 25.4% rise in the busiest evening hour under +5°C. A review of the code shows the thermostat savings figure is not isolated from the warming, which the deck explains.",
+   "repo": "https://github.com/TanayPratapSingh/energy-usage-prediction",
+   "ready": true,
+   "blurb": "Predicting peak summer demand under a warming climate."
   },
   {
    "id": "p-wealth-health",
@@ -436,40 +470,70 @@
    "id": "p-uber-pipeline",
    "title": "Uber Data Engineering Pipeline",
    "group": "Portfolio",
-   "blurb": "An ETL pipeline and star schema for trip data.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-uber-pipeline.json",
+   "count": 30,
+   "narrations": 11,
+   "types": {
+    "concept": 4,
+    "how": 6,
+    "define": 5,
+    "compare": 2,
+    "code": 1,
+    "pushback": 6,
+    "case": 2,
+    "narrate": 4
+   },
+   "summary_easy": "Tanay built the full path from raw New York City taxi trip data to an interactive Power BI dashboard on Google Cloud: a data lake in Cloud Storage, Python cleaning jobs on Compute Engine, a star schema loaded into partitioned BigQuery tables, and exploratory analysis in Jupyter. The goal was to do every stage of the data lifecycle once on real cloud services.",
+   "repo": "",
+   "ready": true,
+   "blurb": "An ETL pipeline and star schema for trip data."
   },
   {
    "id": "p-travel-db",
-   "title": "Travel Itinerary Database",
+   "title": "Travel Itinerary Management System",
    "group": "Portfolio",
-   "blurb": "A normalized relational database for travel planning.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-travel-db.json",
+   "count": 30,
+   "narrations": 11,
+   "types": {
+    "concept": 5,
+    "how": 5,
+    "define": 4,
+    "why": 2,
+    "pushback": 6,
+    "code": 2,
+    "case": 2,
+    "narrate": 4
+   },
+   "summary_easy": "Tanay designed the database behind a travel itinerary app: 12 normalized tables, 3 stored procedures, 2 triggers, and 1 function. The rules (no negative costs, no zero length activities, hotels tied to real destinations) are enforced by the database, so every app, import, or analyst gets the same guarantees, and a traveler's full itinerary is created in one all or nothing call.",
+   "repo": "",
+   "ready": true,
+   "blurb": "A normalized relational database for travel planning."
   },
   {
    "id": "p-digit-nn",
-   "title": "Digit Recognition from Scratch",
+   "title": "Digit Recognition Neural Network from Scratch",
    "group": "Portfolio",
-   "blurb": "A neural network with hand written backpropagation.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-digit-nn.json",
+   "count": 30,
+   "narrations": 11,
+   "types": {
+    "concept": 6,
+    "why": 1,
+    "define": 1,
+    "formula": 5,
+    "compare": 2,
+    "code": 1,
+    "how": 1,
+    "number": 1,
+    "pushback": 6,
+    "case": 2,
+    "narrate": 4
+   },
+   "summary_easy": "Tanay built a neural network that reads handwritten digits using only Python and NumPy, writing the forward pass, backpropagation, and training loop by hand. It reached 94% on the held out MNIST test set, and the real output was hands on experience with the classic training failures: bouncing and stalling losses, underfitting, and vanishing gradients.",
+   "repo": "",
+   "ready": true,
+   "blurb": "A neural network with hand written backpropagation."
   },
   {
    "id": "p-bigdata-delay",
