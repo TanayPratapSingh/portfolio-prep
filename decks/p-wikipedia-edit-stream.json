@@ -1,0 +1,1258 @@
+{
+  "deck_id": "p-wikipedia-edit-stream",
+  "title": "Wikipedia Edit Stream",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/wikipedia-edit-stream",
+  "summary_easy": "A live browser dashboard that reads every edit to Wikipedia and its sister sites and counts it twice: exactly, and with three memory saving estimators (HyperLogLog, Count-Min, Space-Saving). Plotting the gap shows whether each estimator stays inside its promised error. On a 297 second run of 9,909 real events, the distinct editor estimate landed within 0.4% of the exact count.",
+  "summary_deep": "The page opens one EventSource on Wikimedia's recentchange stream, discards canary events, dedupes on meta.id through a 5,000 id ring, and resumes with Last-Event-ID (Kafka positions expressed as timestamps) after the 15 minute connection cutoff. Distinct editors go into a p = 12 HyperLogLog (4,096 one byte registers, MurmurHash3 x86_32 verified against SMHasher, linear counting below 2.5m = 10,240); per wiki counts go into a 4 by 1,024 Count-Min sketch with the standard update (epsilon = e/w = 0.00265, delta = e^-4 = 0.0183); edited pages go into a 200 counter Space-Saving summary held in an indexed min heap. Each sketch runs beside exact state, and the deterministic guarantees are audited every second. Throughput is binned by event time with a 2 second watermark, and a burst rule (more than 4 sigma and at least 10 events above a 60 second half life EWMA) runs on closed seconds. All sketch logic is a pure module shared by the page, a node verification script, and the node:test suite. The 297 second node run measured HyperLogLog at +0.4% against a 1.6% bound, 0 Space-Saving violations, and no Count-Min overcounts, with the stated caveat that Count-Min barely collides across about 100 wikis.",
+  "sheet": {
+    "easy": "## What it is\n- A live page that reads every change to Wikipedia and its sister sites, straight from Wikimedia's public stream, in the browser. No server of Tanay's sits in between.\n- Every event is counted twice: exactly, and with a **sketch** (a fixed size summary that trades a small, bounded error for tiny memory).\n- Each card plots the gap between the two, so the textbook promise is checked live.\n\n## The three questions and their sketches\n| Question | Sketch | Memory | What it promises |\n| --- | --- | --- | --- |\n| How many different editors? | HyperLogLog | 4 KB (4,096 one byte registers) | typical error about 1.6% |\n| Which wikis are busiest? | Count-Min | 4 x 1,024 counters | never undercounts; rarely overcounts by more than 0.27% of all events |\n| Which pages are busiest? | Space-Saving | 200 counters | every page above N/200 edits is in the table, each count has a known error |\n\n## The data\n- Wikimedia's recentchange stream, about 33 to 36 events a second in the logged runs, about 100 wikis.\n- More than half of all events are category changes; edits are about 38%.\n- Bots (by the wiki's own flag) were 27% to 44.5% of events across three runs.\n\n## Measured (node run of the same code, Oct 8 2026)\n- 297 seconds, 9,909 events, 33.3 a second\n- HyperLogLog 986.9 vs 983 exact, +0.4% (other runs -0.3% and -1.2%)\n- Space-Saving: 0 violations of its guarantee\n- Count-Min: 12 of 12 busiest wikis within bound, but no collisions happened, so this is a weak test\n\n## Design choices worth defending\n- Count per second by **event time** (when the edit happened), not arrival time. Arrival bins called delivery clumps \"bursts\" (3 and 2 false bursts in two runs, 0 on event time).\n- **Resume and dedupe**: reconnect with Last-Event-ID, drop repeated ids.\n- **Privacy**: editor names are hashed on arrival and never shown.\n- **Test against the guarantee**, with seeded random streams, not against fixed outputs.\n\n## What went wrong\n- False bursts from arrival time binning (fixed by event time bins).\n- The rate pill read 23 a second when the truth was 33 (fixed by pooling arrivals into 50 ms windows).\n\n## Honest limits\n- Count-Min barely collides with about 100 wikis.\n- Live runs only used HyperLogLog's small range branch.\n- Exact counting is cheap at this rate; sketches pay off at much higher volume.\n- The resume path worked once in the browser, but no logged run exercised it.\n",
+    "deep": "## Architecture\n1. `EventSource` on `stream.wikimedia.org/v2/stream/recentchange` (server sent events: `text/event-stream`, fields `data`, `event`, `id`, `retry`; colon lines are comments). Wikimedia closes every connection after 15 minutes; the browser reconnects and sends `Last-Event-ID`.\n2. The SSE id is a JSON list of Kafka topic and partition positions. Wikimedia fills them with **timestamps**, because offsets are unique only within one Kafka cluster and the service runs active/active across datacenters. (The write up says \"Kafka offsets\"; positions expressed as timestamps is the accurate phrasing.)\n3. Manual fallback when `readyState` is CLOSED (non 200 or wrong content type, which the browser never retries): reconnect with `?since=` newest `meta.dt` minus 5 s, backoff $\\min(60, 2^{retry})$ s.\n4. Drop canary events (`meta.domain = canary`), dedupe on `meta.id` through `RecentIds` (5,000 slot ring plus Set, O(1); covers about 150 s at 33 events/s). Contract: at least once delivery, idempotent consumer.\n5. `ingest()` mutates state only; one `requestAnimationFrame` scheduler (`onPaint(fn, everyMs)`) paints each chart at its own minimum interval and stops while hidden or paused. River 33 ms, KPI tiles 500 ms.\n6. Sketch logic lives in `wiki/sketch.js` (no DOM). The page, the node verification script that wrote `runs/` (not itself in the repo), and the `node:test` suite import the same file.\n\n## Data\n- Fields used: `meta.id`, `meta.dt`, `meta.domain`, `meta.uri`, `wiki`, `server_name`, `type`, `bot`, `user`, `title`, `namespace`, `length.old`, `length.new`.\n- Run 3 kinds: categorize 5,463, edit 3,777, log 431, new 238. Space-Saving sees edit + new = 4,015.\n- Bot flag `d.bot === true` (the wiki's bot right); unflagged automation counts as people. Bot share 44.5%, 32.7%, 27.0% across runs 1 to 3.\n- Edit size: 11 signed order of magnitude bins of `length.new - length.old`; run 3 bot edits in the +1k bin 22.6% vs human 4.0% (computed from the log).\n- Delay = local arrival minus `meta.dt`, includes clock offset: p50/p95 0.30/1.01, 0.34/0.57, 1.07/3.61 s; min 0.27 s in all runs.\n\n## MurmurHash3 x86_32\n- Blocks: $k \\leftarrow k \\cdot c_1$, $\\mathrm{rotl}(k,15)$, $k \\cdot c_2$; $h \\leftarrow h \\oplus k$, $\\mathrm{rotl}(h,13)$, $h \\leftarrow 5h + \\texttt{0xe6546b64}$; $c_1=\\texttt{0xcc9e2d51}$, $c_2=\\texttt{0x1b873593}$.\n- Finalizer: $h \\oplus= len$; xor shift 16, $\\times\\texttt{0x85ebca6b}$, xor shift 13, $\\times\\texttt{0xc2b2ae35}$, xor shift 16. JS needs `Math.imul` and `>>> 0`.\n- Verified: `''`/0 = 0, `''`/1 = `0x514E28B7`, `'hello'` = `0x248BFA47`, quick brown fox = `0x2E4FF723`, SMHasher verification = `0xB0F57EE3` (keys of length 0 to 255, seed 256 minus length, results concatenated little endian, hashed with seed 0).\n- Not cryptographic; seeded Murmur is open to hash flooding (SipHash is the keyed fix).\n- `hash53` = 21 bits of one seeded hash times $2^{32}$ plus another; collision chance $\\approx n^2/2^{54} \\approx 5.6 \\times 10^{-7}$ at $n = 100{,}000$.\n\n## HyperLogLog (Flajolet, Fusy, Gandouet, Meunier 2007), p = 12\n- $m = 2^p = 4096$ one byte registers, 4 KB. Index $j = h \\gg (32-p)$; rank $\\rho = \\mathrm{clz}(h \\ll p) + 1$, capped at $32 - p + 1 = 21$; $M[j] \\leftarrow \\max(M[j], \\rho)$.\n$$E_{raw} = \\frac{\\alpha_m m^2}{\\sum_{j=1}^{m} 2^{-M[j]}}, \\qquad \\alpha_m = \\frac{0.7213}{1 + 1.079/m} \\;(m \\ge 128)$$\n- $\\alpha_{16} = 0.673$, $\\alpha_{32} = 0.697$, $\\alpha_{64} = 0.709$ in the paper; the code uses the $m \\ge 128$ form for every p (0.72111 at m = 4,096).\n- Small range: if $E_{raw} \\le 2.5m = 10{,}240$ and $V > 0$ empty registers, $E = m \\ln(m/V)$ (linear counting).\n- Large range (32 bit hash): if $E_{raw} > 2^{32}/30$, $E = -2^{32} \\ln(1 - E_{raw}/2^{32})$.\n- Standard error $\\beta_m/\\sqrt{m}$, $\\beta_\\infty = \\sqrt{3\\ln 2 - 1} \\approx 1.03896$, so $1.04/64 = 1.625\\%$. Harmonic mean replaces LogLog's geometric mean; matches LogLog accuracy with 64% of the memory.\n- Linear counting: $E[V] \\approx m e^{-n/m}$; $\\mathrm{SE} = \\sqrt{m(e^t - t - 1)}/n$, $t = n/m$, tends to $1/\\sqrt{2m} \\approx 1.1\\%$; 1.13% to 1.15% at the logged counts.\n- Memory versus error: p = 10 3.25%, 12 1.625%, 14 0.81%, 16 0.41%. Merge = register wise max; no deletion.\n- HLL++ (Heule, Nunkesser, Hall 2013): 64 bit hash, empirical bias correction, sparse registers.\n\n## Count-Min (Cormode and Muthukrishnan 2005), standard update\n- $d = 4$ rows, $w = 1024$ columns, seeds `0x9747b28c + (i+1) * 0x9e3779b1`. Update $C[i, h_i(x)] \\mathrel{+}= w_x$ for all rows; query $\\hat f(x) = \\min_i C[i, h_i(x)]$. Negative weights throw.\n- $f(x) \\le \\hat f(x)$ always. $P(\\hat f(x) - f(x) > \\varepsilon N) \\le \\delta$, $\\varepsilon = e/w = 0.00265$, $\\delta = e^{-d} = 0.0183$. Sizing: $w = \\lceil e/\\varepsilon \\rceil$, $d = \\lceil \\ln(1/\\delta) \\rceil$.\n- Proof: $E[X_i] \\le N/w$; Markov $P(X_i > eN/w) \\le 1/e$; independent rows $e^{-d}$. Assumes pairwise independent hashes; seeded Murmur is not provably that.\n- Expected inflated share, $K$ keys: $\\left(1 - (1 - 1/w)^{K-1}\\right)^d$ = 0.007% at K = 100.\n- Storage `Float64Array(4096)` = 32 KB. Column `murmur % 1024` has no modulo bias.\n- Conservative update (raise each counter only to $\\min + w$) is tighter, still never undercounts, not linear, outside the textbook proof, so not used. Count Sketch: signed updates, median, unbiased, L2 error.\n\n## Space-Saving (Metwally, Agrawal, El Abbadi 2005), k = 200\n- Hit: `count += w`. Miss, table full: evict min counter $c_{min}$; new `count = c_min + w`, `error = c_min`.\n- Lemma 1: $\\sum \\text{count} = N$. Lemma 2: $c_{min} \\le \\lfloor N/k \\rfloor$. Lemma 3: $0 \\le \\text{error} \\le c_{min}$, $\\text{count} - \\text{error} \\le f(x) \\le \\text{count}$. Theorem 1: $f(x) > c_{min} \\Rightarrow x$ tracked (so $f(x) > N/k$ suffices).\n- Structure: indexed binary min heap plus `Map` item to position. Update $O(\\log k)$, min $O(1)$, `top(n)` sorts a copy at paint time. Stream-Summary gets $O(1)$ unit updates. Misra-Gries: decrement all, lower bounds.\n- Fed only by events of type `edit` and `new`.\n\n## Exact reference and audit\n- `users` Set of `hash53`; `wikis` Map; `pages` Map keyed `wiki|title` (hashed key for namespaces 2 and 3).\n- Every 1 s: HLL sample (3,600 point ring) and Space-Saving audit, $O(k + P)$. Every 250 ms: close seconds. Reset at 500,000 pages or 2,000,000 editors.\n\n## Throughput and bursts\n- Bin by `floor(meta.dt / 1000)`; close second $s$ once $(s+1) \\cdot 1000 + 2000 \\le$ newest event time (watermark). Late events fill the chart, miss the detector, and are counted.\n- Continuous time EWMA: $\\tau = t_{1/2}/\\ln 2$, $\\alpha = 1 - e^{-\\Delta t/\\tau}$; $\\mu \\mathrel{+}= \\alpha(x-\\mu)$; $\\sigma^2 \\leftarrow (1-\\alpha)(\\sigma^2 + \\alpha(x-\\mu)^2)$. Burst half life 60 s, rate tile 10 s, feed meter 10 s.\n- Flag if $x > \\mu + 4\\sigma$ and $x \\ge \\mu + 10$, baseline read before the update, warmup 30 s.\n- Feed meter: pool arrivals until 50 ms elapse, then feed count / elapsed (ratio of sums).\n\n## Rendering\n- Canvas at CSS size times `devicePixelRatio`; preallocated typed arrays per frame; one path per colour; 2,000 edit ring; span 4 to 60 s; jitter from hash of `meta.id`; ease $1 - e^{-dt/0.3}$, snap after 0.25 s gaps; reduced motion repaint once a second.\n- Dot area $\\propto 1 + 1.5\\log_{10}(1 + |\\Delta\\text{bytes}|)$; 10,000 bytes is about 7x the area of 0.\n- Lanes: `rankLanes` with hysteresis, challenger must beat by 10% plus 1.\n- `safeHref`: https only, Wikimedia domains only. Names never stored.\n\n## Measured (node runs of `wiki/sketch.js`, Oct 8 2026)\n| Run | Length | Events | Per s | HLL vs exact | SS violations | CMS top 12 in bound | Bursts arrival / event |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| 1 | 118 s | 3,903 | 33.0 | 533.3 vs 535 (-0.3%) | 0 | 12 of 12 | 3 / 0 |\n| 2 | 178 s | 6,376 | 35.8 | 686.4 vs 695 (-1.2%) | 0 | 12 of 12 | 0 / 0 |\n| 3 | 297 s | 9,909 | 33.3 | 986.9 vs 983 (+0.4%) | 0 | 12 of 12 | 2 / 0 |\n\n- Run 3 detail: HLL regime linear; Space-Saving N = 4,015, N/k = 20.07, 0 pages above N/k, top 15 overlap 2 of 15 strict (4 tie aware, c15 = 5), 3,624 distinct pages; Count-Min $\\varepsilon N$ = 26.30 over 100 wikis, 0 inflated, expected 0.007%; 0 duplicates.\n- Rate bug: pill showed 23 msg/s while a separate counter saw 33; fixed by 50 ms pooling.\n\n## Tests (`node --test tests/*.test.mjs`, Node 22 and 24 in CI, no install step)\n- 24 in the wiki suite plus 2 shared formatting tests (26 in the README).\n- Murmur vectors and SMHasher value; HLL rank edges, idempotence, 100,000 keys within 3 SE (raw regime), 100 keys within 3 (linear regime); Count-Min no undercount and share over $\\varepsilon N$ below $\\delta$ on a 200,000 event Zipf(1.1) stream over 50,000 keys; Space-Saving bounds on Zipf and mostly distinct streams; dedupe ring; burst detector warmup and both conditions; size bins; dot radius; lane hysteresis; seeded mulberry32 everywhere.\n\n## Limits\n- Count-Min bound shown but hardly stressed; live HLL runs never left linear counting; exact counting is cheap at 30 events a second; Last-Event-ID resume seen once in the browser, never in a logged run; one sketch per run means no coverage statistic; the logging script is not published.\n\n## Next\n- 100 seeded HLLs on one stream for coverage; a session past 10,240 editors; key Count-Min by page; Web Worker ingestion; HLL++ with 6 bit registers; dedupe sized by time.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "I built a live dashboard that reads every Wikipedia edit straight from Wikimedia's public stream and counts it twice: exactly, and with three streaming sketches, HyperLogLog, Count-Min and Space-Saving. I wanted to watch their error bounds hold on real traffic instead of trusting the textbook. On a 297 second run of 9,909 events, HyperLogLog was 0.4% off against a 1.6% bound, and Space-Saving never broke its guarantee. Count-Min barely collided, so that check is weak, and the page says so.",
+      "keypoints": [
+        "Live Wikipedia stream, read in the browser, no server",
+        "Each sketch runs beside an exact counter",
+        "986.9 vs 983, +0.4% against a 1.6% bound, 297 s, 9,909 events",
+        "Space-Saving 0 violations",
+        "Admits Count-Min was not stressed"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "Streaming sketches are usually taught with their error bounds and then trusted. I wanted to see the bounds hold on real data. Wikimedia publishes every change to every wiki as a server sent events stream, and in my runs it carried 26 to 36 events a second across about 100 wikis. The browser reads it directly. I count each event twice. Distinct editors go into a HyperLogLog with 4,096 one byte registers and also into an exact set of hashed names. Events per wiki go into a 4 by 1,024 Count-Min sketch with the standard update, so the textbook bound applies. Edited pages go into Space-Saving with 200 counters, each carrying its own error term. Every second the page checks the deterministic guarantees against exact maps and counts any violation. A node script ran the same module against the live stream for 297 seconds: 9,909 events. HyperLogLog said 986.9 editors against an exact 983, plus 0.4% against a 1.6% one sigma bound, and two shorter runs gave minus 0.3 and minus 1.2. Space-Saving had zero violations and Count-Min kept all 12 busiest wikis in bound. Two things broke along the way. Binning throughput by arrival time flagged delivery clumps as bursts, three and two false bursts in two runs, so I bin by event time with a two second settle. And my status pill read 23 messages a second when a plain counter saw 33, because clumped messages got almost no weight in the smoothed rate; pooling into 50 millisecond windows fixed it. The honest limits: Count-Min barely collides with 100 wikis, and short sessions only exercise HyperLogLog's small range branch. Next I would run many seeded sketches side by side to measure coverage, and move ingestion off the main thread.",
+      "keypoints": [
+        "Motivation: verify bounds instead of trusting them",
+        "Data: Wikimedia SSE, 26 to 36 events a second, about 100 wikis",
+        "Three sketches with parameters, each beside exact state",
+        "Result: 986.9 vs 983, Space-Saving 0 violations, Count-Min 12 of 12",
+        "What broke: arrival time bursts (3 and 2), rate meter 23 vs 33",
+        "Limits and next steps: no collisions, linear range only, seeded coverage study"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "The goal was to measure three sketches against ground truth on a real stream, so every design choice serves that comparison. Transport first. The page opens one EventSource on Wikimedia's recentchange stream. Each message has an SSE id, a JSON list of Kafka topic and partition positions, which Wikimedia fills with timestamps because offsets do not carry across its datacenters. Wikimedia closes every connection after 15 minutes, and the browser reconnects with Last-Event-ID. If the browser gives up, my code reconnects with exponential backoff capped at 60 seconds and a since parameter 5 seconds before the newest event time. That rewind replays events on purpose, so every meta.id goes through a 5,000 slot ring plus a set, and repeats are dropped. It is at least once delivery with an idempotent consumer. Canary events are discarded. Hashing. All three sketches use MurmurHash3 x86_32 over UTF-8 bytes. I verified the port against the published vectors and SMHasher's verification value, 0xB0F57EE3, which catches signed shift and tail bugs. HyperLogLog uses p equals 12: the top 12 bits pick one of 4,096 one byte registers, the rank is leading zeros of the other 20 bits plus one, capped at 21. The estimator is alpha m squared over the sum of 2 to the minus register, with the small range switch to linear counting below 2.5 m, which is 10,240, and the large range correction for a 32 bit hash. The error is 1.04 over root m, 1.625%. The exact side is a set of 53 bit hashes built from two seeded Murmur values, so names are never stored and collisions are about 6 in ten million at 100,000 editors. Count-Min is 4 rows by 1,024 columns with the standard update. Epsilon is e over w, 0.00265, delta is e to the minus 4, 0.0183. I avoided conservative update because the proof is for the standard update and I wanted to check the bound as stated. Space-Saving has 200 counters in an indexed min heap with a map from item to position, so eviction of the minimum is O(1) and updates are O(log k). Once a second I check count minus error at most exact at most count for every counter, and that every page above N over k is present. Those are deterministic, so any violation is a bug. Throughput. Per second counts are binned by meta.dt, and a second closes once the newest event time is 2 seconds past it, a simple watermark. Late events still fill the chart and are counted. Bursts are seconds more than 4 sigma and at least 10 events above a continuous time EWMA with a 60 second half life, read before the update. Arrival time bins flagged 3 and 2 false bursts in two runs; event time bins flagged none. Painting runs on one requestAnimationFrame scheduler with a minimum interval per chart, and handlers only mutate state. The river is a canvas with preallocated typed arrays and one path per colour. Results from a node run of the same module, 297 seconds, 9,909 events: HyperLogLog 986.9 against 983, plus 0.4%. Space-Saving zero violations. Count-Min zero undercounts and zero keys inflated. The weak spots I state up front. Count-Min had about 100 keys in 1,024 columns, so it never collided and its check is close to vacuous. HyperLogLog stayed in linear counting live, so the harmonic mean estimator is only tested offline, at 100,000 keys within three standard errors. One sketch over time gives correlated points, so I make no coverage claim. Next I would run a hundred seeded HyperLogLogs on the same stream and key Count-Min by page so it actually collides.",
+      "keypoints": [
+        "SSE with Last-Event-ID (timestamps, not offsets), since fallback, backoff, 5,000 id dedupe",
+        "MurmurHash3 verified against SMHasher 0xB0F57EE3",
+        "HLL p = 12, rank capped at 21, linear counting below 10,240, SE 1.625%",
+        "Count-Min 4 x 1,024 standard update, eps 0.00265, delta 0.0183; Space-Saving heap with per second audit",
+        "Event time bins with 2 s watermark; 4 sigma and +10 burst rule; 3 and 2 false bursts on arrival bins",
+        "986.9 vs 983, 0 violations, 0 inflated",
+        "Limits: no Count-Min collisions, linear range only, no coverage claim"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone without a technical background.",
+      "script": "Wikipedia and its sister sites get dozens of changes every second. I built a web page that watches them live and answers simple questions: how many different people are editing right now, and which wikis and pages are busiest. Large websites answer questions like these with shortcuts that use a tiny, fixed amount of memory and accept a small, known error. Those shortcuts usually get trusted without anyone checking. My page runs each shortcut and the exact count side by side, so you can watch how far the shortcut drifts. In a five minute test with about ten thousand changes, the shortcut said 986.9 people and the true count was 983. I also found and fixed two misleading displays along the way, and the page states plainly where the test was too easy to prove much.",
+      "keypoints": [
+        "Plain framing: watching Wikipedia changes live",
+        "Shortcuts that trade a small error for tiny memory",
+        "Side by side with the exact count",
+        "986.9 vs 983 in a five minute test",
+        "Honest about where the test was easy"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the architecture on the whiteboard.",
+      "script": "First I draw a box on the left for Wikimedia's recentchange stream and an arrow into a box for the browser, labelled EventSource. On that arrow I write Last-Event-ID and the 15 minute cutoff, and I say that delivery is at least once, so the first thing inside the browser is a filter: drop canary events, then dedupe on meta.id with a 5,000 id ring. Second, I fan the clean events out into three pairs of boxes, each pair a sketch and its exact twin. Top pair: HyperLogLog, p equals 12, 4 KB, next to a set of 53 bit hashes of editor names. Middle pair: Count-Min, 4 by 1,024, next to a map of counts per wiki. Bottom pair: Space-Saving, 200 counters in a min heap, next to a map of counts per page, fed only by edits and new pages. Between each pair I draw a comparison arrow labelled audit every second, and I write the guarantee on it: 1.04 over root m, exact at most estimate, count minus error at most exact at most count. Third, below the fan out, I draw the time path: events binned by meta.dt into seconds, a watermark line 2 seconds behind the newest event, and the burst rule, 4 sigma and at least 10 above a 60 second half life EWMA. Beside it I note the result that arrival bins gave 3 and 2 false bursts. Last, on the right, I draw the paint scheduler as one requestAnimationFrame loop reading state, and I say handlers never paint. If there is room, I write the run 3 numbers in a corner: 9,909 events, 986.9 against 983, 0 violations.",
+      "keypoints": [
+        "Stream to EventSource with Last-Event-ID and dedupe first",
+        "Three sketch and exact pairs with their guarantees",
+        "Audit every second between each pair",
+        "Event time bins, watermark, burst rule",
+        "Separate paint scheduler",
+        "Run 3 numbers in the corner"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Your HyperLogLog error was 0.4%. Which estimator produced it, and what error should you expect there?",
+      "script": "It came from linear counting, not the harmonic mean estimator. The switch happens when the raw estimate is at most 2.5 m, which is 10,240 for 4,096 registers, and the run peaked at 983 distinct editors. In that range the estimate is m times the log of m over the number of empty registers, and its error at that load is about 1.15%, a bit tighter than the 1.6% the page draws. So plus 0.4, minus 0.3 and minus 1.2 across three runs are all ordinary. The harmonic mean branch is covered offline, where the suite requires 100,000 distinct keys to land within three standard errors. The live chart follows one sketch, so its points are correlated, and measuring coverage needs many seeded sketches.",
+      "keypoints": [
+        "Linear counting, since 983 is below 2.5m = 10,240",
+        "E = m ln(m/V)",
+        "Expected error about 1.1% there",
+        "Raw regime tested offline at 100,000 keys within 3 SE",
+        "Single sketch, correlated points"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What happens when the connection drops? How do you avoid gaps and double counts?",
+      "script": "Wikimedia closes every connection after 15 minutes, so this is the normal path. EventSource reconnects on its own and sends the last id it saw as Last-Event-ID. That id is a list of Kafka topic and partition positions, expressed as timestamps. If the browser gives up, for example on an HTTP error, my code reconnects with exponential backoff capped at 60 seconds and a since parameter 5 seconds before the newest event time. That rewind is deliberate: I would rather replay a few events than lose any. Every meta.id goes through a ring of the last 5,000 ids plus a set, so replays are dropped and counted. I saw it work once in the browser with no duplicates, but no logged run includes a reconnect.",
+      "keypoints": [
+        "15 minute cutoff makes reconnect normal",
+        "Last-Event-ID resume, positions as timestamps",
+        "Manual fallback: backoff to 60 s, since minus 5 s",
+        "Dedupe on meta.id with a 5,000 id ring",
+        "Admits the path is lightly tested"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Count-Min had zero collisions. How would you actually stress it?",
+      "script": "With about 100 wikis in 1,024 columns, the chance that a key collides in all four rows is about 0.007%, so a zero was expected and the check is close to vacuous. To stress it I would change the key or the width. Keying by page title gives thousands of distinct keys, and run 3 had 3,624 distinct pages, so collisions would appear and the epsilon N bound would start to bind. Shrinking the width to 64 columns on the wiki key would do the same. Then the useful measurement is the share of keys over epsilon N against delta, and how much tighter conservative update would be, which is the same test the suite runs on a 200,000 event Zipf stream.",
+      "keypoints": [
+        "Expected inflated share 0.007% at 100 keys",
+        "Key by page: 3,624 distinct pages in run 3",
+        "Or shrink width",
+        "Measure share over eps N against delta",
+        "Compare conservative update"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why event time bins, and what does the watermark cost you?",
+      "script": "Delivery from the stream comes in clumps. When I binned by arrival second, a stall followed by a flush looked like a spike, and the burst rule flagged 3 seconds in one run and 2 in another. Binned by meta.dt, the same rule flagged none, because the flushed events fall back into the seconds they happened in. A second closes once the newest event time is 2 seconds past it. The cost is two seconds of latency on the rate chart and a policy for late events: they still fill the chart, miss the detector, and are counted in the footer. The rule is a simple heuristic watermark, so one event with a skewed clock could push it forward early.",
+      "keypoints": [
+        "Clumped delivery made false bursts on arrival bins",
+        "3 and 2 false bursts against 0",
+        "Close a second 2 s after newest event time",
+        "Late events counted, not re judged",
+        "Heuristic watermark weakness"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you test code whose output is random?",
+      "script": "I tested the guarantees, not fixed outputs, and seeded every random stream with mulberry32 so a failure reproduces. The hash is checked against published vectors and SMHasher's verification value. HyperLogLog has crafted hashes for rank edge cases, an idempotence test, 100,000 keys within three standard errors in the raw regime, and 100 keys within 3 in linear counting. Count-Min gets a 200,000 event Zipf stream where nothing is undercounted and the share over epsilon N stays below delta. Space-Saving gets Zipf and mostly distinct streams where every tracked item satisfies its bounds and no item above N over k is missing. It is 24 tests in the wiki suite, run on Node 22 and 24 with no install step.",
+      "keypoints": [
+        "Property tests against guarantees",
+        "Seeded mulberry32 streams",
+        "SMHasher value for the hash",
+        "HLL raw and linear regimes; Count-Min and Space-Saving on Zipf",
+        "24 tests, Node 22 and 24, no dependencies"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "At 33 events a second this is trivial. Why not just count exactly?",
+      "script": "You're right that exact counting is trivial at this rate, and that is the only reason I can run the comparison at all. The sketches earn their place somewhere else. A distinct set grows with every new user, while HyperLogLog stays at 4 KB for any cardinality. Sketches also merge: HyperLogLogs from many shards or hourly buckets combine with a register wise max, so you get distinct counts over any union without raw data. And per key per window state, like distinct editors per page per minute, multiplies exact cost quickly. What this project adds is the measured error on real traffic, so the decision to accept 1.6% is made with evidence.",
+      "keypoints": [
+        "Concede exact is cheap here",
+        "That is what enables the comparison",
+        "Sketch memory is fixed regardless of cardinality",
+        "Mergeability across shards and windows",
+        "Measured error informs the trade"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Three short runs and a sketch that never collided. What have you actually shown?",
+      "script": "Two different things, and I keep them apart. The Space-Saving and Count-Min guarantees are deterministic, so zero violations over every check is a real implementation test; one violation would prove a bug. What I have not shown is statistical calibration from the live data. One sketch over time gives correlated points, three runs are three draws, Count-Min never collided, and HyperLogLog stayed in linear counting. I say all of that next to the numbers. The calibration evidence is the seeded test suite, at 100,000 keys and on 200,000 event Zipf streams. The next live experiment is a hundred seeded HyperLogLogs on one stream to measure coverage directly.",
+      "keypoints": [
+        "Deterministic checks are real bug tests",
+        "No live statistical calibration claimed",
+        "Lists the gaps: correlated points, no collisions, linear range only",
+        "Calibration lives in the seeded suite",
+        "Next: seeded replicas for coverage"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "wes-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is the Wikipedia Edit Stream project, in two sentences?",
+      "easy": "A live web page that reads every change to Wikipedia and its sister sites and counts it twice: exactly, and with three compact estimators called sketches. It plots how far each estimate drifts from the truth, so the textbook error promises get checked on real traffic.",
+      "deep": "The browser subscribes to Wikimedia's recentchange server sent events stream, which carried 26 to 36 events a second across about 100 wikis in Tanay's runs, with no server of his in between. Three questions are answered twice: distinct editors (HyperLogLog, p = 12, against a Set of 53 bit hashes), events per wiki (Count-Min, 4 by 1,024, against an exact Map), and the most edited pages (Space-Saving, k = 200, against an exact Map). The sketch code is one pure module, wiki/sketch.js, imported unchanged by the page, by the node script that wrote the run logs, and by the node:test suite. Each card shows live error against the stated bound, and the deterministic guarantees are audited once a second with every violation counted on the page.",
+      "say": "I built a page that reads every Wikipedia edit live and counts it two ways, exactly and with sketches, then plots the gap. I wanted to watch the error bounds hold on real traffic instead of taking them on faith.",
+      "evidence": [
+        "portfolio: In my runs it carried 26 to 36 events a second across about 100 wikis, roughly a quarter of them from bots.",
+        "repo:wikipedia-edit-stream/wiki/app.js: const SS_K = 200, CMS_W = 1024, CMS_D = 4, HLL_P = 12;"
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "streaming",
+        "sketches"
+      ]
+    },
+    {
+      "id": "wes-02",
+      "type": "concept",
+      "level": 1,
+      "q": "What problem does the project address, and why does it matter?",
+      "easy": "A sketch is a fixed size summary of a stream that answers questions like how many distinct users or which items are most common, using kilobytes instead of memory that grows with the data. Their error bounds are usually taught and then trusted; this project measures them against the exact answer on live data.",
+      "deep": "Plain version: big systems count with shortcuts, and nobody watches whether the shortcut stays within its promise. Technical version: HyperLogLog promises relative standard error about 1.04/sqrt(m) for distinct counts; Count-Min promises f(x) <= f_hat(x) always and f_hat(x) <= f(x) + epsilon N with probability at least 1 - delta; Space-Saving promises count - error <= f(x) <= count for every tracked item and that every item above N/k is tracked. Each of those statements depends on assumptions (uniform hashing, pairwise independent rows, correct implementation) that a real deployment can silently break. Running each sketch beside an exact shadow counter on the same events turns the promise into a measured quantity, and turns the deterministic guarantees into assertions that a single bug would violate. The exact side is only affordable because the stream is small, which is also the main limit on what the live runs can show.",
+      "evidence": [
+        "portfolio: I wanted to watch those promises hold on real traffic instead of taking them on faith"
+      ],
+      "sources": [],
+      "tags": [
+        "problem",
+        "motivation"
+      ]
+    },
+    {
+      "id": "wes-03",
+      "type": "define",
+      "level": 1,
+      "q": "What is the Wikimedia recentchange stream, and which fields does the page use?",
+      "easy": "A public feed, published by the Wikimedia Foundation, with one JSON message for every change on every Wikimedia wiki: edits, new pages, category changes, and log actions. The page reads it directly from stream.wikimedia.org.",
+      "deep": "Transport is server sent events at stream.wikimedia.org/v2/stream/recentchange. Fields used: meta.id (unique event id, for dedupe), meta.dt (event time, for binning), meta.domain (to drop canary events), meta.uri (the link), wiki and server_name (the wiki key and its label), type (edit, new, categorize, log), bot (the wiki's own bot flag), user (hashed, never kept), title and namespace (namespaces 2 and 3 hidden), and length.old and length.new (byte change). Wikimedia injects synthetic canary events, marked meta.domain = canary, so operators can tell a broken stream from an empty one; its documentation tells consumers to discard them, and isCanary() does that before anything is counted. Messages that fail JSON.parse are counted as bad, and the logged runs show 0 canary, 0 duplicates and 0 bad JSON. Scope buttons (all projects, Wikipedia, Wikidata, Commons, English Wikipedia) filter events and reset every counter and sketch on change.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: messages 9909 events counted 9909 canary 0 duplicates 0 bad json 0"
+      ],
+      "sources": [
+        "https://wikitech.wikimedia.org/wiki/Event_Platform/EventStreams_HTTP_Service"
+      ],
+      "tags": [
+        "data",
+        "eventstreams"
+      ]
+    },
+    {
+      "id": "wes-04",
+      "type": "number",
+      "level": 2,
+      "q": "What was the event mix by type, and why does it matter for the sketches?",
+      "easy": "In the 297 second run, more than half of the 9,909 events were category changes (5,463), then edits (3,777), log actions (431), and new pages (238). Only edits and new pages feed the Space-Saving page counter, so its stream was 4,015 events.",
+      "deep": "Run 3 kinds: categorize 5,463 (55.1%), edit 3,777 (38.1%), log 431 (4.3%), new 238 (2.4%), shares computed from the log. Distinct editor and per wiki counts see every event, but Space-Saving only sees type edit or new, and 3,777 + 238 = 4,015 matches its logged N exactly, which confirms the filter. This changes the threshold that matters: N/k = 4,015/200 = 20.07 rather than 9,909/200. The edit size histogram covers only edits with both lengths, and its two group totals (2,378 human, 1,399 bot) also sum to 3,777. A reader who assumes the stream is mostly article edits would misread every rate on the page, which is why the kinds chart exists.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: kinds {\"edit\":3777,\"categorize\":5463,\"log\":431,\"new\":238}",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: Space-Saving N 4015 k 200 N/k 20.07"
+      ],
+      "sources": [],
+      "tags": [
+        "data",
+        "results"
+      ]
+    },
+    {
+      "id": "wes-05",
+      "type": "number",
+      "level": 2,
+      "q": "What rate and delivery delay did the logged runs see, and what is wrong with the delay number?",
+      "easy": "The three node runs averaged 33.0, 35.8, and 33.3 events a second. Median delay from event time to arrival was 0.30, 0.34, and 1.07 seconds, but that figure includes the offset between Wikimedia's clock and the local one.",
+      "deep": "Run 1: 3,903 events over 118.2 s; run 2: 6,376 over 178.0 s; run 3: 9,909 over 297.4 s. The write up's range of 26 to 36 events a second covers browser sessions too; the logs alone span 33.0 to 35.8. Delay is arrival time on this computer minus meta.dt: p50 and p95 were 0.30 and 1.01 s (run 1), 0.34 and 0.57 s (run 2), 1.07 and 3.61 s (run 3), each over the last 2,000 events. The minimum was 0.27 s in all three runs, which looks like a fixed floor from clock offset plus pipeline latency, so the delay is a relative signal, not an absolute one. The page says the offset can be a second or more and can even make the delay negative. Run 3's higher p95 shows delivery slowed during that window, which is consistent with clumped arrivals.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run1.txt: lag p50 0.30 s p95 1.01 s (n=2000) min lag 0.27 s",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run2.txt: lag p50 0.34 s p95 0.57 s (n=2000) min lag 0.27 s",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: lag p50 1.07 s p95 3.61 s (n=2000) min lag 0.27 s",
+        "repo:wikipedia-edit-stream/README.md: | 2 | 178 s | 6,376 | 35.8 | 686.4 vs 695 (-1.2%) | 0 | 12 of 12 |"
+      ],
+      "sources": [],
+      "tags": [
+        "data",
+        "latency",
+        "results"
+      ]
+    },
+    {
+      "id": "wes-06",
+      "type": "concept",
+      "level": 2,
+      "q": "How does the page split bots from people, and what share of activity came from bots?",
+      "easy": "It uses the wiki's own bot flag on each event: accounts with the bot right count as bots, everyone else as people. In the three logged runs the bot share was 44.5%, 32.7%, and 27.0%, so it moves a lot from one few minute window to the next.",
+      "deep": "The code is one line, who = d.bot === true ? 'bot' : 'human', and that label is carried into every per group count: totals, per second stacked bins, kinds, edit sizes, and the river's dot colours. The flag is administrative, so automated edits from accounts without the bot right count as people, and the page says so; the split measures flagged bots, not automation. The write up says roughly a quarter of events came from bots, which matches run 3 (27.0%) but understates runs 1 and 2, so the honest summary is 27.0% to 44.5% across three short runs. Bot volume comes in batches (a bot sweeping categories or Wikidata items), which also explains why the share swings and why categorize events dominate some windows. A better split would add a heuristic for unflagged automation, such as edit rate per account, at the cost of keeping per account state.",
+      "say": "I use the wiki's own bot flag, so the split is flagged bots versus everyone else. Across my three logged runs it ranged from 27% to 44.5%. My write up says roughly a quarter, which matches the longest run but not the other two.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/app.js: who = d.bot === true ? 'bot' : 'human'",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run1.txt: events/s 33.03 bot share 44.5%",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run2.txt: events/s 35.82 bot share 32.7%",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: events/s 33.32 bot share 27.0%",
+        "repo:wikipedia-edit-stream/index.html: The bot flag is the wiki's own: accounts with the bot right. Automated edits from accounts without it count as people."
+      ],
+      "sources": [],
+      "tags": [
+        "data",
+        "bots",
+        "honesty"
+      ]
+    },
+    {
+      "id": "wes-07",
+      "type": "number",
+      "level": 3,
+      "q": "What did the edit size histogram show for bots versus people?",
+      "easy": "Bot edits were larger. In run 3, 22.6% of bot edits added 1,000 to 9,999 bytes, against 4.0% of human edits; the most common human edit added 10 to 99 bytes (35.6%).",
+      "deep": "Byte change is length.new minus length.old, for edits that carry both, binned into 11 signed order of magnitude bins whose labels are the edge nearest zero (+100 holds +100 to +999). Run 3 counts, from -10k to +10k: human 2, 11, 91, 226, 164, 81, 178, 846, 682, 94, 3 (2,378 edits); bot 0, 40, 26, 162, 135, 18, 122, 208, 372, 316, 0 (1,399 edits). Shares are computed within each group, so each colour sums to 100%, which keeps the bot and human shapes comparable despite unequal counts. Removals made up 20.8% of human edits and 25.9% of bot edits by the same bins. These shares are Tanay's arithmetic on one 297 second log, so they describe that window, not Wikipedia in general.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: edit size human 2,11,91,226,164,81,178,846,682,94,3 bot 0,40,26,162,135,18,122,208,372,316,0"
+      ],
+      "sources": [],
+      "tags": [
+        "data",
+        "bots",
+        "results"
+      ]
+    },
+    {
+      "id": "wes-08",
+      "type": "define",
+      "level": 1,
+      "q": "What are server sent events, and how do they differ from WebSockets?",
+      "easy": "Server sent events are a one way stream from server to browser over plain HTTP. The browser's EventSource object parses the stream, delivers each message, and reconnects on its own if the connection drops.",
+      "deep": "The response has Content-Type text/event-stream and carries lines of field: value. data appends to the message (several data lines form one multi line message), event sets the type (default message), id sets the last event id, and retry sets the reconnection delay in milliseconds; lines starting with a colon are comments, often used as keep alive pings, and a blank line dispatches the event. The browser stores the most recent id and sends it as the Last-Event-ID request header when it reconnects. readyState is CONNECTING (0), OPEN (1), or CLOSED (2). A network error or a normal end of the body triggers an automatic reconnect; a non 200 status or a wrong Content-Type fails the connection, sets CLOSED, and the browser never retries, which is why the page has its own fallback. Compared with WebSockets: one direction only, text only, but plain HTTP with built in resume, which is all a read only feed needs.",
+      "evidence": [],
+      "sources": [
+        "https://html.spec.whatwg.org/multipage/server-sent-events.html"
+      ],
+      "tags": [
+        "server sent events",
+        "protocols"
+      ]
+    },
+    {
+      "id": "wes-09",
+      "type": "concept",
+      "level": 2,
+      "q": "What does Last-Event-ID carry on this stream, and how does it relate to Kafka offsets?",
+      "easy": "Each message id names where it sits in the Kafka topics behind the stream. On reconnect the browser sends the last id back, and the server resumes from that position. Wikimedia expresses that position as a timestamp rather than a raw offset.",
+      "deep": "EventStreams is a proxy over Kafka. Its SSE id is a JSON array of objects naming a topic, a partition, and either an offset or a timestamp, covering every topic and partition in the stream. A Kafka offset is a per partition sequence number, but offsets are unique only within one cluster, and Wikimedia runs active/active across datacenters backed by different clusters, so the service always emits timestamps in ids. The page's method notes say the same: as observed, the id is a millisecond timestamp for the active datacenter's topic. Resuming by timestamp is less precise than by offset, because several events can share a millisecond and the server may replay some of them, which is one reason the page also dedupes on meta.id. The portfolio write up says the id carries the stream's Kafka offsets; the accurate phrasing is Kafka topic and partition positions, expressed as timestamps.",
+      "say": "The id is a JSON list of Kafka topic and partition positions. Wikimedia runs several Kafka clusters, and offsets only mean something inside one cluster, so it uses timestamps. My write up says offsets, and if I rewrote it I'd say positions expressed as timestamps.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/index.html: Every message carries an SSE id: a JSON list of Kafka topic and partition positions (in the stream as observed, a millisecond timestamp for the active datacenter's topic).",
+        "portfolio: the browser reconnects with Last-Event-ID, which carries the stream's Kafka offsets"
+      ],
+      "sources": [
+        "https://wikitech.wikimedia.org/wiki/Event_Platform/EventStreams_HTTP_Service"
+      ],
+      "tags": [
+        "last event id",
+        "kafka",
+        "resume"
+      ]
+    },
+    {
+      "id": "wes-10",
+      "type": "how",
+      "level": 2,
+      "q": "Walk through the reconnect logic in wiki/app.js.",
+      "easy": "The browser reconnects by itself after a dropped connection and sends the last id. If the browser gives up, the page waits with exponential backoff (1, 2, 4 seconds and so on, capped at 60) and reconnects with since set 5 seconds before the newest event time it has seen.",
+      "deep": "Wikimedia's connection termination layer closes every connection after 15 minutes, so reconnecting is the normal path, not an error path. connect(since) opens new EventSource(STREAM + '?since=...') or plain STREAM; onopen counts the connection and resets retry to 0. onerror increments a reconnect counter; if readyState is CLOSED (a failure the browser will not retry), it closes the object, waits min(60, 2^retry) seconds, and reconnects with since = new Date(tr.maxDt - 5000).toISOString(), where tr.maxDt is the newest meta.dt seen. Otherwise it only marks the feed as connecting and lets EventSource retry with Last-Event-ID. The 5 second rewind deliberately replays a few events, accepting duplicates to avoid gaps; since accepts anything Date.parse reads, and Wikimedia keeps 7 to 31 days of history. The design is gap free first, duplicate free second, with dedupe absorbing the overlap.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/app.js: const wait = Math.min(60, 2 ** retry++) * 1000;",
+        "repo:wikipedia-edit-stream/wiki/app.js: connect(isNum(tr.maxDt) ? new Date(tr.maxDt - 5000).toISOString() : '')",
+        "repo:wikipedia-edit-stream/index.html: Wikimedia closes every connection after 15 minutes."
+      ],
+      "sources": [
+        "https://wikitech.wikimedia.org/wiki/Event_Platform/EventStreams_HTTP_Service",
+        "https://html.spec.whatwg.org/multipage/server-sent-events.html"
+      ],
+      "tags": [
+        "resume",
+        "backoff",
+        "code"
+      ]
+    },
+    {
+      "id": "wes-11",
+      "type": "how",
+      "level": 1,
+      "q": "How do you avoid double counting after a reconnect?",
+      "easy": "Every event id passes through a memory of the 5,000 most recent ids, and repeats are dropped and counted. The memory is a fixed ring plus a hash set, so each check costs constant time and memory stays bounded.",
+      "deep": "RecentIds(cap) keeps ring, an array of cap slots, an index i, and set, a Set. add(id) returns false if set has the id; otherwise it evicts the id in ring[i] from the set, stores the new id, advances i modulo cap, and returns true, so lookup and insert are O(1) and memory is O(cap). The delivery contract this implements is at least once delivery with an idempotent consumer: the transport may replay, and the consumer makes replays harmless by keying on meta.id. The window is count based, so at the logged 33.3 events a second 5,000 ids cover about 150 seconds; a replay older than that would be counted twice, which is fine for a 5 second rewind but would not survive a long outage at higher rates. All three logged runs show 0 duplicates, and the resume path itself was seen once in the browser and never in a logged run. The suite tests that repeats are dropped and that an id older than the capacity is forgotten.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/app.js: const recent = new RecentIds(5000);",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: messages 9909 events counted 9909 canary 0 duplicates 0 bad json 0",
+        "portfolio: The resume path is lightly tested."
+      ],
+      "sources": [],
+      "tags": [
+        "dedupe",
+        "idempotency",
+        "delivery semantics"
+      ]
+    },
+    {
+      "id": "wes-12",
+      "type": "define",
+      "level": 2,
+      "q": "How does MurmurHash3 x86_32 work, step by step?",
+      "easy": "It reads the key four bytes at a time, scrambles each block with multiplies and rotations, folds it into a running hash, then runs a finalizer that spreads every input bit across all 32 output bits. It is fast and well mixed, but not cryptographic.",
+      "deep": "Austin Appleby's MurmurHash3 (finished in 2011) processes 4 byte little endian blocks: k = k * c1, k = rotl(k, 15), k = k * c2 with c1 = 0xcc9e2d51 and c2 = 0x1b873593; then h = h xor k, h = rotl(h, 13), h = h * 5 + 0xe6546b64. The 1 to 3 tail bytes get the same k mixing without the h rotation. Then h = h xor len and the fmix32 finalizer: xor shift 16, multiply by 0x85ebca6b, xor shift 13, multiply by 0xc2b2ae35, xor shift 16. The finalizer gives avalanche: flipping one input bit flips each output bit with probability near one half, which is what every sketch's uniform hashing assumption needs. In JavaScript the multiplies use Math.imul, since ordinary multiplication of two 32 bit values exceeds 2^53 and loses low bits, and the result is read with >>> 0 to make it unsigned. Strings are hashed as their UTF-8 bytes through TextEncoder, and a test checks that a string with non ASCII characters hashes the same as its encoded bytes.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/MurmurHash"
+      ],
+      "tags": [
+        "hashing",
+        "murmurhash3"
+      ]
+    },
+    {
+      "id": "wes-13",
+      "type": "how",
+      "level": 2,
+      "q": "How do you know the JavaScript MurmurHash3 port is correct?",
+      "easy": "It is checked against published test vectors and against SMHasher's verification value, a single number that depends on hashing 256 different keys with 256 different seeds. One wrong bit anywhere changes it.",
+      "deep": "Vectors in the suite: empty string with seed 0 gives 0, with seed 1 gives 0x514E28B7, 'hello' gives 0x248BFA47, and 'The quick brown fox jumps over the lazy dog' gives 0x2E4FF723. SMHasher's VerificationTest builds keys {}, {0}, {0, 1}, up to {0, ..., 254}, hashes the key of length i with seed 256 - i, writes the 256 results as little endian 32 bit words into a 1,024 byte buffer, and hashes that buffer with seed 0; the expected value for MurmurHash3_x86_32 is 0xB0F57EE3. Because it covers every tail length (0 to 3 bytes) and many seeds, it catches the classic port bugs: signed shifts, missing imul, wrong tail fallthrough, and wrong byte order. A third test checks outputs are integers in 0 to 0xFFFFFFFF over 1,000 random keys. Testing against a published reference value is stronger than testing a port against itself, because it removes the risk of a consistent bug.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/tests/wiki.test.mjs: assert.equal(murmur3_32(out, 0), 0xB0F57EE3);"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/MurmurHash"
+      ],
+      "tags": [
+        "hashing",
+        "testing"
+      ]
+    },
+    {
+      "id": "wes-14",
+      "type": "formula",
+      "level": 2,
+      "q": "How does the exact editor set avoid storing names, and how likely is a false merge?",
+      "easy": "It stores a 53 bit number built from two seeded MurmurHash3 values instead of the name. Two different editors would have to collide on all 53 bits, which for 100,000 editors happens with probability about 6 in ten million.",
+      "deep": "hash53(key) = (murmur3_32(b, 0x5bd1e995) >>> 11) * 2^32 + murmur3_32(b, 0x27d4eb2f): 21 high bits from one seed and 32 low bits from another, which fits exactly in JavaScript's 53 bit safe integer range so it can live in a Set of numbers. The birthday bound gives P(any collision) about n(n - 1)/2 / 2^53, roughly n^2 / 2^54; at n = 100,000 that is 10^10 / 1.8 x 10^16, about 5.6 x 10^-7, which the page rounds to 6 x 10^-7. So the reference count is exact in practice while the name string is dropped after hashing. Seeds are known constants in public code, so an adversary could craft names that collide; Aumasson and Bernstein showed seeded MurmurHash is open to hash flooding, and SipHash is the usual fix. For a read only dashboard of a public feed that risk is accepted; for public counters someone can feed, a keyed hash would be needed.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/sketch.js: return (murmur3_32(b, 0x5bd1e995) >>> 11) * 4294967296 + murmur3_32(b, 0x27d4eb2f);",
+        "repo:wikipedia-edit-stream/index.html: The chance of any collision among 100,000 editors is about n&sup2; / 2^54 &asymp; 6 &times; 10^&minus;7, so it is exact in practice."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/MurmurHash"
+      ],
+      "tags": [
+        "hashing",
+        "birthday bound",
+        "privacy"
+      ]
+    },
+    {
+      "id": "wes-15",
+      "type": "concept",
+      "level": 1,
+      "q": "How does HyperLogLog estimate a distinct count from 4 KB of state?",
+      "easy": "Hash every editor name to random looking bits. A hash that starts with many zeros is rare, so the longest run of leading zeros seen hints at how many distinct names went by. HyperLogLog splits names into 4,096 buckets, tracks the longest run in each, and combines the buckets to cut the noise.",
+      "deep": "Each key is hashed to 32 bits with MurmurHash3. The top p = 12 bits choose one of m = 4,096 registers; the other 20 bits get a rank, the number of leading zeros plus one, capped at 21, and the register keeps the maximum rank it has seen. Under a uniform hash a rank of at least r has probability 2^-(r-1), so a register that has seen about n/m distinct keys holds roughly log2(n/m) + 1. Repeated keys hash identically and cannot raise any register, which is why the sketch counts distinct items rather than events. Combining 4,096 registers with a harmonic mean turns one very noisy observable into an estimate with relative error about 1.04/sqrt(m). Here each register is one byte in a Uint8Array, so the state is exactly 4,096 bytes; 5 bits would suffice for ranks up to 21, and production systems pack registers into 6 bits.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/app.js: const SS_K = 200, CMS_W = 1024, CMS_D = 4, HLL_P = 12;"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/HyperLogLog"
+      ],
+      "tags": [
+        "hyperloglog",
+        "theory"
+      ]
+    },
+    {
+      "id": "wes-16",
+      "type": "formula",
+      "level": 2,
+      "q": "Write down the HyperLogLog estimator as implemented, including alpha_m and both range corrections.",
+      "easy": "The raw estimate is alpha times m squared divided by the sum of 2 to the minus register value. When that is small and some registers are still empty, the code switches to counting empty registers (linear counting). Near the 32 bit hash limit it applies a log correction.",
+      "deep": "Raw: E = alpha_m m^2 / sum_j 2^(-M[j]). alpha_m removes the multiplicative bias of the normalized harmonic mean: the paper gives 0.673 for m = 16, 0.697 for m = 32, 0.709 for m = 64, and 0.7213 / (1 + 1.079/m) for m >= 128, which is 0.72111 at m = 4,096. The code applies the m >= 128 formula for every p from 4 to 16, so at p = 4 it would use 0.6757 instead of 0.673, a 0.4% bias that does not affect p = 12. Small range: if E <= 2.5m (10,240 here) and V > 0 registers are still zero, use E = m ln(m/V). Large range: if E > 2^32/30, use E = -2^32 ln(1 - E/2^32), correcting for collisions inside a 32 bit hash space. detail() returns the estimate, the raw value, V, and the regime name, so the page and the run logs say which branch produced each number. HLL++ (Heule, Nunkesser and Hall, 2013) removes the large range branch with a 64 bit hash and replaces the hard switch with empirical bias correction plus sparse registers.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/sketch.js: this.alpha = 0.7213 / (1 + 1.079 / this.m);",
+        "repo:wikipedia-edit-stream/wiki/sketch.js: if (raw <= 2.5 * m && V > 0) { E = m * Math.log(m / V); regime = 'linear'; }"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/HyperLogLog",
+        "https://algo.inria.fr/flajolet/Publications/FlFuGaMe07.pdf"
+      ],
+      "tags": [
+        "hyperloglog",
+        "formula"
+      ]
+    },
+    {
+      "id": "wes-17",
+      "type": "code",
+      "level": 2,
+      "q": "Walk through the code that updates a HyperLogLog register. What edge case does it handle?",
+      "easy": "Take the top 12 bits of the hash as the register number, shift them away, and count leading zeros in what is left with a built in instruction. If all 20 remaining bits are zero, the rank is capped at 21.",
+      "deep": "```js\nconst p = this.p, j = x >>> (32 - p), w = (x << p) >>> 0;\nconst r = w === 0 ? 32 - p + 1 : Math.clz32(w) + 1;\nif (r > this.M[j]) { this.M[j] = r; return true; }\n```\nThe unsigned shift >>> keeps j in 0 to 4,095. x << p moves the 20 remaining bits to the top so Math.clz32 counts their leading zeros, and >>> 0 reads the result as unsigned. If w is 0, clz32 would return 32 and count the 12 shifted in zeros as signal, so the rank is capped at 32 - p + 1 = 21. The suite pins the edges with crafted hashes: 0xFFF00000 lands in register 4,095 with rank 21, 0x00080000 in register 0 with rank 1, and 0x00100001 in register 1 with rank 20. Another test adds 500 keys, adds them again five times, and requires an unchanged estimate, which is the idempotence property distinct counting needs.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/sketch.js: const r = w === 0 ? 32 - p + 1 : Math.clz32(w) + 1;"
+      ],
+      "sources": [],
+      "tags": [
+        "hyperloglog",
+        "code"
+      ]
+    },
+    {
+      "id": "wes-18",
+      "type": "why",
+      "level": 3,
+      "q": "Why a harmonic mean, and where does the 1.04 come from?",
+      "easy": "One register is very noisy, and a single unlucky register with a huge run of zeros would wreck an ordinary average of 2^M. The harmonic mean is dominated by the small values, so it shrugs off those outliers.",
+      "deep": "LogLog (Durand and Flajolet, 2003) combined registers with what amounts to a geometric mean, 2 raised to the arithmetic mean of M[j]. HyperLogLog replaces it with the harmonic mean of 2^M[j], so each register contributes 2^-M[j] and a register with a large M contributes almost nothing. The paper shows the relative standard error is beta_m / sqrt(m), with beta_m tending to sqrt(3 ln 2 - 1), about 1.03896, hence 1.04/sqrt(m). The abstract states that LogLog's accuracy can be matched with only 64% of the memory. The estimate is still biased at small cardinalities because many registers are 0 and the harmonic mean saturates near alpha_m m, which is why the small range switches to linear counting.",
+      "evidence": [],
+      "sources": [
+        "https://algo.inria.fr/flajolet/Publications/FlFuGaMe07.pdf",
+        "https://en.wikipedia.org/wiki/HyperLogLog"
+      ],
+      "tags": [
+        "hyperloglog",
+        "theory"
+      ]
+    },
+    {
+      "id": "wes-19",
+      "type": "formula",
+      "level": 2,
+      "q": "Derive linear counting, and state its error in the range the live runs used.",
+      "easy": "If n distinct keys land at random in m buckets, the share of buckets still empty is about e^(-n/m). Counting empty buckets and inverting gives n = m ln(m/V). Its error at small counts is about 1/sqrt(2m), close to 1.1% for 4,096 registers.",
+      "deep": "Each register stays empty after n distinct keys with probability (1 - 1/m)^n, about e^(-n/m), so E[V] is about m e^(-n/m), and solving for n gives n_hat = m ln(m/V) (Whang, Vander-Zanden and Taylor, 1990). With load t = n/m, its standard error is sqrt(m (e^t - t - 1)) / n; for small t, e^t - t - 1 is about t^2/2, so the error tends to 1/sqrt(2m), 1.105% at m = 4,096. At the logged cardinalities that formula gives 1.13% at 535, 1.14% at 695, and 1.15% at 983 (Tanay's arithmetic). The switch at E <= 2.5m exists because HyperLogLog's raw estimator is biased upward when most registers are 0, and linear counting is accurate until the buckets fill. The cost is a discontinuity at the switch point, which HLL++ smooths with empirical bias tables.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/index.html: Below 2.5 m = 10,240 the linear counting branch is in use, and its error there is a little smaller than the raw bound (close to 1 / &radic;(2m) &asymp; 1.1% for small counts)."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/HyperLogLog"
+      ],
+      "tags": [
+        "hyperloglog",
+        "linear counting",
+        "formula"
+      ]
+    },
+    {
+      "id": "wes-20",
+      "type": "why",
+      "level": 1,
+      "q": "Why does m = 4,096 give about 1.6% error, and what memory would halve it?",
+      "easy": "Error shrinks with the square root of the number of registers: 1.04 divided by the square root of 4,096 (which is 64) is 1.625%. Halving the error needs four times the registers.",
+      "deep": "With m = 2^12, sqrt(m) = 64 and 1.04/64 = 1.625%, which is the one sigma line on the chart; the band is drawn at two sigma, 3.25%. The memory curve: p = 10 (1 KB) gives 3.25%, p = 12 (4 KB) 1.625%, p = 14 (16 KB) 0.81%, p = 16 (64 KB) 0.41%. p = 12 was picked as a round 4 KB with error comfortably under 2%, matching the write up's promise of about 1.6% from 4 KB. The figure applies to the raw estimator; below 10,240 distinct editors the page uses linear counting, whose error is a little smaller. The chart follows one sketch over time, so neighbouring points are strongly correlated and do not count as independent coverage trials.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: HLL estimate 986.9 exact distinct users 983 relative error 0.396% regime linear SE 1.625%"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/HyperLogLog"
+      ],
+      "tags": [
+        "hyperloglog",
+        "error bounds"
+      ]
+    },
+    {
+      "id": "wes-21",
+      "type": "number",
+      "level": 1,
+      "q": "What did HyperLogLog measure on real data, and how should that number be read?",
+      "easy": "In a 297 second node run on October 8, 2026 (9,909 events), HyperLogLog estimated 986.9 distinct editors against an exact 983, an error of +0.4%. Two shorter runs gave -0.3% and -1.2%. All three sit inside the 1.6% one sigma band.",
+      "deep": "Run 3: 297 s, 9,909 events at 33.3 a second, estimate 986.9 against exact 983 (+0.396%), regime linear. Run 1: 533.3 against 535 (-0.327%). Run 2: 686.4 against 695 (-1.232%). Measured against the linear counting error at those counts (about 1.13% to 1.15%), the three errors are 0.3, 1.1, and 0.3 standard errors, which is ordinary. Caveats that travel with the number: every run stayed below 10,240 distinct editors, so only the linear counting branch ran live; three runs are three draws, not a coverage estimate; and the exact side is a Set of 53 bit hashes, exact in practice. The raw regime is covered offline, where the suite requires 100,000 distinct keys to land within 3 standard errors and asserts the regime is raw.",
+      "say": "On a five minute run with about ten thousand events, HyperLogLog said 986.9 editors and the exact count was 983. That is 0.4% off, inside the 1.6% band. The caveat is that a short session only exercises the small range branch, so the main estimator is tested offline, not live.",
+      "evidence": [
+        "portfolio: HyperLogLog estimated 986.9 distinct editors against an exact 983, an error of +0.4% against a one sigma bound of 1.6%. Two shorter runs gave -0.3% and -1.2%.",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run1.txt: HLL estimate 533.3 exact distinct users 535 relative error -0.327% regime linear SE 1.625%",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run2.txt: HLL estimate 686.4 exact distinct users 695 relative error -1.232% regime linear SE 1.625%",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: HLL estimate 986.9 exact distinct users 983 relative error 0.396% regime linear SE 1.625%"
+      ],
+      "sources": [],
+      "tags": [
+        "hyperloglog",
+        "results"
+      ]
+    },
+    {
+      "id": "wes-22",
+      "type": "concept",
+      "level": 2,
+      "q": "How do HyperLogLogs merge, and what can they not do?",
+      "easy": "Two HyperLogLog sketches built with the same hash and size combine by taking the larger value in each register. The result is exactly the sketch of the combined stream, so distinct counts over many shards or time buckets need no raw data.",
+      "deep": "Union: M_union[j] = max(M_1[j], M_2[j]). Because each register is a max over the keys routed to it, max is associative, commutative and idempotent, so merging is order independent and double merging is harmless; this is why daily HyperLogLogs can be rolled into weekly distinct users. The page does not merge sketches, but scope changes rebuild from zero precisely because there is no way to subtract: HyperLogLog supports insertion only, not deletion. Intersections need inclusion and exclusion (|A and B| = |A| + |B| - |A or B|), and the absolute error of the union then swamps small overlaps. Sketches must share the hash and seed to merge; a sketch with larger p can be folded down to a smaller p by recomputing ranks over register groups, but a small sketch can never be grown back. HLL++ adds a sparse representation for small counts and 64 bit hashes, which is what BigQuery and Redis style implementations build on.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/HyperLogLog"
+      ],
+      "tags": [
+        "hyperloglog",
+        "mergeability"
+      ]
+    },
+    {
+      "id": "wes-23",
+      "type": "concept",
+      "level": 1,
+      "q": "Explain Count-Min: structure, update, query, and why it never undercounts.",
+      "easy": "A small grid of counters, here 4 rows by 1,024 columns. Each event adds one to one counter per row, chosen by a different hash per row. To read a count, take the smallest of that key's 4 counters. Other keys can only add to a counter, so the minimum can be too high but never too low.",
+      "deep": "Update: for each row i, C[i, h_i(x)] += w. Query: f_hat(x) = min over i of C[i, h_i(x)]. Weights are non negative and x adds to every one of its d counters, so each counter is at least f(x) and so is the minimum; the code throws on negative weights for exactly this reason, because the turnstile model with deletions breaks the min estimator. The overcount in a row is the mass of other keys that collide with x there. Cormode and Muthukrishnan described it in their 2005 paper; it can be read as a counting Bloom filter sized for approximation error rather than set size. The bound is additive in the total stream mass N, so it is tight for heavy keys and nearly useless for rare ones, which suits heavy hitter questions like which wikis are busiest.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Count%E2%80%93min_sketch"
+      ],
+      "tags": [
+        "count-min",
+        "theory"
+      ]
+    },
+    {
+      "id": "wes-24",
+      "type": "formula",
+      "level": 2,
+      "q": "Prove the Count-Min error bound and give the sizing rules.",
+      "easy": "Each row's overcount averages at most N divided by the width. A row rarely exceeds e times that average, and all four rows exceeding it at once is rarer still. That gives width e/epsilon and depth ln(1/delta).",
+      "deep": "Fix x and row i, and let X_i = C[i, h_i(x)] - f(x), the mass of other keys hashed to the same column. With pairwise independent hashing each other key y collides with probability 1/w, so E[X_i] <= N/w. Markov's inequality gives P(X_i > eN/w) <= E[X_i] / (eN/w) <= 1/e. Rows use independent hashes, so P(all d rows exceed eN/w) <= e^-d. Setting epsilon = e/w and delta = e^-d gives P(f_hat(x) - f(x) > epsilon N) <= delta; sizing runs the other way, w = ceil(e/epsilon), d = ceil(ln(1/delta)). Here w = 1,024 and d = 4 give epsilon = 0.00265 and delta = 0.0183, so in run 3 (N = 9,909) the bound epsilon N was 26.30 events. The guarantee is per query; across many keys you expect about a delta share of them over the bound, which is exactly what the Zipf test asserts.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: CMS N 9909 eps 0.00265 delta 0.0183 eps*N 26.30"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Count%E2%80%93min_sketch"
+      ],
+      "tags": [
+        "count-min",
+        "formula",
+        "proof"
+      ]
+    },
+    {
+      "id": "wes-25",
+      "type": "why",
+      "level": 3,
+      "q": "Why the standard update instead of conservative update, and which proof assumption does the implementation not meet?",
+      "easy": "Conservative update gives tighter counts, but the textbook bound is proved for the standard update, and the page exists to check that bound as stated. The proof also assumes pairwise independent hash functions, which seeded MurmurHash3 is not proven to be.",
+      "deep": "Conservative update (associated with Estan and Varghese, 2002) computes the current estimate e = min_i C[i, h_i(x)] and raises each of x's counters only to max(C, e + w), so collisions inflate less. It keeps the never undercount property and stays mergeable, but the sketch stops being linear, so the clean expectation argument behind epsilon N no longer applies as written. Because the goal was to compare observed error with the stated bound, the standard update keeps that comparison honest. Row hashes are MurmurHash3 with per row seeds, seed + (i + 1) times 0x9e3779b1 (the 32 bit golden ratio constant), starting from 0x9747b28c. The proof assumes a pairwise independent family such as ((a x + b) mod p) mod w; the code comment admits seeded Murmur is not provably one, which is one more reason to measure. Column choice is murmur % 1024, and since 2^32 is a multiple of 1,024 there is no modulo bias.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/sketch.js: this.seeds = Array.from({ length: depth }, (_, i) => (seed + Math.imul(i + 1, 0x9e3779b1)) >>> 0);",
+        "repo:wikipedia-edit-stream/index.html: the conservative update tightens estimates but falls outside that proof."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Count%E2%80%93min_sketch"
+      ],
+      "tags": [
+        "count-min",
+        "design"
+      ]
+    },
+    {
+      "id": "wes-26",
+      "type": "formula",
+      "level": 3,
+      "q": "How many Count-Min keys should be inflated at all, and why did the live runs see none?",
+      "easy": "A key is inflated only if, in every one of the 4 rows, some other key shares its column. With about 100 wikis in 1,024 columns that almost never happens: the expected share is about 0.007%, and the runs saw 0.",
+      "deep": "Under uniform hashing a key escapes collision in one row with probability (1 - 1/w)^(K - 1) for K distinct keys, so the probability of at least one collision in every row is (1 - (1 - 1/w)^(K - 1))^d; cmsCollisionShare implements exactly that. At K = 100, w = 1,024, d = 4: 1 - (1023/1024)^99 is about 0.092, and 0.092^4 is about 7.2 x 10^-5, the 0.007% logged in run 3 (0.004% for 87 wikis in run 1). Observed: 0 inflated, 0 over bound, 0 undercounts, maximum overestimate 0. So the Count-Min card was effectively exact, and its 12 of 12 within bound result tests almost nothing. To stress it you would key by page title (thousands of keys), shrink w to around 64, or replay a long session.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: distinct wikis 100 underestimates 0 over bound 0 inflated at all 0 max overestimate 0 expected inflated share 0.007% top12 within bound 12/12",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run1.txt: distinct wikis 87 underestimates 0 over bound 0 inflated at all 0 max overestimate 0 expected inflated share 0.004%"
+      ],
+      "sources": [],
+      "tags": [
+        "count-min",
+        "collisions",
+        "formula"
+      ]
+    },
+    {
+      "id": "wes-27",
+      "type": "compare",
+      "level": 2,
+      "q": "Compare Count-Min with Count Sketch and with an exact hash map.",
+      "easy": "Count-Min only overcounts and is best on skewed data; Count Sketch adds plus or minus one per row and takes a median, so its errors cancel and it is unbiased. An exact map has no error but grows with every key.",
+      "deep": "Count-Min: w by d non negative counters, min estimator, one sided error at most epsilon times the L1 mass N with probability 1 - delta, no deletions with the min estimator. Count Sketch (Charikar, Chen and Farach-Colton): each row also has a sign hash s_i(x) in {-1, +1}, update C[i, h_i(x)] += s_i(x) w, estimate the median over rows of s_i(x) C[i, h_i(x)]; the estimate is unbiased, its error scales with the L2 norm of the frequency vector, which is much smaller than L1 when the distribution is flat, and it handles deletions. Count-Min's min estimator works well on skewed data, where heavy keys dwarf the collision mass. Exact map: O(K) memory, zero error, not mergeable without shipping keys. At 100 wikis the exact map is tiny, which is why Count-Min here is a teaching instrument; it earns its place when keys number in the millions, such as per IP or per page counts.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Count%E2%80%93min_sketch"
+      ],
+      "tags": [
+        "count-min",
+        "count sketch",
+        "compare"
+      ]
+    },
+    {
+      "id": "wes-28",
+      "type": "how",
+      "level": 2,
+      "q": "What does the Count-Min card compute, and how much memory does the sketch really use?",
+      "easy": "Every second it compares the sketch's estimate with the exact count for every wiki and reports undercounts, overcounts past epsilon N, keys inflated at all, and the expected inflated share. The table is 4,096 counters stored as 64 bit floats, so 32 KB.",
+      "deep": "The card's painter iterates the exact Map S.wikis, calls cms.estimate(k) for each wiki, and counts under (e < f), over (e - f > epsilon N), inflated (e > f), and the maximum overestimate, then shows the top 12 wikis by exact count beside their estimates. cms.bound() is eps times N, with N incremented on every add. Storage is new Float64Array(width * depth), so 4 x 1,024 x 8 bytes = 32,768 bytes; a Uint32Array would halve that with no loss below 4 billion events. HyperLogLog, by contrast, is exactly 4,096 bytes. The write up's memory talk centres on HyperLogLog's 4 KB; Count-Min's 32 KB is still fixed regardless of key count, which is the property that matters.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/sketch.js: this.t = new Float64Array(width * depth);"
+      ],
+      "sources": [],
+      "tags": [
+        "count-min",
+        "implementation"
+      ]
+    },
+    {
+      "id": "wes-29",
+      "type": "concept",
+      "level": 1,
+      "q": "How does Space-Saving find the most edited pages with 200 counters, and what does it guarantee?",
+      "easy": "Keep 200 slots of (page, count, error). A page already tracked gets plus one. A new page evicts the slot with the smallest count and inherits that count as its possible error. Every row then has a guaranteed minimum and maximum, and any page with more than N/200 edits is always in the table.",
+      "deep": "Metwally, Agrawal and El Abbadi (2005). Hit: count += w. Miss with a free slot: count = w, error = 0. Miss when full: evict the minimum counter with count c_min and set count = c_min + w, error = c_min. Invariants: counts sum to N; for every tracked x, count - error <= f(x) <= count; c_min <= N/k. The paper's Theorem 1 is stronger than the N/k statement: any item with f(x) > c_min is tracked, and N/k is just an upper bound on c_min. These guarantees are deterministic, so the expected violation count is exactly zero and any nonzero value on the page would be a bug. Ranking is the weak part: near N/k most of a counter can be inherited error, so the order of the lower rows is unreliable.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/sketch.js: const c = { item, count: root.count + w, error: root.count };"
+      ],
+      "sources": [
+        "https://www.cs.ucsb.edu/sites/default/files/documents/2005-23.pdf"
+      ],
+      "tags": [
+        "space-saving",
+        "heavy hitters",
+        "theory"
+      ]
+    },
+    {
+      "id": "wes-30",
+      "type": "formula",
+      "level": 3,
+      "q": "Prove the Space-Saving guarantees.",
+      "easy": "Each event adds exactly one to exactly one counter, so the counters always sum to N, and the smallest of k counters cannot exceed N/k. A newcomer's error is the evicted minimum, and the minimum never shrinks, so a heavy item can never be the one evicted.",
+      "deep": "Lemma 1: every arrival increments exactly one counter, including on replacement, so the sum of counts equals N. Lemma 2: if all k counters are in use, c_min = (N - sum_i (count_i - c_min)) / k and every term in the sum is non negative, so c_min <= floor(N/k). Lemma 3: an item's error is the minimum at the moment it entered, and the minimum is non decreasing over time, so 0 <= error <= c_min and f(x) <= count <= f(x) + c_min, which gives count - error <= f(x). Theorem 1, by contradiction: if x with f(x) > c_min were untracked, it was evicted earlier while holding the minimum; its count then was at least its true count so far, and since the minimum only grows the evicted value was at most the current c_min, which contradicts f(x) > c_min once the remaining arrivals are counted. Theorem 3: with k >= 1/epsilon counters, every error is at most epsilon N, and the bound is tight when all ids are distinct. The suite checks Lemma 1, Lemma 2, Lemma 3 and the N/k form of Theorem 1 on Zipf and mostly distinct streams.",
+      "evidence": [],
+      "sources": [
+        "https://www.cs.ucsb.edu/sites/default/files/documents/2005-23.pdf"
+      ],
+      "tags": [
+        "space-saving",
+        "proof"
+      ]
+    },
+    {
+      "id": "wes-31",
+      "type": "how",
+      "level": 2,
+      "q": "How is Space-Saving implemented here, and what does each operation cost?",
+      "easy": "The 200 counters sit in a binary min heap, with a map from page to heap position. The smallest counter is always at the root, so eviction is instant, and each update costs about log2(200), roughly 8 steps.",
+      "deep": "SpaceSaving keeps heap, an array of {item, count, error}, and pos, a Map from item to heap index, updated inside swap(). A hit increments the counter and sifts it down, since a count only grows and can only move toward the leaves of a min heap. A miss on a full table overwrites the root with count = root.count + w and error = root.count, deletes the old item from pos, then sifts down. Both are O(log k) with O(1) lookup; top(n) sorts a copy in O(k log k) only when the card paints, with ties broken by smaller error first. The paper's Stream-Summary (a doubly linked list of buckets of equal count, each holding its items) gets O(1) unit increments, but at k = 200 a heap is 8 levels deep and much easier to test. Only events of type edit and new feed it, so its N (4,015 in run 3) is smaller than the 9,909 events counted.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: Space-Saving N 4015 k 200 N/k 20.07 tracked 200 checks 200 violations 0",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: kinds {\"edit\":3777,\"categorize\":5463,\"log\":431,\"new\":238}"
+      ],
+      "sources": [
+        "https://www.cs.ucsb.edu/sites/default/files/documents/2005-23.pdf"
+      ],
+      "tags": [
+        "space-saving",
+        "data structures",
+        "complexity"
+      ]
+    },
+    {
+      "id": "wes-32",
+      "type": "compare",
+      "level": 3,
+      "q": "Compare Space-Saving with Misra-Gries and with Count-Min plus a heap for top k.",
+      "easy": "Misra-Gries also keeps a fixed set of counters but decrements all of them when a new item arrives, so it undercounts; Space-Saving overwrites the smallest and overcounts. Count-Min with a heap answers the same question with hashing instead of explicit counters.",
+      "deep": "Misra-Gries with k - 1 counters: on a miss when full, decrement every counter and drop zeros; every item above n/k survives, and estimates are lower bounds within n/k of the truth. Space-Saving with k counters: on a miss, replace the minimum and inherit it as error; estimates are upper bounds with a per item error term, so each row gets both a lower and an upper bound, which is what the page draws. The two are known to be closely related (the counter values of one can be derived from the other), so the choice is mostly about interface: Space-Saving reports count and error per item and never decrements all counters, so updates touch one counter. Count-Min plus a heap of candidates handles weighted, mergeable, distributed streams better, but its top k list depends on probabilistic bounds and needs a heap anyway. For a single stream of page titles with an exact audit beside it, Space-Saving's deterministic guarantees make violations meaningful.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Misra%E2%80%93Gries_summary",
+        "https://www.cs.ucsb.edu/sites/default/files/documents/2005-23.pdf"
+      ],
+      "tags": [
+        "space-saving",
+        "misra-gries",
+        "compare"
+      ]
+    },
+    {
+      "id": "wes-33",
+      "type": "number",
+      "level": 1,
+      "q": "Space-Saving had 0 violations and Count-Min kept 12 of 12 wikis in bound. What do those numbers actually tell you?",
+      "easy": "Zero violations shows the code is correct, because both guarantees are deterministic. But the stream barely tested either sketch: in the longest run no page crossed the N/k threshold, and Count-Min had no collisions at all.",
+      "deep": "Run 3 Space-Saving: N = 4,015 edits and page creations, k = 200, N/k = 20.07, 200 tracked counters checked, 0 violations, 0 pages above N/k, 3,624 distinct pages. The guarantee that every heavy page is tracked was therefore vacuously true; only run 1 had pages above N/k (2, none missing). The top 15 list matched the exact top 15 in only 2 of 15 rows strictly, and 4 of 15 counting ties, where a row counts if its exact count is at least the 15th largest exact count (5). That is the known ranking weakness on a flat distribution where most of each count is inherited error. Count-Min: epsilon N = 26.30, 100 wikis, 0 underestimates, 0 keys inflated at all. Both sketches are implemented correctly, neither bound was stressed by this stream, and the stress tests live in the Zipf suites.",
+      "say": "Zero violations tells me the code is right, because those guarantees can never fail. It does not tell me much about the sketches, because the stream was too easy. No page crossed the threshold in the long run and Count-Min never had a collision, and I say that next to the numbers.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: Space-Saving N 4015 k 200 N/k 20.07 tracked 200 checks 200 violations 0 pages above N/k 0 missing 0 top15 overlap with exact (strict) 2/15 tie aware 4/15 c15 5 distinct pages 3624",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: CMS N 9909 eps 0.00265 delta 0.0183 eps*N 26.30 distinct wikis 100 underestimates 0 over bound 0 inflated at all 0 max overestimate 0 expected inflated share 0.007% top12 within bound 12/12",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run1.txt: Space-Saving N 1712 k 200 N/k 8.56 tracked 200 checks 200 violations 0 pages above N/k 2 missing 0",
+        "portfolio: Count-Min barely collides here. About 100 wikis in 1,024 columns rarely share a cell, so the bound is shown but hardly stressed."
+      ],
+      "sources": [],
+      "tags": [
+        "space-saving",
+        "count-min",
+        "results",
+        "honesty"
+      ]
+    },
+    {
+      "id": "wes-34",
+      "type": "how",
+      "level": 2,
+      "q": "What are the exact reference counters, and how often is each sketch audited against them?",
+      "easy": "Beside every sketch the page keeps the true answer: a set of hashed editor names, a map of counts per wiki, and a map of counts per page. HyperLogLog and Space-Saving are checked every second, and the Count-Min card recomputes its comparison each time it paints.",
+      "deep": "users is a Set of hash53 values; wikis is a Map from wiki id to count; pages is a Map keyed by wiki + '|' + title, or for User and User talk pages by wiki, namespace and a hash of the title. A 1 second interval runs sampleHll(), which pushes the estimate, exact size, relative error and regime into a 3,600 point ring, and checkSpaceSaving(), which checks count - error <= f <= count for all 200 counters, counts pages above N/k and any missing from the table, and finds the 15th largest exact count in one pass with a small insertion buffer. closeSeconds runs every 250 ms. The audit is O(k + P) for P distinct pages, which is affordable only at this rate. To bound memory, the page resets everything if the exact page map reaches 500,000 keys or the editor set 2,000,000.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/app.js: const CAP_PAGES = 500000, CAP_USERS = 2000000;",
+        "repo:wikipedia-edit-stream/wiki/app.js: setInterval(() => { sampleHll(); checkSpaceSaving(); dirty(); }, 1000);"
+      ],
+      "sources": [],
+      "tags": [
+        "ground truth",
+        "audit",
+        "implementation"
+      ]
+    },
+    {
+      "id": "wes-35",
+      "type": "why",
+      "level": 1,
+      "q": "Why bin throughput by event time instead of arrival time?",
+      "easy": "Wikimedia delivers events in clumps, so counting by arrival second makes a delivery hiccup look like a burst of editing. Counting by each edit's own timestamp removes that. In two logged runs, arrival bins produced 3 and 2 false bursts; event time bins produced none.",
+      "deep": "Every event carries meta.dt, when the change was recorded. The page bins by floor(meta.dt / 1000) and closes a second only once the newest event time seen is 2 seconds past it, so the decision never depends on the viewer's clock. A delivery stall followed by a flush puts many events into one arrival second, but in event time those events fall back into the seconds they happened in. The same burst rule runs on arrival bins purely to show what that choice would have flagged. Run 1: 3 arrival bursts against 0; run 3: 2 against 0; run 2: 0 and 0. The cost is 2 seconds of added latency and a late data policy; arrival time is instant but measures the delivery system instead of editors.",
+      "say": "Delivery comes in clumps, and when I binned by arrival time the detector called those clumps bursts, three in one run and two in another. Binning by each edit's own timestamp with a two second settle gave zero. The cost is two seconds of latency, which is fine for a rate chart.",
+      "evidence": [
+        "portfolio: Binning throughput by arrival flagged delivery clumps as bursts: 3 and 2 false bursts in two of the runs, against none when the same rule ran on event time bins.",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run1.txt: per second by arrival: secs 117 mean 33.04 sd 10.79 min 12 max 66 bursts 3",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run1.txt: per second by meta.dt: secs 117 mean 32.97 sd 12.00 min 8 max 67 bursts 0",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: per second by arrival: secs 296 mean 33.21 sd 12.47 min 7 max 82 bursts 2",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: per second by meta.dt: secs 296 mean 33.43 sd 13.63 min 8 max 87 bursts 0"
+      ],
+      "sources": [],
+      "tags": [
+        "event time",
+        "watermark",
+        "design"
+      ]
+    },
+    {
+      "id": "wes-36",
+      "type": "define",
+      "level": 2,
+      "q": "Define event time, processing time, watermark, and late data, and say how this page implements each.",
+      "easy": "Event time is when something happened; processing time is when your code sees it. A watermark is the point after which you assume a time window is complete. Late data is anything that arrives after its window was closed.",
+      "deep": "Event time here is meta.dt; processing time is Date.now() on arrival, kept only for the delay tile and the arrival comparison. The watermark is newest meta.dt seen minus 2,000 ms (SETTLE_MS): closeSeconds() closes second s once (s + 1) x 1000 + 2000 <= tr.maxDt, feeds its total to the rate EWMA and the burst detector, and advances lastClosed. Late events (dt inside an already closed second) still land in the chart's bins, are not re judged by the detector, and increment S.late, which the footer reports; in Flink or Beam terms that is allowed lateness of zero for the detector plus a side output counter. A heuristic watermark driven by the newest event can be pushed forward by one event with a skewed clock, which is a known weakness of this simple rule. A subtle point from the logs: event time bins were not smoother overall (run 3 sd 13.63 against 12.47 for arrival), they just lacked the stall then flush spikes that the burst rule flags.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/app.js: const SETTLE_MS = 2000;",
+        "repo:wikipedia-edit-stream/runs/2026-10-08-wiki-run3.txt: per second by meta.dt: secs 296 mean 33.43 sd 13.63 min 8 max 87 bursts 0"
+      ],
+      "sources": [],
+      "tags": [
+        "event time",
+        "watermark",
+        "stream processing"
+      ]
+    },
+    {
+      "id": "wes-37",
+      "type": "formula",
+      "level": 2,
+      "q": "Derive the continuous time EWMA used for the burst baseline and the rate tiles.",
+      "easy": "An exponentially weighted moving average forgets old data at a fixed rate. Here the forgetting depends on elapsed time, not on the number of samples: a sample's weight halves every half life, 60 seconds for the burst baseline.",
+      "deep": "With half life t_half, tau = t_half / ln 2, and for a gap dt since the last update the new sample's weight is alpha = 1 - e^(-dt/tau). Mean: mu <- mu + alpha (x - mu). Variance: with d = x - mu_old, var <- (1 - alpha)(var + alpha d^2), the standard incremental form for an exponentially weighted variance, so sigma = sqrt(var). The first sample sets mu = x and var = 0. Because alpha depends on dt, irregular spacing is handled correctly: two samples 1 ms apart barely move the mean, and a sample after a long silence moves it a lot. The burst detector uses a 60 s half life on closed seconds; the rate tile uses 10 s; the feed meter also uses 10 s, which is where the clumped traffic bug came from.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/assets/util.js: const a = 1 - Math.exp(-Math.max(0, tSec - this.t) / this.tau);",
+        "repo:wikipedia-edit-stream/assets/util.js: this.var = (1 - a) * (this.var + a * d * d);"
+      ],
+      "sources": [],
+      "tags": [
+        "ewma",
+        "formula",
+        "anomaly detection"
+      ]
+    },
+    {
+      "id": "wes-38",
+      "type": "how",
+      "level": 2,
+      "q": "How does the burst detector decide a second is unusual, and why does it need two conditions?",
+      "easy": "A second counts as a burst only if it is more than 4 standard deviations above the recent average and at least 10 events above it, and nothing is flagged in the first 30 seconds.",
+      "deep": "BurstDetector.push(x, t) reads mean and std before updating, so a burst cannot raise its own threshold; flagged seconds still update the baseline afterward, so a sustained shift becomes the new normal instead of a stream of alarms. Rule: flag if ready and x > mu + 4 sigma and x >= mu + 10, with ready meaning at least 30 seconds seen. The absolute floor handles quiet scopes: on a baseline of exactly 2 a second with zero variance, a jump to 8 is infinitely many sigma but trivial, and the suite pins that case (8 not flagged, 30 flagged). Another test feeds 120 seconds of 20 to 30 events a second with no flags, then 90 is flagged, and a detector with 10 seconds of history refuses to flag 500. The rule assumes roughly stationary noise; Poisson counts have variance equal to the mean, so a 4 sigma rule on an EWMA variance is a pragmatic choice rather than a calibrated false alarm rate.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/app.js: const BURST = { halfLife: 60, k: 4, minExcess: 10, warmup: 30 };"
+      ],
+      "sources": [],
+      "tags": [
+        "anomaly detection",
+        "ewma"
+      ]
+    },
+    {
+      "id": "wes-39",
+      "type": "case",
+      "level": 2,
+      "q": "Tell me about the feed rate bug you found.",
+      "easy": "The status pill read 23 messages a second while a separate counter saw 33. Messages arriving less than a millisecond apart got almost no weight in the smoothed rate. Pooling arrivals into 50 ms windows fixed it, in shared code all four dashboards use.",
+      "deep": "The original meter turned every message into an instantaneous rate, n / dt with dt clamped at 1 ms, and fed it to the continuous time EWMA. A clump of messages delivered in one network read arrives under a millisecond apart; each gets a huge rate but almost zero weight, because weight in a continuous time EWMA scales with elapsed time. The long gaps between clumps carry the weight and a low rate, so the time weighted mean of n / dt reads low on bursty traffic. The fix in Feed.hit() pools arrivals until 50 ms have passed and feeds count over elapsed time for the pooled window, a ratio of sums instead of a mean of ratios. Between messages the displayed rate decays toward 1000 / age, so silence shows as a falling rate rather than a frozen one. It was caught by cross checking two independent counters, the same habit as running sketches beside exact counts.",
+      "say": "My status pill said 23 messages a second while a plain counter said 33. Clumped messages a fraction of a millisecond apart were getting almost no weight in the smoothed rate. I pooled arrivals into 50 millisecond windows, and the fix went into the shared code all four dashboards use.",
+      "evidence": [
+        "portfolio: The status pill read 23 messages a second while a separate counter saw 33, because events arriving less than a millisecond apart carried almost no weight in the smoothed rate. Pooling arrivals into 50 ms windows fixed it, in the shared code all four dashboards use.",
+        "repo:wikipedia-edit-stream/assets/ui.js: if (dt >= 0.05) { this.rate.update(this.pend / dt, now / 1000); this.rateAt = now; this.pend = 0; }"
+      ],
+      "sources": [],
+      "tags": [
+        "debugging",
+        "rates",
+        "ewma"
+      ]
+    },
+    {
+      "id": "wes-40",
+      "type": "how",
+      "level": 2,
+      "q": "How is the edit river drawn on canvas, and what choices keep it fast?",
+      "easy": "Each edit is a dot in a row for its wiki, sliding left as it ages, blue for people and orange for bots, with rings for new pages. The page redraws one canvas about 30 times a second from a buffer of the latest 2,000 edits.",
+      "deep": "The canvas backing store is sized to CSS width times devicePixelRatio and the context is scaled with setTransform, so dots are sharp on high density screens. Per frame, positions go into preallocated Float32Array and Uint8Array buffers (no per frame allocation), and all dots of one colour are added to a single path and filled once, so a frame is a handful of fill calls instead of 2,000. x is age mapped onto a span that grows from 4 to 60 seconds over the first minute; y is the lane centre plus a jitter from the hash of meta.id, so dots do not stack and do not jump between frames. Dot area grows with 1 + 1.5 log10(1 + |bytes|), so a 10,000 byte edit has about 7 times the area of a zero byte one, which the suite asserts. Lanes ease toward their targets with 1 - e^(-dt/0.3), snap after gaps over 0.25 s, and respect prefers-reduced-motion by repainting once a second without animation. Hover finds the nearest dot within 24 px by a linear scan over the frame's buffer.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/app.js: const RIVER_N = 2000, LANES = 6, SPAN_MIN = 4, SPAN_MAX = 60;",
+        "repo:wikipedia-edit-stream/wiki/app.js: rv.job = onPaint(paintRiver, 33);",
+        "repo:wikipedia-edit-stream/wiki/sketch.js: return base * Math.sqrt(1 + 1.5 * Math.log10(1 + a));"
+      ],
+      "sources": [],
+      "tags": [
+        "canvas",
+        "rendering",
+        "performance"
+      ]
+    },
+    {
+      "id": "wes-41",
+      "type": "why",
+      "level": 2,
+      "q": "Why canvas and a single paint scheduler instead of SVG or DOM updates per event?",
+      "easy": "A few thousand moving dots redrawn many times a second would mean thousands of DOM nodes changing every frame. Canvas draws pixels directly, and one scheduler decides when each chart repaints so incoming messages never trigger drawing.",
+      "deep": "Message handlers only mutate state and mark paint jobs dirty. onPaint(fn, everyMs) registers a job with a minimum interval; one requestAnimationFrame loop runs each dirty job whose interval has passed, catches its errors, and skips everything while the display is paused. Browsers stop requestAnimationFrame in hidden tabs, so painting halts while ingestion continues, and counts stay correct when the tab returns. Charts get their own intervals (the river 33 ms, KPI tiles 500 ms), which caps paint cost no matter how fast events arrive. The cost of canvas is accessibility and hit testing: each canvas has role img and an aria label, each card has a table view of its data, and hover is computed by hand. SVG would be fine for the static charts but not for a river at 30 frames a second.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "canvas",
+        "architecture",
+        "performance"
+      ]
+    },
+    {
+      "id": "wes-42",
+      "type": "how",
+      "level": 3,
+      "q": "How do the river lanes avoid flapping when two wikis have similar counts?",
+      "easy": "A wiki takes a lane, or passes the wiki above it, only when its edit count beats the other by 10% plus one. Small fluctuations leave the order alone, and a clear lead swaps it.",
+      "deep": "rankLanes(prev, counts, n, margin = 0.1, slack = 1) starts from the previous order, keeps keys still present, fills empty lanes from the sorted counts, and replaces the weakest lane only if the challenger beats it by c(a) > c(b)(1 + margin) + slack. Then it runs adjacent swaps under the same rule until nothing moves, capped at n^2 passes. This is hysteresis, the same idea as a thermostat's dead band: a ranking that updates every 500 ms on noisy counts would otherwise reshuffle constantly. Tests: c at 52 against a at 50 does not take a's lane; c at 200 takes it and passes b; 105 against 100 keeps order and 130 swaps; and on a 20,000 draw Zipf(1.2) stream over 40 keys the lanes converge to the true top 6 in order. Labels jump and fade in rather than sliding past each other, while their dots glide.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/sketch.js: const beats = (a, b) => c(a) > c(b) * (1 + margin) + slack;"
+      ],
+      "sources": [],
+      "tags": [
+        "ranking",
+        "hysteresis",
+        "ui"
+      ]
+    },
+    {
+      "id": "wes-43",
+      "type": "why",
+      "level": 2,
+      "q": "How does the page handle privacy and untrusted data from the stream?",
+      "easy": "Editor names and IP addresses are hashed the moment they arrive and never shown or kept. Titles of personal user pages are hidden, and only https links to Wikimedia domains are rendered.",
+      "deep": "In ingest(), d.user is encoded to bytes and passed to hll.add and hash53, and the string is not stored anywhere. Pages in namespaces 2 and 3 (User and User talk) are named after an account or an IP, so their titles are counted under a hashed key and shown as User page (name hidden) without a link. The page admits one gap: titles in other namespaces can still mention an account, for example a noticeboard subpage, and those are shown as published. Links pass through safeHref(uri, ALLOW), which returns a URL only if the protocol is https and the hostname is one of 12 Wikimedia domains or a subdomain, so a malicious javascript: URI in stream data cannot become a clickable link. Text is set through DOM text nodes rather than innerHTML, so titles cannot inject markup. Nothing is stored between visits.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/wiki/app.js: const hide = raw !== null && (d.namespace === 2 || d.namespace === 3);",
+        "repo:wikipedia-edit-stream/index.html: Titles in other namespaces can still mention an account, for example a noticeboard subpage; those are shown as the wiki published them."
+      ],
+      "sources": [],
+      "tags": [
+        "privacy",
+        "security"
+      ]
+    },
+    {
+      "id": "wes-44",
+      "type": "why",
+      "level": 2,
+      "q": "Why run everything in the browser with no server?",
+      "easy": "Wikimedia's stream is public and browsers can read it directly, so a server would add cost and a place where editor names could be stored, without adding anything. The tradeoff is that nothing persists and every visitor starts from zero.",
+      "deep": "For: zero infrastructure, a static GitHub Pages site, and no data at rest. Against: no history across visits, each tab sees only what arrived since it opened, browsers throttle hidden tabs, and one main thread does parsing, sketching and drawing. Mitigations in the code: message handlers only mutate state; one requestAnimationFrame scheduler paints each chart at its own minimum interval; exact maps reset at 500,000 pages or 2,000,000 editors so memory stays bounded. The sketch logic lives in wiki/sketch.js with no DOM, so the page, the node verification script and the test suite run the same code. That script is not in the public repository; only its three logs are. A server side consumer becomes the right design once you need history, many viewers sharing one computation, or volumes where exact counting does not fit.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "architecture",
+        "privacy",
+        "design"
+      ]
+    },
+    {
+      "id": "wes-45",
+      "type": "how",
+      "level": 1,
+      "q": "How do you test sketches whose outputs are random?",
+      "easy": "Test the guarantees instead of fixed outputs. Every random stream comes from a seeded generator so failures reproduce, and each test checks the property the paper promises: never undercount, bounds hold for every tracked item, error within a few standard errors.",
+      "deep": "Hash: published vectors plus SMHasher's verification value. HyperLogLog: 4,096 registers, 4,096 bytes, SE equal to 1.04/64; rank edge cases with crafted hashes; idempotence on repeats; 100,000 keys within 3 SE in the raw regime; 100 keys within 3 of the truth in the linear regime. Count-Min: epsilon and delta formulas, distinct row seeds, negative weights rejected; on a 200,000 event Zipf(1.1) stream over 50,000 keys, zero underestimates and a share over epsilon N below delta; the collision share formula at its edges. Space-Saving: counts sum to N and min at most N/k on a Zipf(1.0) stream; bounds for every tracked item and no heavy item missing on Zipf(1.1); the same on a mostly distinct stream with 5 hot keys and k = 50. Also RecentIds, the burst detector, size bins, scopes and the canary filter, dot radius, lane ranking, and labels. The README counts 26 tests including 2 shared formatting tests; the write up counts the 24 in the wiki suite.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/README.md: 26 tests on node 22 or newer, nothing to install; two of them cover the shared duration formatting.",
+        "portfolio: 24 tests",
+        "repo:wikipedia-edit-stream/tests/wiki.test.mjs: const { keys, exact } = zipfStream(200000, 50000, 1.1, 11);"
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "property based"
+      ]
+    },
+    {
+      "id": "wes-46",
+      "type": "define",
+      "level": 2,
+      "q": "What are the Zipf sampler and mulberry32, and why does the suite use them?",
+      "easy": "Zipf is a heavy tailed distribution where the rank r item appears with weight 1/r^s, which mimics page popularity: a few pages get most edits and a long tail gets one each. mulberry32 is a tiny seeded random number generator, so every test stream is identical on every run.",
+      "deep": "zipf(n, s, rand) builds the cumulative distribution of 1/(i + 1)^s over n ranks, normalizes it, and samples by drawing u in [0, 1) and binary searching the CDF, so each draw is O(log n) after O(n) setup. Streams use s = 1.0, 1.1 and 1.2 over 20,000 to 50,000 keys, which produce both heavy items above N/k (needed so the Space-Saving test is not vacuous, and the test asserts heavy > 0) and a long tail of rare keys that collide in Count-Min. mulberry32 keeps a 32 bit state, adds 0x6D2B79F5 each call, and mixes with xor shifts and Math.imul to return a float in [0, 1); it is fast and good enough for tests, though not cryptographic. Seeding means a failing assertion reproduces bit for bit, and the probabilistic tests were sized (3 SE, share below delta) so a correct implementation passes with near certainty.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "testing",
+        "zipf",
+        "prng"
+      ]
+    },
+    {
+      "id": "wes-47",
+      "type": "how",
+      "level": 2,
+      "q": "How does CI run the suite, and why is there no install step?",
+      "easy": "GitHub Actions runs node --test on Node 22 and Node 24 for every push to main and every pull request. There is nothing to install, because the sketch and helper modules have no third party dependencies.",
+      "deep": "The workflow is a matrix over node-version 22 and 24 with fail-fast off, checkout, setup-node, then node --test tests/*.test.mjs. The comment in the workflow says the missing install step is deliberate: it proves on a clean runner that the analytic modules need nothing beyond the runtime. node:test and node:assert/strict are built in, and the modules are plain ES modules, so the same files load in the browser and in Node. Pure modules mean the tests import exactly what the page runs, with no mocks for DOM or network. What CI does not cover: the DOM code in app.js, the canvas drawing, and the live stream, which were checked by hand and by the logged node runs.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/.github/workflows/ci.yml: node-version: [\"22\", \"24\"]"
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "ci"
+      ]
+    },
+    {
+      "id": "wes-48",
+      "type": "case",
+      "level": 2,
+      "q": "What are the honest limitations of this project?",
+      "easy": "Count-Min barely collides with about 100 wikis, the live runs only used HyperLogLog's small range branch, exact counting is cheap at this rate, and the reconnect path was seen working once in the browser but never in a logged run.",
+      "deep": "Count-Min: 0 keys inflated in every run, so 12 of 12 within bound tests almost nothing. HyperLogLog: the switch to the raw estimator is at about 10,240 distinct editors, and the longest run reached 983, so the harmonic mean estimator ran only in the test suite. Scale: at about 30 events a second exact maps are cheap, which makes the comparison possible but means the sketches never had to earn their memory savings. Resume: Wikimedia dropped the stream once during browser testing and the page reconnected without a duplicate, but no logged run includes a reconnect. Evidence: three runs of 2 to 5 minutes, one sketch per run, so no coverage statistics. Other gaps: the bot flag misses unflagged automation, the delay tile includes clock offset, the node script that wrote the logs is not in the repository, and the write up's bot share (roughly a quarter) and Kafka offsets phrasing are looser than the logs and the docs.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/README.md: The Last-Event-ID resume path has been seen working once in the browser, with no duplicates, but no logged run has exercised it.",
+        "repo:wikipedia-edit-stream/README.md: HyperLogLog switches from linear counting to the raw estimator at about 10,240 distinct editors, which takes a long session to reach."
+      ],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "honesty"
+      ]
+    },
+    {
+      "id": "wes-49",
+      "type": "case",
+      "level": 3,
+      "q": "What would you do next, and what breaks at 10 times and 100 times the event rate?",
+      "easy": "At 10 times the rate the page still works but the once a second audit and exact maps get heavy. At 100 times the browser's main thread and the exact counters fail first; the sketches would be fine. Next steps are moving ingestion off the main thread, sampling the exact side, and running many seeded sketches to measure coverage.",
+      "deep": "At about 330 events a second: JSON.parse and ingest compete with painting, the 5,000 id dedupe ring covers about 15 seconds instead of 150, and the page map reaches the 500,000 key reset in well under an hour. At about 3,300 a second: the main thread saturates, the O(k + P) audit becomes the bottleneck, and the exact sets dominate memory. Unaffected: HyperLogLog stays 4 KB and O(1) per event, Count-Min costs 4 hashes per event, Space-Saving O(log k). Changes: parse and sketch in a Web Worker or a server side keyed streaming job; keep exact counts on a sample or a bounded window; size dedupe by time, not count; switch to HLL++ with 64 bit hashes and 6 bit registers; raise k or key Count-Min by page so it actually collides. Experiments: 100 independently seeded HyperLogLogs on one stream to measure how often error falls inside one sigma (expect about 68%), and a long session that crosses 10,240 editors so the raw estimator runs live.",
+      "say": "At a hundred times the rate the sketches are fine; the main thread and the exact maps are what break. I'd move ingestion to a worker or a server job and keep exact counts on a sample. Then I'd run a hundred seeded HyperLogLogs side by side to measure coverage, which a single sketch can't.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "scaling",
+        "next steps"
+      ]
+    },
+    {
+      "id": "wes-50",
+      "type": "pushback",
+      "level": 1,
+      "q": "Why not just count exactly? Memory is cheap.",
+      "easy": "At 33 events a second exact counting is cheap, which is exactly why the page can check the sketches against it. Sketches matter when exact state grows without bound, has to merge across machines, or must exist per key and per time window.",
+      "deep": "Concede: here the exact Set and Maps fit easily, and the README says the sketches pay off only at volumes where exact counting does not. Defend with scaling: an exact distinct set grows linearly with distinct items, while HyperLogLog stays at 4 KB for any cardinality with about 1.6% error; Count-Min stays at 4 x 1,024 counters regardless of key count; Space-Saving stays at 200 counters. The stronger argument is mergeability: HyperLogLogs from many shards or hourly buckets combine by register wise max, so distinct counts over any union of partitions need no raw data. Per key per window state, for example distinct editors per page per minute, multiplies exact cost by keys times windows. The project's contribution is measured error on real traffic, so a team can decide whether 1.6% is acceptable before paying for exact state.",
+      "say": "At 33 events a second you're right, exact counting is trivial, and that is what makes the comparison possible. Sketches pay off when state is per key and per window, or has to merge across shards. HyperLogLog stays at 4 KB for any number of users and merges with a register max.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/README.md: Exact counting is affordable at about 30 events a second. That is what makes the comparison possible; the sketches pay off at volumes where it is not."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "tradeoffs"
+      ]
+    },
+    {
+      "id": "wes-51",
+      "type": "pushback",
+      "level": 2,
+      "q": "Is 297 seconds of data enough to claim anything?",
+      "easy": "Not enough for a statistical claim about HyperLogLog's error rate, and the project does not make one. It is enough to catch implementation bugs, because the Space-Saving and Count-Min guarantees are deterministic and should never break even once.",
+      "deep": "Separate two kinds of claim. Deterministic: Space-Saving's count - error <= f <= count and Count-Min's no undercount must hold on every event, so 200 checks a second with 0 violations is a meaningful bug check, and a single violation would disprove the implementation. Statistical: one sketch observed over time gives correlated points and three runs give three draws, which cannot estimate coverage. The calibration claims rest on the offline suite: 100,000 distinct keys within 3 standard errors, and 200,000 event Zipf streams where Count-Min's share over epsilon N stays below delta and Space-Saving's bounds hold for every item. Admitted gaps: the raw HyperLogLog regime never ran live, and Count-Min had zero collisions. A stronger live study would run many independently seeded HyperLogLogs on the same stream and count how often each lands inside the one sigma band.",
+      "say": "For a statistical claim, no, and I don't make one from the live runs. The Space-Saving and Count-Min checks are deterministic, so zero violations over five minutes is a real bug check. The error calibration comes from the seeded test suite.",
+      "evidence": [
+        "portfolio: A node script ran the same sketch code against the live stream for 297 seconds on October 8, 2026: 9,909 events at 33.3 a second."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "evaluation",
+        "statistics"
+      ]
+    },
+    {
+      "id": "wes-52",
+      "type": "pushback",
+      "level": 2,
+      "q": "Isn't a browser dashboard a toy compared with a Kafka and Flink pipeline?",
+      "easy": "The deployment is small, but the problems are the ones a streaming pipeline has: resuming after a disconnect, duplicates, late events, event time versus processing time, and checking a summary against ground truth. The core logic is a pure, tested module that does not depend on the browser.",
+      "deep": "Concede: one consumer, no persistence, no partitioned parallelism, and tens of events a second. Defend: wiki/sketch.js has no DOM and is imported unchanged by the node:test suite and by the node verification script that wrote the logs, and CI runs the suite on Node 22 and 24 with no install step. The stream semantics map directly onto production concepts: Last-Event-ID is a committed consumer position, RecentIds is idempotent consumption under at least once delivery, the 2 second settle is a watermark, the late counter is a side output, and exact versus sketch is a shadow computation. Moving to Flink means swapping the transport and keyed state, not rethinking the algorithms.",
+      "say": "The deployment is small, I agree. But the sketch module has no browser code, it is the same file the tests and the logging script run, and the hard parts are the same as in Flink: resume, dedupe, late data and watermarks. Porting it means changing the transport, not the logic.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "architecture"
+      ]
+    },
+    {
+      "id": "wes-53",
+      "type": "pushback",
+      "level": 2,
+      "q": "You picked the run with the nicest HyperLogLog number for the headline.",
+      "easy": "The headline uses the longest run, and all three runs are published next to it, including the worst one at -1.2%. All three are inside the one sigma band.",
+      "deep": "Concede: the badge quotes +0.4%, and a reader skimming it sees the best looking figure. Defend: the write up states the other two runs in the next sentence (-0.3% and -1.2%), the README table lists all three with lengths and event counts, and the raw logs are committed in runs/. The longest run is the natural headline because it has the most data. Against the linear counting error at those counts (about 1.1%), the errors are 0.3, 1.1 and 0.3 standard errors, so even the worst run is ordinary. The honest framing is that three runs show no sign of a bug, not that the error is 0.4%.",
+      "say": "The headline is the longest run, and the other two are in the very next sentence, including minus 1.2%. All three logs are in the repo. What I claim from them is no sign of a bug, not a 0.4% error rate.",
+      "evidence": [
+        "repo:wikipedia-edit-stream/README.md: | 3 | 297 s | 9,909 | 33.3 | 986.9 vs 983 (+0.4%) | 0 | 12 of 12 |",
+        "repo:wikipedia-edit-stream/README.md: | 1 | 118 s | 3,903 | 33.0 | 533.3 vs 535 (-0.3%) | 0 | 12 of 12 |"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "honesty",
+        "results"
+      ]
+    },
+    {
+      "id": "wes-54",
+      "type": "pushback",
+      "level": 3,
+      "q": "Why write your own sketches instead of using Apache DataSketches or a Redis HyperLogLog?",
+      "easy": "In production I would use a maintained library. Here the goal was to implement each algorithm from its paper and verify it against its own guarantees, which a library call would hide.",
+      "deep": "Concede: DataSketches and Redis PFCOUNT are tested at scale, use better variants (HLL++ style bias correction, 6 bit registers, sparse modes), and would be the right call for a product. Defend: the page needs internals a library hides, such as the regime that produced each estimate, per item Space-Saving error terms for the lower and upper bounds, and the standard rather than conservative Count-Min update so the textbook bound applies. Writing them also forced the verification work: MurmurHash3 against SMHasher's value, rank edge cases, and Zipf property tests. Everything stays dependency free, so the same module runs in the browser and in CI without a build step. The risk of a home grown bug is exactly what the live audit and the test suite exist to catch.",
+      "say": "For a product I'd use DataSketches. Here I needed the internals: which regime produced the estimate, per item error terms, and the exact update rule the bound is proved for. Writing them is also what made me verify the hash against SMHasher.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "build vs buy"
+      ]
+    },
+    {
+      "id": "wes-55",
+      "type": "pushback",
+      "level": 3,
+      "q": "Your write up says Last-Event-ID carries Kafka offsets, but Wikimedia emits timestamps. Which is it?",
+      "easy": "Timestamps. The id names Kafka topic and partition positions, and Wikimedia fills them with timestamps because offsets are only meaningful inside one Kafka cluster and it runs several. The write up's wording is loose.",
+      "deep": "Concede: the portfolio text says the id carries the stream's Kafka offsets, and the Wikitech documentation says ids always use timestamps instead of offsets in the multi datacenter setup. The page's own method notes have it right: a JSON list of Kafka topic and partition positions, as observed a millisecond timestamp for the active datacenter's topic. Defend the design, which does not depend on the distinction: resuming by timestamp can replay events that share a millisecond, and the manual fallback rewinds 5 seconds on purpose, so dedupe on meta.id is required either way. The practical difference is precision: an offset resumes at exactly the next event, a timestamp resumes at a time and needs idempotent consumption to be exact.",
+      "say": "It's timestamps, and my write up should say positions rather than offsets. Wikimedia runs several Kafka clusters and offsets don't carry across them. The design doesn't depend on it, because I dedupe on event id either way.",
+      "evidence": [
+        "portfolio: the browser reconnects with Last-Event-ID, which carries the stream's Kafka offsets",
+        "repo:wikipedia-edit-stream/index.html: Every message carries an SSE id: a JSON list of Kafka topic and partition positions (in the stream as observed, a millisecond timestamp for the active datacenter's topic)."
+      ],
+      "sources": [
+        "https://wikitech.wikimedia.org/wiki/Event_Platform/EventStreams_HTTP_Service"
+      ],
+      "tags": [
+        "pushback",
+        "resume",
+        "kafka"
+      ]
+    },
+    {
+      "id": "wes-56",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to me as if I were the hiring manager.",
+      "easy": "A live page that watches every Wikipedia edit and answers three questions twice, once exactly and once with compact estimators, to check the estimators stay inside their promised error.",
+      "deep": "Lead with the question and the result, then one design decision and one honest limit. Keep jargon to the three sketch names, each with a one line gloss. The number to land is 986.9 against 983, with the 297 second, 9,909 event context.",
+      "say": "I built a live page that watches every Wikipedia edit and answers how many people are editing and which wikis and pages are busiest. It answers each question twice, exactly and with a compact estimator that uses a few kilobytes. On a five minute run the editor estimate was 986.9 against a true 983, within 0.4%. It shows I can build streaming code and check it against ground truth instead of assuming it works.",
+      "evidence": [
+        "portfolio: 9,909 real edits in a 297 second run (Oct 8 2026)",
+        "portfolio: HyperLogLog 986.9 vs 983 exact distinct editors (+0.4%, one sigma bound 1.6%)"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring manager"
+      ]
+    },
+    {
+      "id": "wes-57",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain this project to me as if I were a staff engineer.",
+      "easy": "Pure sketch module, exact shadow state, deterministic guarantees audited every second, event time bins with a watermark, Last-Event-ID plus id dedupe, and two honest gaps.",
+      "deep": "A staff engineer wants the mechanism, the invariants, and where it is weak. Name the parameters, the audit, the watermark, the delivery contract, and the two places the live data did not stress the code.",
+      "say": "The core is a pure module: MurmurHash3, a p equals 12 HyperLogLog, a 4 by 1,024 Count-Min with the standard update so the textbook bound applies, and Space-Saving on an indexed min heap. Each runs beside exact state, and the deterministic guarantees are audited every second. Throughput is binned on event time with a 2 second watermark, because arrival bins called delivery clumps bursts. Delivery is at least once, so I resume with Last-Event-ID and dedupe on event id. The weak spots are that Count-Min never collided and the live runs stayed in linear counting.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff engineer"
+      ]
+    },
+    {
+      "id": "wes-58",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain this project to me as if I were a product manager.",
+      "easy": "Dashboards often show estimated numbers without saying how wrong they might be. This page shows the estimate, the true value, and the promised error side by side, live.",
+      "deep": "A PM cares about what the user sees and what decision it supports. Frame sketches as the cheap way large products count things, the error as a cost the product can choose, and the page as evidence for that choice. Mention the plain language design: every card leads with a plain question and hides the math behind a toggle.",
+      "say": "Big products count unique users and top items with shortcuts that use a tiny amount of memory and accept a small error. My page runs the shortcut and the exact count side by side on live Wikipedia edits, so you can see the error instead of trusting it. On a five minute run the unique editor estimate was 0.4% off. Every card asks a plain question first, like how many people are editing, and puts the math behind a link.",
+      "evidence": [
+        "portfolio: HyperLogLog 986.9 vs 983 exact distinct editors (+0.4%, one sigma bound 1.6%)"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "product manager"
+      ]
+    },
+    {
+      "id": "wes-59",
+      "type": "narrate",
+      "level": 1,
+      "q": "Give me the recruiter version in under 30 seconds.",
+      "easy": "A live dashboard of Wikipedia edits that checks three classic streaming algorithms against exact counts, written in plain JavaScript with a 24 test suite.",
+      "deep": "Keep it to what was built, the tools, one number, and why it is relevant to data and ML engineering roles. No formulas.",
+      "say": "It's a live dashboard of every Wikipedia edit, in JavaScript, that checks three well known streaming algorithms against exact counts as the data arrives. On a five minute run of about ten thousand edits the unique editor estimate was within half a percent. It's the same kind of work as monitoring a data pipeline, checking that a summary matches the truth.",
+      "evidence": [
+        "portfolio: 9,909 real edits in a 297 second run (Oct 8 2026)"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "HyperLogLog (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/HyperLogLog",
+      "why": "Register update, estimator with alpha_m values, small and large range corrections, 1.04/sqrt(m), merge by register max, and HLL++."
+    },
+    {
+      "title": "HyperLogLog: the analysis of a near optimal cardinality estimation algorithm (Flajolet et al., 2007)",
+      "url": "https://algo.inria.fr/flajolet/Publications/FlFuGaMe07.pdf",
+      "why": "The original paper: harmonic mean over LogLog's geometric mean, beta constant sqrt(3 ln 2 - 1), and the 64% memory claim."
+    },
+    {
+      "title": "Count-min sketch (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Count%E2%80%93min_sketch",
+      "why": "Width e/epsilon and depth ln(1/delta), the epsilon N guarantee, no underestimates, pairwise independence, conservative update, comparison with Count Sketch."
+    },
+    {
+      "title": "Efficient Computation of Frequent and Top-k Elements in Data Streams (Metwally, Agrawal, El Abbadi, 2005)",
+      "url": "https://www.cs.ucsb.edu/sites/default/files/documents/2005-23.pdf",
+      "why": "Space-Saving update rule, Stream-Summary structure, and Lemmas 1 to 3 and Theorem 1 behind the per item bounds."
+    },
+    {
+      "title": "Misra-Gries summary (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Misra%E2%80%93Gries_summary",
+      "why": "The decrement all counter algorithm that Space-Saving is usually compared with."
+    },
+    {
+      "title": "MurmurHash (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/MurmurHash",
+      "why": "MurmurHash3 x86_32 constants and finalizer, test vectors, SMHasher, and the hash flooding caveat."
+    },
+    {
+      "title": "Server sent events (WHATWG HTML Standard)",
+      "url": "https://html.spec.whatwg.org/multipage/server-sent-events.html",
+      "why": "Field grammar, Last-Event-ID on reconnect, readyState values, and when the browser reconnects versus fails the connection."
+    },
+    {
+      "title": "EventStreams HTTP Service (Wikitech)",
+      "url": "https://wikitech.wikimedia.org/wiki/Event_Platform/EventStreams_HTTP_Service",
+      "why": "SSE ids as Kafka topic and partition positions using timestamps, the since parameter, the 15 minute connection timeout, and discarding canary events."
+    }
+  ]
+}
