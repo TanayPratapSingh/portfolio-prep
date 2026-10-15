@@ -1,0 +1,696 @@
+{
+  "deck_id": "p-travel-db",
+  "title": "Travel Itinerary Management System",
+  "group": "Portfolio",
+  "repo": "",
+  "summary_easy": "Tanay designed the database behind a travel itinerary app: 12 normalized tables, 3 stored procedures, 2 triggers, and 1 function. The rules (no negative costs, no zero length activities, hotels tied to real destinations) are enforced by the database, so every app, import, or analyst gets the same guarantees, and a traveler's full itinerary is created in one all or nothing call.",
+  "summary_deep": "Twelve entities in third normal form with full referential integrity, with itinerary as the hub linked by foreign keys to destinations, activities, accommodations, transportation, seasonal information, and tags, documented in a logical ERD with cardinalities. sp_add_full_itinerary_single inserts activity, transport, accommodation, season, and tag records, links them through the itinerary table, fires the triggers, and returns the new itinerary_id atomically in one round trip, replacing five inserts plus application checks; sp_get_full_itinerary and sp_get_itineraries_for_destination serve the read paths. trg_check_activity_duration rejects zero or negative durations and trg_check_activity_cost rejects negative costs on insert and update, and ufn_estimate_total_activity_time centralizes total activity time for views and rankings. Interview depth: 1NF to BCNF with schema examples, keys and referential actions, transaction design and isolation levels, set based triggers versus CHECK constraints, scalar UDF cost, and indexing the browse path.",
+  "sheet": {
+    "easy": "## What it is\n- Database engineering project (Jan 2025 to May 2025): a relational database for a travel itinerary app.\n- Principle: business rules live **in the database**, so every client (web, mobile, batch import, ad hoc SQL) gets the same guarantees.\n\n## Counts\n| Item | Count | Names |\n|---|---|---|\n| Entities | 12 | itinerary at the center; destinations, activities, accommodations, transportation, seasonal info, tags |\n| Stored procedures | 3 | sp_add_full_itinerary_single, sp_get_full_itinerary, sp_get_itineraries_for_destination |\n| Triggers | 2 | trg_check_activity_duration, trg_check_activity_cost |\n| Function | 1 | ufn_estimate_total_activity_time |\n\n## Rules\n- Activity duration must be above zero. Activity cost cannot be negative (zero is fine).\n- A hotel must belong to a real destination (foreign key).\n- Itinerary cost should equal the sum of its parts (compute it; do not store it).\n\n## The user story\n- Traveler picks options, one procedure call inserts everything, checks run, and it all saves or nothing does.\n\n## Normal forms in one line each\n- 1NF: one value per cell. 2NF: nothing depends on half a composite key. 3NF: no facts riding on another non key column. BCNF: every determinant is a key.\n\n## What to improve\n- CHECK constraints instead of triggers for simple ranges; accept lists of activities; add tests; index foreign keys.\n",
+    "deep": "## As written\n- Twelve entities, 3NF, full referential integrity, logical ERD with PKs, FKs, cardinality.\n- Itinerary links to destinations, activities, accommodations, transportation, seasonal information, tags through explicit FKs.\n- sp_add_full_itinerary_single: inserts activity, transport, accommodation, season info, tag in one atomic call; replaces five inserts plus app checks; inserts children, links via itinerary, fires triggers, returns itinerary_id.\n- sp_get_full_itinerary: every linked detail by ID, joins in the database. sp_get_itineraries_for_destination: the common browse query.\n- trg_check_activity_duration: rejects insert or update with duration <= 0. trg_check_activity_cost: rejects negative cost.\n- ufn_estimate_total_activity_time: total activity time per itinerary, reused by views, filters, ranking.\n- Not stated: engine, columns, the other table names, tests. Practice on the illustrative schema; present your own.\n\n## Illustrative schema\n```sql\ndestination(destination_id PK, name, country)\nactivity(activity_id PK, destination_id FK, name, duration_hours, cost)\naccommodation(accommodation_id PK, destination_id FK NOT NULL, name, nightly_rate)\ntransportation(transport_id PK, mode, provider, cost)\nseasonal_info(season_id PK, destination_id FK, season_name, start_month, end_month)\ntag(tag_id PK, name UNIQUE)\nitinerary(itinerary_id PK, destination_id FK, accommodation_id FK, transport_id FK, season_id FK, title)\nitinerary_activity(itinerary_id FK, activity_id FK, PRIMARY KEY(itinerary_id, activity_id))\nitinerary_tag(itinerary_id FK, tag_id FK, PRIMARY KEY(itinerary_id, tag_id))\n```\n\n## Normalization\n| Form | Condition | Example violation | Fix |\n|---|---|---|---|\n| 1NF | atomic values | itinerary.tags = 'beach,family' | tag + itinerary_tag |\n| 2NF | no partial dependency on a composite key | itinerary_activity carries activity_name | move to activity |\n| 3NF | for each $X \\to A$: X superkey or A prime | accommodation carries destination_name | move to destination |\n| BCNF | for each $X \\to A$: X superkey | transport_booking(itinerary, mode, provider), provider $\\to$ mode | provider(provider, mode) + itinerary_provider; loses {itinerary, mode} $\\to$ provider |\n\nAnomalies prevented: update, insertion, deletion.\n\n## Keys and constraints\n- PK, candidate (UNIQUE), surrogate (IDENTITY, AUTO_INCREMENT), natural, composite (junction), FK with RESTRICT, CASCADE, SET NULL.\n- CHECK (duration_hours > 0), CHECK (cost >= 0); CHECK passes NULL, so add NOT NULL. MySQL ignored CHECK before 8.0.16.\n\n## Transactions and ACID\n- One explicit transaction; T-SQL: SET XACT_ABORT ON, TRY/CATCH, ROLLBACK, THROW. MySQL: START TRANSACTION, EXIT HANDLER, ROLLBACK, RESIGNAL.\n- Isolation: READ UNCOMMITTED (dirty), READ COMMITTED (non repeatable, phantom), REPEATABLE READ (phantom in the standard), SERIALIZABLE. Defaults: SQL Server and PostgreSQL READ COMMITTED; InnoDB REPEATABLE READ.\n- Durability: write ahead log flushed at commit.\n\n## Triggers\n- MySQL: BEFORE INSERT/UPDATE FOR EACH ROW, NEW, SIGNAL SQLSTATE '45000'.\n- SQL Server: AFTER or INSTEAD OF only, statement level, `inserted` table; check with EXISTS, not a scalar assignment.\n\n## Function and performance\n- Scalar UDF row by row cost (SQL Server before 2019 inlining); prefer inline TVF or set based view in browse queries.\n- Indexes: B+ tree, $O(\\log n)$ seeks; clustered vs nonclustered; leftmost prefix; covering. InnoDB indexes FKs automatically, SQL Server and PostgreSQL do not.\n- Needed: itinerary(destination_id), FK columns used in joins, junction reverse indexes.\n\n## Sample queries\n- Cost per itinerary: SUM over itinerary_activity join activity, GROUP BY itinerary_id.\n- Destinations with no itineraries: NOT EXISTS (NOT IN breaks on NULL).\n- Top tags with ties: DENSE_RANK.\n\n## Limits and next\n- Single item procedure (use TVP or JSON lists, link existing IDs); triggers where CHECK fits; cost rule unenforced in the write up; no tests described; sp_ prefix on SQL Server.\n- Scale: indexes, cached reads, read replicas; then partition by region, search index via CDC.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "I designed a relational database for travel itineraries where the business rules live in the database itself. It's twelve tables in third normal form with full referential integrity, three stored procedures, two triggers, and a function. Creating a full itinerary is one procedure call that inserts everything, runs the duration and cost checks, and commits atomically. The point is that a web app, a batch import, and an analyst writing SQL all get the same guarantees.",
+      "keypoints": [
+        "12 tables in 3NF, full referential integrity",
+        "3 procedures, 2 triggers, 1 function",
+        "One atomic call creates a full itinerary",
+        "Rules hold for every client",
+        "Integrity at the data layer"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "An itinerary system has rules that must hold no matter who writes the data: an activity can't have negative cost, a hotel has to belong to a real destination, and an itinerary's cost should equal its parts. If those live in application code, every new client rewrites them slightly differently. So I put them in the database. The schema has twelve entities in third normal form. Itinerary is the core, linked by foreign keys to destinations, activities, accommodations, transportation, seasonal information, and tags. I drew a logical ERD with every key and cardinality first. There are three stored procedures. sp_add_full_itinerary_single inserts an activity, transport, accommodation, season, and tag, links them to a new itinerary, and returns its ID in one atomic call, replacing five inserts and the app side checks. sp_get_full_itinerary returns every linked detail with the joins done in the database. sp_get_itineraries_for_destination is the browse query. Two triggers reject an activity with zero or negative duration, and a negative cost, on insert or update. Zero cost is allowed, since free activities exist. A function, ufn_estimate_total_activity_time, sums activity time per itinerary so views and rankings reuse one calculation. What I'd change: the range checks should be CHECK constraints, which are declarative and cheaper, keeping triggers for rules that span tables. The insert procedure takes one activity per call, so I'd accept a list. And I'd add a rollback based test suite that tries to break every rule.",
+      "keypoints": [
+        "Rules must hold on every access path",
+        "12 entities, 3NF, itinerary at the center, ERD first",
+        "Atomic single call insert; two read procedures",
+        "Triggers: duration > 0, cost >= 0",
+        "UDF for total activity time, reused by views",
+        "Next: CHECK constraints, list inputs, tests"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Take me through the design decisions in depth.",
+      "script": "The design principle is that invariants about the data belong in the database, because the database is the only component every writer goes through. A web client, a mobile client, a batch import, and an analyst with SQL access all hit the same tables, so a rule enforced there can't be skipped. Modeling. I started from the user story, a traveler selecting options to get a full itinerary, and drew a logical ERD: twelve entities with primary keys, foreign keys, and cardinality. Itinerary is the hub. It links to destinations, activities, accommodations, transportation, seasonal information, and tags. Many to many relationships, like itineraries and tags, become junction tables keyed on the pair of IDs, which also blocks duplicates. Normalization. I took it to third normal form. The way I explain it: 1NF means no lists in a cell, so tags aren't a comma separated string. 2NF means nothing in a junction table depends on half the key, so an activity's name lives in the activity table, not in every itinerary that uses it. 3NF means no facts riding on another non key column, so a hotel row stores destination_id and not the destination's name. BCNF is stricter, and fixing it can cost you dependency preservation, which is why 3NF is the usual stopping point. Derived data. The rule that an itinerary's cost equals the sum of its components is a reason not to store the total. A stored total is a second copy that drifts. Computing it in a view or function makes it true by construction, which is the same reasoning behind the time function. Transactions. sp_add_full_itinerary_single inserts each child, links them through the itinerary table, fires the triggers, and returns the new ID. Atomicity comes from one explicit transaction with error handling that rolls back and rethrows, so a trigger rejecting a bad duration on the third insert leaves nothing behind. Without that, each insert autocommits and a failure leaves orphans. Isolation at read committed is enough for inserting new rows; a rule like a cap on activities per day would need serializable or explicit locks. Triggers. Two of them reject zero or negative duration and negative cost, on both insert and update. Zero cost is allowed because free activities are real; negative cost is usually a typo or unit error. The classic bug is writing a SQL Server trigger as if one row changed; a set based check over the inserted table catches a bad row in a bulk import. And honestly, for single column ranges, a CHECK constraint is the better tool. Triggers earn their place for rules across tables, or on MySQL before 8.0.16, which ignored CHECK. Function. ufn_estimate_total_activity_time sums activity durations for one itinerary, with COALESCE so an empty itinerary returns zero. It centralizes the math for views, filters, and ranking. The risk is scalar function cost when it's called per row in a browse query, so at scale I'd replace that call with a set based view joined once. Read performance. Fetching one itinerary is a primary key seek plus index seeks per join, which is cheap. The browse query needs an index on the itinerary's destination column, and every foreign key used in joins needs one too, since some engines don't create them. What I'd change: CHECK constraints for the ranges, a procedure that takes lists of activities and tags and links existing records instead of inserting copies, and a test script that tries to break every rule inside a rolled back transaction.",
+      "keypoints": [
+        "Invariants in the database: every writer passes through it",
+        "ERD first, itinerary hub, junction tables for many to many",
+        "1NF to 3NF with schema examples; BCNF tradeoff",
+        "Don't store derived totals; compute them",
+        "One explicit transaction, rollback and rethrow",
+        "Set based triggers; CHECK constraints are better for ranges",
+        "Scalar UDF cost; index foreign keys",
+        "Next: list inputs, CHECK constraints, tests"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone who isn't technical.",
+      "script": "I built the database behind a travel planning app. Think of it as the filing system that stores destinations, hotels, activities, transport, and finished trip plans. The main idea was to make the filing system itself refuse bad information. It won't accept an activity that costs a negative amount or takes no time, and it won't let a hotel point to a city that doesn't exist. Because those rules live in the database, it doesn't matter whether the data comes from a website, a phone app, or a spreadsheet import; the same checks apply. A traveler picks their options and the system builds the whole trip plan in one step, and if anything is wrong, nothing is saved halfway.",
+      "keypoints": [
+        "Database behind a travel planning app",
+        "It refuses bad data itself",
+        "Same rules for website, phone, imports",
+        "One step builds a whole trip plan",
+        "All or nothing saves"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the design.",
+      "script": "First I draw the hub: a box labelled itinerary, with its primary key itinerary_id. Around it I draw six boxes: destination, activity, accommodation, transportation, seasonal info, and tag. I connect them with crow's foot lines and say which are one to many and which are many to many. For activities and tags I draw small junction boxes between them and the itinerary, with composite keys, and say that's where 'one itinerary has many activities' lives. Second, I draw a line from accommodation to destination and write NOT NULL FK, and say that's the rule that a hotel has to belong to a real destination. Third, on the activity box I draw two small shields labelled duration > 0 and cost >= 0, and write the trigger names under them. I note that these fire on insert and update, and that I'd now write them as CHECK constraints. Fourth, on the left, a client box with one arrow into a box labelled sp_add_full_itinerary_single. Inside that box I write BEGIN, five inserts, link, COMMIT, and a second arrow labelled ROLLBACK on any error. I say: one round trip, all or nothing. Fifth, on the right, two read arrows: sp_get_full_itinerary by ID, and sp_get_itineraries_for_destination with an index icon on destination_id. The function ufn_estimate_total_activity_time hangs off the activity junction as a SUM. Last, I list three changes in the corner: CHECK constraints, list inputs, and a rollback test suite.",
+      "keypoints": [
+        "Itinerary hub with six related entities",
+        "Crow's foot cardinality; junction tables",
+        "FK from accommodation to destination",
+        "Range rules on activity; would use CHECK now",
+        "Transaction box: BEGIN, inserts, COMMIT or ROLLBACK",
+        "Read procedures, index on destination_id, SUM function",
+        "Three changes listed"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How does the single call insert guarantee atomicity?",
+      "script": "All the inserts run inside one explicit transaction. The procedure begins a transaction, inserts each child record, inserts the itinerary that links them, and commits. Error handling wraps it, so any failure, including a trigger rejecting a zero duration on the third insert, rolls everything back and rethrows the error to the client. On SQL Server I'd also set XACT_ABORT so runtime errors abort the transaction automatically; on MySQL it's an exit handler that rolls back and resignals. Without the explicit transaction, each insert would commit on its own and a failure would leave orphan rows.",
+      "keypoints": [
+        "One explicit transaction around every insert",
+        "Trigger errors cause rollback too",
+        "Rethrow so the client sees the reason",
+        "XACT_ABORT or an exit handler",
+        "Without it: autocommit and orphans"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Show me a normalization violation you avoided.",
+      "script": "The easiest one is a hotel table that stores the destination's name and country next to destination_id. The name depends on the destination, not the hotel, so it's a transitive dependency and breaks third normal form. If a city gets renamed, every hotel row needs editing, and missing one leaves the data contradicting itself. The fix is storing only destination_id in the hotel table and the name once in destination. A 1NF example is tags as a comma separated string in the itinerary row; that becomes a tag table plus a junction table.",
+      "keypoints": [
+        "Hotel row storing destination name: transitive dependency",
+        "Breaks 3NF; update anomaly on rename",
+        "Fix: FK only, name in destination",
+        "1NF: tags as a list in one cell",
+        "Fix: tag table plus junction"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Which indexes would you add, and why?",
+      "script": "Start from the queries. The browse query filters itineraries by destination, so itinerary needs an index on destination_id, possibly with a date column after it for sorting. The full itinerary query joins on foreign keys, and SQL Server and PostgreSQL don't index those automatically, so every foreign key used in a join gets one. Junction tables get their composite primary key plus a reverse index on the second column, so 'which itineraries use this activity' is fast. I'd stop there, since every index slows writes, and add more only from slow query evidence.",
+      "keypoints": [
+        "Index for the queries that exist",
+        "itinerary(destination_id) for browsing",
+        "Foreign keys used in joins",
+        "Junction tables: composite PK plus reverse index",
+        "Each index slows writes; add from evidence"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why a function for total activity time instead of a stored column?",
+      "script": "A stored total is a second copy of facts that already live in the activity rows, so it drifts the moment someone edits an activity and forgets the total. A function computes it from the source rows every time, so it's correct by construction, and views, filters, and ranking all call the same logic. The cost is performance: a scalar function called once per row in a big ranking query can be slow. If that showed up, I'd move to a set based view that aggregates once, or a persisted total maintained by the database, not the app.",
+      "keypoints": [
+        "Stored totals drift",
+        "Function is correct by construction",
+        "One calculation reused everywhere",
+        "Risk: per row scalar function cost",
+        "Fix if needed: set based view or DB maintained total"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Logic in the database is an anti pattern. Why not keep it in the application?",
+      "script": "There's a real cost: procedural SQL is harder to test and version, it ties you to an engine, and the database is the hardest tier to scale out. I'd still put integrity rules there. A hotel belonging to a real destination, no negative cost, and an all or nothing itinerary insert have to hold for every writer, including a batch import or an analyst with direct SQL access. The application can't guarantee that. Logic that changes often, like pricing or recommendations, stays in the app. That split is the design.",
+      "keypoints": [
+        "Concede: testing, versioning, lock in, scaling",
+        "Integrity rules must hold for every writer",
+        "App can't protect against direct SQL or imports",
+        "Fast changing logic stays in the app",
+        "Split: invariants in DB, workflow in app"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "A CHECK constraint does what your triggers do. Why the extra machinery?",
+      "script": "For these two rules, a CHECK constraint is the better choice, and I'd switch. It's declarative, visible in the table definition, cheaper, and it can't be disabled by accident. Triggers make sense for rules that cross tables, like an activity's destination matching its itinerary's, or on MySQL before 8.0.16, which ignored CHECK constraints entirely. What I'd keep from the trigger version is the coverage of both inserts and updates and a clear error message, and a CHECK gives you both of those too.",
+      "keypoints": [
+        "Concede: CHECK is better for single column ranges",
+        "Declarative, visible, cheaper",
+        "Triggers for cross table rules",
+        "Old MySQL ignored CHECK",
+        "Coverage of insert and update is preserved"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "tdb-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is this project, and why put the rules in the database?",
+      "easy": "Tanay designed a relational database for travel itineraries: 12 normalized tables, 3 stored procedures, 2 triggers, and 1 function. The business rules (no negative costs, no zero length activities, every hotel tied to a real destination) live in the database, so every app, import, or analyst gets the same guarantees without rewriting them.",
+      "deep": "A database engineering project (Jan 2025 to May 2025). The argument: an itinerary database carries rules that must hold on every access path, and rules in application code get reimplemented, inconsistently, by each new client (web, mobile, batch import, ad hoc SQL). So the schema enforces structure (twelve entities in third normal form with full referential integrity), triggers enforce row rules (trg_check_activity_duration rejects zero or negative durations; trg_check_activity_cost rejects negative costs), stored procedures encapsulate the main operations (sp_add_full_itinerary_single inserts a complete itinerary in one atomic call, replacing five separate inserts plus application side checks; sp_get_full_itinerary; sp_get_itineraries_for_destination), and a user defined function (ufn_estimate_total_activity_time) centralizes a calculation that views, filters, and ranking interfaces reuse. The user story: a traveler selects options and gets a full itinerary from one round trip.",
+      "say": "I designed a travel itinerary database where the rules live in the database itself: twelve tables in third normal form, three stored procedures, two triggers, and a function. Creating a full itinerary is one procedure call that validates everything and commits atomically. The reason is simple: if the rules are in app code, every new client rewrites them slightly differently.",
+      "evidence": [
+        "portfolio: META: Database Engineering / Jan 2025 to May 2025",
+        "portfolio: 12 normalized entities  |  3 stored procedures  |  2 triggers  |  1 user defined function  |  Single procedure call generates full itinerary",
+        "portfolio: An itinerary database carries rules that have to hold on every access path: an activity cannot have negative cost, a hotel must belong to a real destination, an itinerary cost should always equal the sum of its components.",
+        "portfolio: Put those rules in application code and each new feature or platform reintroduces them, badly.",
+        "portfolio: This project puts them in the database itself, so any client (web, mobile, batch import, ad hoc SQL) gets the same guarantees automatically.",
+        "portfolio: - sp_add_full_itinerary_single: Inserts a complete itinerary (activity, transport, accommodation, season info, tag) in a single atomic call. It replaces five separate inserts plus consistency checks at the application layer."
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "database-design",
+        "integrity"
+      ]
+    },
+    {
+      "id": "tdb-02",
+      "type": "how",
+      "level": 1,
+      "q": "Describe the schema.",
+      "easy": "Twelve tables in third normal form. The center is the itinerary table, which connects through foreign keys to destinations, activities, accommodations, transportation, seasonal information, and tags. The ERD shows every table's primary key, foreign keys, and the cardinality of each relationship.",
+      "deep": "Illustrative columns (the write up names the entities and routines, not the columns):\n\n```sql\ndestination(destination_id PK, name, country)\nactivity(activity_id PK, destination_id FK, name, duration_hours, cost)\naccommodation(accommodation_id PK, destination_id FK, name, nightly_rate)\ntransportation(transport_id PK, mode, provider, cost)\nseasonal_info(season_id PK, destination_id FK, season_name, start_month, end_month)\ntag(tag_id PK, name UNIQUE)\nitinerary(itinerary_id PK, destination_id FK, accommodation_id FK,\n          transport_id FK, season_id FK, title, created_at)\nitinerary_activity(itinerary_id FK, activity_id FK, PRIMARY KEY (itinerary_id, activity_id))\nitinerary_tag(itinerary_id FK, tag_id FK, PRIMARY KEY (itinerary_id, tag_id))\n```\n\nWhat the write up does fix: 12 entities, itinerary as the core entity, explicit foreign keys to the six named entities, 3NF, full referential integrity, and a logical ERD with cardinalities. The remaining tables in a design like this are typically junction tables for many to many links (itineraries to activities, itineraries to tags) and lookups. In an interview, draw your actual ERD; the sketch above is for practicing the reasoning. 'A hotel must belong to a real destination' is exactly accommodation.destination_id as a NOT NULL foreign key.",
+      "evidence": [
+        "portfolio: The schema has twelve entities in third normal form with full referential integrity.",
+        "portfolio: The core entity is itinerary, which links to destinations, activities, accommodations, transportation, seasonal information, and tags through explicit foreign keys.",
+        "portfolio: Figure 1. Logical ERD with all 12 tables, primary keys, foreign keys, and cardinality relationships",
+        "portfolio: An itinerary database carries rules that have to hold on every access path: an activity cannot have negative cost, a hotel must belong to a real destination, an itinerary cost should always equal the sum of its components."
+      ],
+      "sources": [],
+      "tags": [
+        "schema",
+        "erd",
+        "3nf"
+      ]
+    },
+    {
+      "id": "tdb-03",
+      "type": "define",
+      "level": 1,
+      "q": "What is an ERD, what does cardinality mean, and how do you model a many to many relationship?",
+      "easy": "An entity relationship diagram shows tables as boxes and relationships as lines. Cardinality says how many rows on one side can match the other: one to one, one to many, or many to many. A many to many link, such as itineraries and tags, becomes its own table holding pairs of IDs.",
+      "deep": "Crow's foot notation marks each end of a relationship with its maximum (one or many) and minimum (zero or one, meaning optional or mandatory). One to many: the foreign key goes on the many side (activity.destination_id). One to one: a foreign key with a UNIQUE constraint, or shared primary key. Many to many: a junction (associative) table whose primary key is the pair of foreign keys, for example itinerary_tag(itinerary_id, tag_id); attributes of the relationship itself (the day an activity is scheduled within an itinerary, its order) belong on the junction table. Logical ERDs show entities, keys, and cardinality; physical ERDs add types, indexes, and constraints. Tanay's Figure 1 is a logical ERD with all 12 tables, primary keys, foreign keys, and cardinality relationships.",
+      "evidence": [
+        "portfolio: Figure 1. Logical ERD with all 12 tables, primary keys, foreign keys, and cardinality relationships"
+      ],
+      "sources": [],
+      "tags": [
+        "erd",
+        "cardinality",
+        "junction-table"
+      ]
+    },
+    {
+      "id": "tdb-04",
+      "type": "define",
+      "level": 1,
+      "q": "Define primary, candidate, surrogate, natural, composite, and foreign keys, with examples from this schema.",
+      "easy": "A primary key uniquely identifies each row. A foreign key points to another table's primary key and must match a real row there. A surrogate key is a generated ID with no business meaning; a natural key is real data that happens to be unique. A composite key uses more than one column.",
+      "deep": "Candidate key: any minimal set of columns that uniquely identifies a row; the primary key is the one chosen, the others get UNIQUE constraints (tag.name). Surrogate: itinerary_id as IDENTITY or AUTO_INCREMENT; stable, narrow, and immune to business changes. Natural: a country code or an airline IATA code; meaningful but can change or be reused. Composite: the junction table key (itinerary_id, activity_id), which also prevents adding the same activity twice. Foreign key: accommodation.destination_id REFERENCES destination(destination_id), which is the write up's rule that a hotel must belong to a real destination. Referential actions decide what happens on parent delete or update: RESTRICT or NO ACTION (block), CASCADE (delete children, appropriate for junction rows), SET NULL (only if the child can exist without the parent). Full referential integrity, as the write up claims, means every relationship is a declared foreign key, so orphans cannot exist even for rows written through direct SQL.",
+      "evidence": [
+        "portfolio: An itinerary database carries rules that have to hold on every access path: an activity cannot have negative cost, a hotel must belong to a real destination, an itinerary cost should always equal the sum of its components.",
+        "portfolio: The schema has twelve entities in third normal form with full referential integrity.",
+        "portfolio: - Data analysts querying the database directly get consistent data, because the triggers and foreign keys also apply to rows written through direct SQL."
+      ],
+      "sources": [],
+      "tags": [
+        "keys",
+        "foreign-key",
+        "referential-integrity"
+      ]
+    },
+    {
+      "id": "tdb-05",
+      "type": "concept",
+      "level": 1,
+      "q": "Why normalize at all? What problems does it prevent?",
+      "easy": "Normalization stores each fact once. If a destination's name is copied onto every hotel row, renaming it means editing many rows, and missing one leaves the data contradicting itself. Normalizing removes those duplicate copies.",
+      "deep": "Normalization is driven by functional dependencies: $X \\to Y$ means rows that agree on X must agree on Y. Three anomalies it prevents: update anomaly (a fact stored in several rows gets changed in some and not others), insertion anomaly (cannot record a destination until some hotel exists for it), deletion anomaly (deleting the last activity in a city deletes the city's only record). Each normal form removes a class of dependencies that cause these: 1NF (atomic values, no repeating groups), 2NF (no partial dependency on part of a composite key), 3NF (no transitive dependency of a non key attribute through another non key attribute), BCNF (every determinant is a candidate key). The cost is more tables and more joins; reads that span many tables get slower, which is why analytics schemas denormalize deliberately. For a transactional itinerary system with many writers, 3NF is the usual target, which is what the write up claims.",
+      "evidence": [
+        "portfolio: The schema has twelve entities in third normal form with full referential integrity.",
+        "portfolio: TAGS: SQL, Data Modeling, Stored Procedures, Triggers, User Defined Functions, ERD Design, 3NF"
+      ],
+      "sources": [],
+      "tags": [
+        "normalization",
+        "functional-dependency",
+        "anomalies"
+      ]
+    },
+    {
+      "id": "tdb-06",
+      "type": "concept",
+      "level": 1,
+      "q": "Walk through 1NF and 2NF with examples from an itinerary schema.",
+      "easy": "1NF: one value per cell, so tags are not stored as a comma separated list in the itinerary row. 2NF: in a table with a two column key, every other column must depend on both columns, not just one.",
+      "deep": "1NF violation: itinerary(itinerary_id, title, tags = 'beach,family,budget'). Problems: cannot index or join on a tag, cannot enforce that tags exist, and 'find family itineraries' needs string matching. Fix: tag(tag_id, name) plus itinerary_tag(itinerary_id, tag_id). Repeating columns (activity1, activity2, activity3) are the same violation in a different shape. 2NF applies only with composite keys. Violation: itinerary_activity(itinerary_id, activity_id, day_number, activity_name, activity_cost). activity_name and activity_cost depend only on activity_id, a partial dependency, so renaming an activity means updating every itinerary that uses it. Fix: keep (itinerary_id, activity_id, day_number) in the junction table, where day_number genuinely depends on both, and move name and cost to activity(activity_id, name, cost). These examples are illustrative; the write up states the result (3NF), not the decomposition steps.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "normalization",
+        "1nf",
+        "2nf"
+      ]
+    },
+    {
+      "id": "tdb-07",
+      "type": "concept",
+      "level": 1,
+      "q": "Explain 3NF with an example from this schema.",
+      "easy": "3NF removes facts that depend on another non key column. If the hotel table stores the destination's name and country next to destination_id, the name depends on the destination, not on the hotel, so it belongs in the destination table.",
+      "deep": "Definition: a relation is in 3NF if it is in 2NF and no non prime attribute is transitively dependent on a key; formally, for every nontrivial FD $X \\to A$, either X is a superkey or A is a prime attribute (part of some candidate key). Violation: accommodation(accommodation_id, name, destination_id, destination_name, country). FDs: accommodation_id determines destination_id, and destination_id determines destination_name and country, so destination_name depends on the key only through destination_id. Anomalies: rename a city in one hotel row and not another; cannot store a destination with no hotels. Fix: accommodation(accommodation_id, name, destination_id FK) and destination(destination_id, destination_name, country). The same pattern applies to seasonal_info if it carried destination attributes. A useful rule of thumb (Kent's): every non key attribute depends on the key, the whole key, and nothing but the key.",
+      "evidence": [
+        "portfolio: The schema has twelve entities in third normal form with full referential integrity."
+      ],
+      "sources": [],
+      "tags": [
+        "normalization",
+        "3nf",
+        "transitive-dependency"
+      ]
+    },
+    {
+      "id": "tdb-08",
+      "type": "concept",
+      "level": 2,
+      "q": "What is BCNF, how does it differ from 3NF, and is there a BCNF issue a travel schema could hit?",
+      "easy": "BCNF is a stricter 3NF: anything that determines another column must itself be a key. The two differ only in unusual tables with overlapping candidate keys, and fixing a BCNF violation can make one rule impossible to enforce with a simple key.",
+      "deep": "BCNF: for every nontrivial FD $X \\to A$, X is a superkey (3NF additionally allows A to be prime). Illustrative violation: transport_booking(itinerary_id, mode, provider) with rules 'one provider per mode per itinerary' ({itinerary_id, mode} determines provider) and 'each provider runs one mode' (provider determines mode). Candidate keys: {itinerary_id, mode} and {itinerary_id, provider}. Every attribute is prime, so the table is in 3NF, but provider determines mode and provider is not a superkey, so it violates BCNF; the anomaly is that a provider's mode is repeated in every booking. Decompose into provider(provider, mode) and itinerary_provider(itinerary_id, provider). The decomposition is lossless, but the FD {itinerary_id, mode} determines provider is no longer enforceable by a key in one table; it needs a trigger or an assertion. That tradeoff (BCNF can lose dependency preservation; 3NF synthesis always preserves dependencies) is why 3NF is the common practical target. The write up claims 3NF, so do not claim BCNF unless you have checked every table's determinants.",
+      "evidence": [
+        "portfolio: The schema has twelve entities in third normal form with full referential integrity."
+      ],
+      "sources": [],
+      "tags": [
+        "normalization",
+        "bcnf",
+        "dependency-preservation"
+      ]
+    },
+    {
+      "id": "tdb-09",
+      "type": "why",
+      "level": 2,
+      "q": "The write up says an itinerary's cost should always equal the sum of its components. Do you store the total or compute it?",
+      "easy": "Compute it. A stored total is a second copy of facts that already exist in the component rows, and it will drift the first time someone edits an activity without updating the total. Store it only if reads are too slow, and then keep it in sync inside the database.",
+      "deep": "A total cost column is derived data; storing it introduces a dependency the normal forms do not catch (the total depends on rows in other tables) and creates an update anomaly. Options: (1) compute on read with a view, SELECT itinerary_id, SUM(cost) over the joined components; always correct, cost grows with joins; (2) a function, the same pattern the project uses for total activity time with ufn_estimate_total_activity_time; (3) store it and maintain it with triggers on every component table, or an indexed or materialized view; fast reads, but every write path must update it and concurrency makes that harder; (4) compute it in the application, which reintroduces the problem the project set out to avoid. For an itinerary system with modest read volume, (1) or (2) is correct by construction. The write up lists the rule but does not say how it is enforced, so explain the choice you made and the tradeoff.",
+      "evidence": [
+        "portfolio: An itinerary database carries rules that have to hold on every access path: an activity cannot have negative cost, a hotel must belong to a real destination, an itinerary cost should always equal the sum of its components.",
+        "portfolio: - ufn_estimate_total_activity_time: Returns the total time a traveler will spend on all activities in a given itinerary. Views, filters, and ranking interfaces call it, so itineraries can be sorted or filtered by total activity duration without each of them redoing the math."
+      ],
+      "sources": [],
+      "tags": [
+        "derived-data",
+        "denormalization",
+        "views"
+      ]
+    },
+    {
+      "id": "tdb-10",
+      "type": "how",
+      "level": 1,
+      "q": "How does sp_add_full_itinerary_single make a multi table insert atomic?",
+      "easy": "It runs every insert inside one transaction. If any step fails, including a trigger rejecting a bad duration or cost, the whole thing is rolled back, so the database never holds half an itinerary. The client makes one call and gets back the new itinerary ID.",
+      "deep": "Per the write up: the client passes destination, activity, transport, accommodation, season, and tag; the procedure inserts each child record, links them through the itinerary table, fires the duration and cost triggers, and returns the new itinerary_id, in one round trip, validated and applied atomically. It replaces five separate inserts plus application layer checks. Sketch in T-SQL:\n\n```sql\nCREATE PROCEDURE sp_add_full_itinerary_single @dest INT, ... AS\nBEGIN\n  SET XACT_ABORT ON;  -- any runtime error aborts and rolls back\n  BEGIN TRY\n    BEGIN TRANSACTION;\n      INSERT INTO activity(...) VALUES (...);   SET @act = SCOPE_IDENTITY();\n      -- transport, accommodation, season, tag inserts likewise\n      INSERT INTO itinerary(...) VALUES (...); SET @itin = SCOPE_IDENTITY();\n      INSERT INTO itinerary_activity VALUES (@itin, @act);\n    COMMIT;\n    SELECT @itin AS itinerary_id;\n  END TRY\n  BEGIN CATCH\n    IF @@TRANCOUNT > 0 ROLLBACK;\n    THROW;\n  END CATCH\nEND;\n```\n\nMySQL equivalent: START TRANSACTION, DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END, and LAST_INSERT_ID() for generated keys. Without the explicit transaction, each INSERT autocommits and a failure halfway leaves orphan child rows. The write up does not name the engine; use the dialect you wrote.",
+      "evidence": [
+        "portfolio: - sp_add_full_itinerary_single: Inserts a complete itinerary (activity, transport, accommodation, season info, tag) in a single atomic call. It replaces five separate inserts plus consistency checks at the application layer.",
+        "portfolio: The client passes destination, activity, transport, accommodation, season, and tag to sp_add_full_itinerary_single. The procedure inserts each child record, links them through the itinerary table, fires the duration and cost triggers, and returns the new itinerary_id. The client makes one round trip, and the database validates the whole insert and applies it atomically."
+      ],
+      "sources": [],
+      "tags": [
+        "stored-procedure",
+        "transactions",
+        "atomicity"
+      ]
+    },
+    {
+      "id": "tdb-11",
+      "type": "define",
+      "level": 1,
+      "q": "Explain ACID and isolation levels using this project.",
+      "easy": "Atomicity: the full itinerary insert happens completely or not at all. Consistency: every commit leaves the keys, constraints, and trigger rules satisfied. Isolation: two people saving at once do not see each other's half done work. Durability: once committed, the itinerary survives a crash.",
+      "deep": "Atomicity: the transaction in sp_add_full_itinerary_single, rolled back on any error. Consistency: declared constraints (PK, FK, UNIQUE, CHECK) plus triggers hold at every commit; the application's own invariants (cost equals sum of components) hold only if enforced in the database. Isolation, by level and the anomalies each allows: READ UNCOMMITTED (dirty reads), READ COMMITTED (non repeatable reads, phantoms), REPEATABLE READ (phantoms in the SQL standard; InnoDB's next key locking prevents most), SERIALIZABLE (none; behaves as if transactions ran one at a time). Defaults: SQL Server and PostgreSQL use READ COMMITTED, MySQL InnoDB uses REPEATABLE READ. For inserts of new rows, READ COMMITTED is enough; a rule like 'no more than N activities per day in an itinerary' would need SERIALIZABLE or explicit locking to avoid write skew. Durability: write ahead logging (transaction log in SQL Server, redo log in InnoDB) flushed at commit, so a crash replays committed work.",
+      "evidence": [
+        "portfolio: The client passes destination, activity, transport, accommodation, season, and tag to sp_add_full_itinerary_single. The procedure inserts each child record, links them through the itinerary table, fires the duration and cost triggers, and returns the new itinerary_id. The client makes one round trip, and the database validates the whole insert and applies it atomically."
+      ],
+      "sources": [],
+      "tags": [
+        "acid",
+        "isolation",
+        "transactions"
+      ]
+    },
+    {
+      "id": "tdb-12",
+      "type": "how",
+      "level": 2,
+      "q": "Write the duration and cost triggers, and name the classic trigger bug.",
+      "easy": "Each trigger checks new or changed activity rows and raises an error if duration is zero or negative, or cost is negative, which cancels the statement. The classic bug is writing a SQL Server trigger as if only one row changes at a time.",
+      "deep": "MySQL (row level, BEFORE, NEW pseudo row):\n\n```sql\nCREATE TRIGGER trg_check_activity_duration\nBEFORE INSERT ON activity FOR EACH ROW\nBEGIN\n  IF NEW.duration_hours <= 0 THEN\n    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'duration must be positive';\n  END IF;\nEND;\n-- plus a BEFORE UPDATE twin; trg_check_activity_cost tests NEW.cost < 0\n```\n\nSQL Server (statement level, AFTER or INSTEAD OF only, no BEFORE; the inserted pseudo table holds every affected row):\n\n```sql\nCREATE TRIGGER trg_check_activity_duration ON activity\nAFTER INSERT, UPDATE AS\nIF EXISTS (SELECT 1 FROM inserted WHERE duration_hours <= 0)\nBEGIN\n  ROLLBACK TRANSACTION;\n  THROW 50001, 'duration must be positive', 1;\nEND;\n```\n\nThe bug: SELECT @d = duration_hours FROM inserted reads one arbitrary row, so a bulk import with one bad row can pass. Set based EXISTS checks every row. The write up's triggers reject inserts and updates, so both events must be covered; it does not name the engine.",
+      "evidence": [
+        "portfolio: - trg_check_activity_duration: Rejects any activity insert or update where duration is zero or negative. That catches UI bugs and data import errors that would otherwise silently corrupt the cost calculations downstream.",
+        "portfolio: - trg_check_activity_cost: Rejects negative cost entries, which usually indicate a typo or unit conversion error rather than a genuine refund."
+      ],
+      "sources": [],
+      "tags": [
+        "triggers",
+        "validation",
+        "sql-server",
+        "mysql"
+      ]
+    },
+    {
+      "id": "tdb-13",
+      "type": "why",
+      "level": 2,
+      "q": "Why reject zero duration but allow zero cost?",
+      "easy": "A free activity (a public beach, a walking tour) is real, so zero cost is valid. An activity that takes no time is not, and it would break any calculation that divides by duration or sums time. Negative cost usually means a typo or a unit conversion slip, not a refund.",
+      "deep": "The write up's rules: trg_check_activity_duration rejects duration that is zero or negative, because those rows come from UI bugs or import errors and would silently corrupt downstream cost calculations; trg_check_activity_cost rejects negative cost, which usually indicates a typo or unit conversion error rather than a genuine refund. Design reasoning: the domain of each column should be the set of values that can be true. Cost has a natural floor of 0 inclusive; duration has an open lower bound. Refunds, if needed, belong in a separate table with their own sign convention, so the activity price stays a price. Edge cases worth naming: currency (cost without a currency column is ambiguous across destinations), units for duration (hours vs minutes, the same class of error the cost rule anticipates), and NULLs (a CHECK passes on NULL, so NOT NULL must be declared separately).",
+      "evidence": [
+        "portfolio: - trg_check_activity_duration: Rejects any activity insert or update where duration is zero or negative. That catches UI bugs and data import errors that would otherwise silently corrupt the cost calculations downstream.",
+        "portfolio: - trg_check_activity_cost: Rejects negative cost entries, which usually indicate a typo or unit conversion error rather than a genuine refund."
+      ],
+      "sources": [],
+      "tags": [
+        "domain-constraints",
+        "validation",
+        "design"
+      ]
+    },
+    {
+      "id": "tdb-14",
+      "type": "pushback",
+      "level": 2,
+      "q": "Why use triggers for these checks when a CHECK constraint does the same thing?",
+      "easy": "For a single column range rule, a CHECK constraint is the better tool: it is declarative, visible in the schema, cheaper, and the optimizer can use it. Triggers earn their place when the rule spans rows or tables, needs a custom message, or the engine version ignores CHECK.",
+      "deep": "CHECK (duration_hours > 0) and CHECK (cost >= 0) express both rules in one line each, apply to every insert and update automatically, cannot be accidentally disabled the way triggers can, and document the rule in the table definition. Reasons triggers are still chosen: MySQL parsed but ignored CHECK constraints before version 8.0.16, so older MySQL required triggers; cross table rules (an activity's destination must match its itinerary's destination) cannot be a CHECK in most engines; custom error text; and coursework that asks for triggers. The honest answer: name the reason that applied to your build, and say a CHECK constraint would be the first choice for these two rules on a modern engine, with triggers kept for multi table invariants.",
+      "say": "For a simple range check, a CHECK constraint is better: declarative, cheaper, and visible in the table definition. Triggers make sense when the rule crosses tables, or on MySQL before 8.0.16, which ignored CHECK constraints. If I rebuilt it, the duration and cost rules would be CHECK constraints, and I'd keep triggers for rules like an activity's destination matching its itinerary's.",
+      "evidence": [
+        "portfolio: - trg_check_activity_duration: Rejects any activity insert or update where duration is zero or negative. That catches UI bugs and data import errors that would otherwise silently corrupt the cost calculations downstream.",
+        "portfolio: - trg_check_activity_cost: Rejects negative cost entries, which usually indicate a typo or unit conversion error rather than a genuine refund."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "triggers",
+        "check-constraint"
+      ]
+    },
+    {
+      "id": "tdb-15",
+      "type": "how",
+      "level": 2,
+      "q": "What does ufn_estimate_total_activity_time do, and what is the performance risk of scalar functions?",
+      "easy": "It adds up the time of every activity in one itinerary, so any view, filter, or ranking can sort itineraries by total activity time without repeating the math. The risk is that a scalar function called once per row in a large query can be slow.",
+      "deep": "Sketch:\n\n```sql\nCREATE FUNCTION ufn_estimate_total_activity_time(@itin INT) RETURNS DECIMAL(8,2) AS\nBEGIN\n  RETURN (SELECT COALESCE(SUM(a.duration_hours), 0)\n          FROM itinerary_activity ia JOIN activity a ON a.activity_id = ia.activity_id\n          WHERE ia.itinerary_id = @itin);\nEND;\n```\n\nCOALESCE returns 0 for an itinerary with no activities instead of NULL. Performance: in SQL Server before 2019, scalar UDFs ran row by row, blocked parallel plans, and hid their cost from the optimizer, so ORDER BY dbo.ufn_...(itinerary_id) over many itineraries ran one subquery per row; SQL Server 2019 can inline simple scalar UDFs. Alternatives: an inline table valued function, a view with GROUP BY itinerary_id joined once, or a persisted total maintained by the database. In MySQL, a stored function in WHERE also prevents index use on that expression. The write up's reason for the function is reuse: views, filters, and ranking interfaces call it so none of them redo the math.",
+      "evidence": [
+        "portfolio: - ufn_estimate_total_activity_time: Returns the total time a traveler will spend on all activities in a given itinerary. Views, filters, and ranking interfaces call it, so itineraries can be sorted or filtered by total activity duration without each of them redoing the math."
+      ],
+      "sources": [],
+      "tags": [
+        "udf",
+        "performance",
+        "reuse"
+      ]
+    },
+    {
+      "id": "tdb-16",
+      "type": "code",
+      "level": 2,
+      "q": "Write the two read procedures: full itinerary by ID, and itineraries for a destination.",
+      "easy": "One procedure joins the itinerary to all its linked details for one ID. The other lists every itinerary under a destination, the most common browse query, which needs an index on the destination column.",
+      "deep": "Illustrative columns (the write up names the entities and routines, not the columns):\n\n```sql\nCREATE PROCEDURE sp_get_full_itinerary @itin INT AS\nSELECT i.itinerary_id, i.title, d.name AS destination,\n       acc.name AS accommodation, t.mode, t.provider,\n       s.season_name, a.name AS activity, a.duration_hours, a.cost, tg.name AS tag\nFROM itinerary i\nJOIN destination d            ON d.destination_id = i.destination_id\nLEFT JOIN accommodation acc   ON acc.accommodation_id = i.accommodation_id\nLEFT JOIN transportation t    ON t.transport_id = i.transport_id\nLEFT JOIN seasonal_info s     ON s.season_id = i.season_id\nLEFT JOIN itinerary_activity ia ON ia.itinerary_id = i.itinerary_id\nLEFT JOIN activity a          ON a.activity_id = ia.activity_id\nLEFT JOIN itinerary_tag it    ON it.itinerary_id = i.itinerary_id\nLEFT JOIN tag tg              ON tg.tag_id = it.tag_id\nWHERE i.itinerary_id = @itin;\n\nCREATE PROCEDURE sp_get_itineraries_for_destination @dest INT AS\nSELECT i.itinerary_id, i.title,\n       dbo.ufn_estimate_total_activity_time(i.itinerary_id) AS activity_hours\nFROM itinerary i\nWHERE i.destination_id = @dest\nORDER BY activity_hours;\n```\n\nReview points: LEFT JOIN so an itinerary with no tag still returns; joining two independent one to many branches (activities and tags) multiplies rows (3 activities x 2 tags = 6 rows), so return separate result sets or aggregate one branch (STRING_AGG of tags); index itinerary(destination_id) for the browse query.",
+      "evidence": [
+        "portfolio: - sp_get_full_itinerary: Returns every linked detail of an itinerary by ID, with the joins done inside the database.",
+        "portfolio: - sp_get_itineraries_for_destination: Lists all itineraries available under a selected destination, the most common browse query."
+      ],
+      "sources": [],
+      "tags": [
+        "sql",
+        "joins",
+        "stored-procedure"
+      ]
+    },
+    {
+      "id": "tdb-17",
+      "type": "define",
+      "level": 2,
+      "q": "How do indexes work, and which ones does this schema need?",
+      "easy": "An index is a sorted lookup structure, like a book index, that lets the database jump to matching rows instead of reading the whole table. This schema needs indexes on the foreign key columns that queries filter and join on, especially the destination column used by the browse query.",
+      "deep": "Most relational indexes are B+ trees: balanced, with keys in internal nodes and row pointers (or the rows) in linked leaves, so lookups and range scans cost $O(\\log n)$ plus the matches. Clustered index: the table rows stored in key order (SQL Server clustered index; InnoDB always clusters on the primary key); one per table. Nonclustered or secondary: a separate tree pointing back to rows. Composite indexes follow the leftmost prefix rule, so (destination_id, created_at) serves WHERE destination_id = ? ORDER BY created_at but not a filter on created_at alone. Covering index: includes every column a query needs, so no lookup back to the table. Foreign keys: InnoDB creates an index on FK columns automatically; SQL Server and PostgreSQL do not, so joins and parent deletes scan without one. For this schema: itinerary(destination_id) for sp_get_itineraries_for_destination; junction table primary keys (itinerary_id, activity_id) plus a reverse index (activity_id) for 'which itineraries use this activity'; activity(destination_id); tag(name) unique. Cost: every index slows inserts and updates and uses space, so index for the queries that exist.",
+      "evidence": [
+        "portfolio: - sp_get_itineraries_for_destination: Lists all itineraries available under a selected destination, the most common browse query."
+      ],
+      "sources": [],
+      "tags": [
+        "indexes",
+        "b-tree",
+        "performance"
+      ]
+    },
+    {
+      "id": "tdb-18",
+      "type": "code",
+      "level": 2,
+      "q": "Write three analyst queries against this schema: cost per itinerary, destinations with no itineraries, and the most used tags.",
+      "easy": "Cost per itinerary sums activity costs per itinerary. Destinations with no itineraries need an anti join. Most used tags is a group and count over the junction table.",
+      "deep": "Illustrative columns (the write up names the entities and routines, not the columns):\n\n```sql\n-- 1. activity cost and time per itinerary (correct by construction, no stored total)\nSELECT ia.itinerary_id, SUM(a.cost) AS activity_cost, SUM(a.duration_hours) AS hours\nFROM itinerary_activity ia JOIN activity a ON a.activity_id = ia.activity_id\nGROUP BY ia.itinerary_id;\n\n-- 2. destinations with no itineraries (anti join)\nSELECT d.destination_id, d.name\nFROM destination d\nWHERE NOT EXISTS (SELECT 1 FROM itinerary i WHERE i.destination_id = d.destination_id);\n\n-- 3. top tags, with ties handled by a window function\nSELECT name, uses FROM (\n  SELECT tg.name, COUNT(*) AS uses, DENSE_RANK() OVER (ORDER BY COUNT(*) DESC) AS rk\n  FROM itinerary_tag it JOIN tag tg ON tg.tag_id = it.tag_id\n  GROUP BY tg.name) x\nWHERE rk <= 5;\n```\n\nWhy NOT EXISTS over NOT IN: NOT IN returns no rows if the subquery yields a NULL. Why DENSE_RANK: TOP 5 or LIMIT 5 cuts ties arbitrarily. Because triggers and foreign keys apply to rows written through direct SQL too, analysts can trust these aggregates without defensive filters for negative costs or orphan rows.",
+      "evidence": [
+        "portfolio: - Data analysts querying the database directly get consistent data, because the triggers and foreign keys also apply to rows written through direct SQL."
+      ],
+      "sources": [],
+      "tags": [
+        "sql",
+        "anti-join",
+        "window-functions",
+        "analytics"
+      ]
+    },
+    {
+      "id": "tdb-19",
+      "type": "pushback",
+      "level": 2,
+      "q": "Isn't putting business logic in stored procedures and triggers an anti pattern?",
+      "easy": "It is a real tradeoff. Logic in the database is harder to version, test, and scale out, and ties you to one engine. But integrity rules that must hold for every writer (apps, imports, analysts with SQL access) are exactly what the database is for, and that was the project's argument.",
+      "deep": "Costs: procedural SQL is harder to unit test and debug; deployments need migration discipline; triggers add hidden side effects; the database tier is the hardest to scale horizontally; vendor specific dialects (T-SQL, MySQL's procedural SQL) lock you in. Benefits the write up claims: any client (web, mobile, batch import, ad hoc SQL) gets the same guarantees; developers stop writing defensive code in three languages; one round trip for a multi table write; analysts querying directly get consistent data. A defensible split: invariants about data (keys, ranges, referential rules, atomic multi table writes) in the database; workflow and presentation logic (pricing rules that change weekly, recommendations) in the application. Mitigations: procedures and triggers in version controlled migrations, test scripts that assert rejections, and CHECK constraints instead of triggers where possible.",
+      "say": "It's a tradeoff, and the costs are real: harder testing, engine lock in, and a tier that's hard to scale out. But rules like 'no negative cost' and 'a hotel belongs to a real destination' have to hold for every writer, including a batch import or an analyst with SQL access. Those belong in the database. Business logic that changes often belongs in the app.",
+      "evidence": [
+        "portfolio: This project puts them in the database itself, so any client (web, mobile, batch import, ad hoc SQL) gets the same guarantees automatically.",
+        "portfolio: - Application developers stop writing defensive code in three languages to enforce rules the database already enforces.",
+        "portfolio: With the business rules at the data layer, the application code gets simpler and integrity holds on every read and write path."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "architecture",
+        "stored-procedures"
+      ]
+    },
+    {
+      "id": "tdb-20",
+      "type": "pushback",
+      "level": 3,
+      "q": "Your procedures all start with sp_. Isn't that a known problem?",
+      "easy": "On SQL Server, yes: the sp_ prefix marks system procedures, so the engine checks the master database first, which costs a lookup and risks a name collision with a future system procedure. usp_ or no prefix is the convention. On MySQL the prefix is harmless.",
+      "deep": "SQL Server resolves a procedure named sp_ by looking in master before the current database, and if Microsoft ships a system procedure with the same name, the system one can win. The overhead is small but nonzero, and the collision risk is the real reason the guidance says avoid it. The ufn_ prefix matches SQL Server's own sample database convention, and trg_ is a harmless readability prefix. The write up does not name the engine, so answer for the one used; if it was SQL Server, concede and say you would rename to usp_add_full_itinerary_single.",
+      "say": "On SQL Server, it is: sp_ tells the engine to check master first, and a future system procedure with the same name could shadow mine. The convention is usp_ or no prefix, and I'd rename them. On MySQL it doesn't matter.",
+      "evidence": [
+        "portfolio: - sp_add_full_itinerary_single: Inserts a complete itinerary (activity, transport, accommodation, season info, tag) in a single atomic call. It replaces five separate inserts plus consistency checks at the application layer.",
+        "portfolio: - sp_get_full_itinerary: Returns every linked detail of an itinerary by ID, with the joins done inside the database.",
+        "portfolio: - sp_get_itineraries_for_destination: Lists all itineraries available under a selected destination, the most common browse query."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "naming",
+        "sql-server"
+      ]
+    },
+    {
+      "id": "tdb-21",
+      "type": "pushback",
+      "level": 2,
+      "q": "sp_add_full_itinerary_single adds one activity and one tag. Real trips have many. Doesn't that make the procedure a toy?",
+      "easy": "The name says single, and it does insert one of each per the write up. Real use needs either repeated calls inside one transaction, or a procedure that accepts a list of activities and tags. The schema itself already supports many.",
+      "deep": "Per the write up, the procedure inserts a complete itinerary (activity, transport, accommodation, season info, tag) in one atomic call. Many activities per itinerary are already implied by ufn_estimate_total_activity_time, which totals all activities in a given itinerary. Ways to pass sets: SQL Server table valued parameters (a user defined table type passed READONLY), a JSON array parsed with OPENJSON (SQL Server) or JSON_TABLE (MySQL 8), or a staging table filled by the client and consumed in one transaction. Each keeps the single round trip and atomicity. Also worth noting: the procedure inserts new child records each time, so it would duplicate an activity that already exists; a production version would accept existing activity IDs and insert only the junction rows.",
+      "say": "Fair, the single in the name is literal: one of each per call. The schema supports many activities, and my time function already sums all of them. The production version takes a list, as a table valued parameter or a JSON array, and links existing activities instead of inserting new copies, all in one transaction.",
+      "evidence": [
+        "portfolio: - sp_add_full_itinerary_single: Inserts a complete itinerary (activity, transport, accommodation, season info, tag) in a single atomic call. It replaces five separate inserts plus consistency checks at the application layer.",
+        "portfolio: - ufn_estimate_total_activity_time: Returns the total time a traveler will spend on all activities in a given itinerary. Views, filters, and ranking interfaces call it, so itineraries can be sorted or filtered by total activity duration without each of them redoing the math."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "stored-procedure",
+        "design"
+      ]
+    },
+    {
+      "id": "tdb-22",
+      "type": "pushback",
+      "level": 2,
+      "q": "Twelve normalized tables means a join across many tables to show one itinerary. Isn't that slow?",
+      "easy": "For one itinerary by primary key, no: each join is an index lookup, so the whole query touches a few dozen rows. Normalized joins get expensive for large scans and reports, which is where you add indexes, views, or a separate reporting copy.",
+      "deep": "sp_get_full_itinerary filters on itinerary_id, so the plan is a seek on the itinerary primary key followed by nested loop joins, each an index seek on a primary key or indexed foreign key: cost proportional to the rows returned, roughly O(k log n). What actually hurts: missing foreign key indexes (SQL Server and PostgreSQL do not create them), row multiplication from joining two one to many branches in one query, and scalar functions evaluated per row in browse queries. For heavy read workloads: covering indexes, a cache in front of the read procedure, an indexed or materialized view, or replicating to a denormalized read model for search. The point of 3NF here is correctness under many writers; read performance is handled by indexing first and denormalizing only where measured.",
+      "say": "Fetching one itinerary is a primary key seek and then index seeks per join, so it touches a few dozen rows. Normalization costs show up on big scans and reports, and the fixes there are indexes on the foreign keys, a cached read path, or a denormalized reporting copy. I'd only denormalize where a measurement says to.",
+      "evidence": [
+        "portfolio: - sp_get_full_itinerary: Returns every linked detail of an itinerary by ID, with the joins done inside the database.",
+        "portfolio: The schema has twelve entities in third normal form with full referential integrity."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "performance",
+        "joins"
+      ]
+    },
+    {
+      "id": "tdb-23",
+      "type": "pushback",
+      "level": 2,
+      "q": "How do you know the triggers and procedures actually work?",
+      "easy": "By writing tests that try to break them: insert a zero duration and expect an error, insert a negative cost and expect an error, make the third step of the itinerary procedure fail and confirm nothing was saved. The write up describes the rules, not a test suite, so this is the answer to give.",
+      "deep": "A database test script, each case inside a transaction that is rolled back so the database stays clean: (1) valid full itinerary returns an itinerary_id and exactly one row in each child table; (2) duration 0, duration -1, and an UPDATE that sets duration to 0 all fail with the expected error; (3) cost -0.01 fails and cost 0 succeeds; (4) a forced failure after the first insert in sp_add_full_itinerary_single leaves zero new rows anywhere (atomicity); (5) a multi row insert with one bad row fails as a whole (catches the single row trigger bug); (6) deleting a destination with hotels is blocked by the foreign key; (7) ufn returns 0 for an itinerary with no activities. Tools: tSQLt for SQL Server, or plain scripts with expected errors run in CI against a containerized database.",
+      "say": "The write up describes the rules, not a test suite, so I'd be straight about that. The tests I'd write try to break each rule: zero and negative durations, a negative cost, an update that sneaks a zero in, and a forced failure halfway through the itinerary procedure to prove nothing was saved. Each runs in a transaction that rolls back.",
+      "evidence": [
+        "portfolio: - trg_check_activity_duration: Rejects any activity insert or update where duration is zero or negative. That catches UI bugs and data import errors that would otherwise silently corrupt the cost calculations downstream.",
+        "portfolio: - trg_check_activity_cost: Rejects negative cost entries, which usually indicate a typo or unit conversion error rather than a genuine refund.",
+        "portfolio: - sp_add_full_itinerary_single: Inserts a complete itinerary (activity, transport, accommodation, season info, tag) in a single atomic call. It replaces five separate inserts plus consistency checks at the application layer."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "testing",
+        "database-testing"
+      ]
+    },
+    {
+      "id": "tdb-24",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations, and what happens at 10x and 100x the users?",
+      "easy": "The procedure inserts one of each item, range rules use triggers where constraints would do, there are no tests in the write up, and itinerary cost has no stated enforcement. At scale, the browse query and the per row function are the first bottlenecks, then write contention on one database server.",
+      "deep": "Limitations: single item insert procedure (tdb-21); possible duplicate child rows because the procedure inserts new records; triggers for single column rules (tdb-14); cost equals sum of components stated but not enforced in the write up (tdb-09); no currency column in the sketch; no tests described (tdb-23); sp_ prefix if SQL Server (tdb-20). 10x: index every filtered foreign key, replace scalar UDF calls in browse queries with a set based view, add a cache for popular destinations, read replicas for browse traffic. 100x: shard or partition by destination or region, move search to a search engine fed by change data capture, keep the 3NF database as the system of record for writes, connection pooling, and watch lock contention on hot rows such as popular activities. Operational needs: migrations in version control, backups with tested restores, auditing of who changed rules.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "scaling",
+        "production"
+      ]
+    },
+    {
+      "id": "tdb-25",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next?",
+      "easy": "Replace the range triggers with CHECK constraints, let the itinerary procedure take lists, add a test suite, enforce the cost rule with a view, and index for the browse query.",
+      "deep": "1. CHECK (duration_hours > 0) and CHECK (cost >= 0); keep triggers for cross table rules such as an activity's destination matching its itinerary's destination. 2. sp_add_full_itinerary accepting lists (table valued parameter or JSON) and existing IDs, in one transaction. 3. A view itinerary_cost that sums components so the cost rule is true by construction. 4. A rollback based test script in CI (tdb-23). 5. Indexes on every foreign key used in joins, plus itinerary(destination_id, created_at). 6. Currency and unit columns. 7. Rename sp_ procedures if on SQL Server. 8. An audit table and soft deletes so itinerary history survives edits.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next-steps",
+        "constraints",
+        "testing"
+      ]
+    },
+    {
+      "id": "tdb-26",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager.",
+      "easy": "One sentence on the design principle, the counts, and the one round trip itinerary call; then one honest improvement.",
+      "deep": "Hiring manager version: rules at the data layer so every client inherits them; 12 tables in 3NF; 3 procedures, 2 triggers, 1 function; atomic single call itinerary creation; what Tanay would change (CHECK constraints, list inputs, tests).",
+      "say": "I designed a travel itinerary database where the integrity rules live in the database, so every app and every analyst gets the same guarantees. Twelve tables in third normal form, three stored procedures, two triggers, and a function. Creating a whole itinerary is one call that validates and commits atomically. If I rebuilt it, I'd swap the range triggers for CHECK constraints and add a test suite.",
+      "evidence": [
+        "portfolio: 12 normalized entities  |  3 stored procedures  |  2 triggers  |  1 user defined function  |  Single procedure call generates full itinerary",
+        "portfolio: This project puts them in the database itself, so any client (web, mobile, batch import, ad hoc SQL) gets the same guarantees automatically."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "tdb-27",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the design to a staff engineer.",
+      "easy": "Walk through the boundary between database and application, the transaction design, and the known weak points.",
+      "deep": "Staff version: invariants in the database (FKs, range rules, atomic multi table insert), workflow in the app; transaction with XACT_ABORT or an exit handler; set based triggers; scalar UDF cost; read path indexes; weak points (single item procedure, triggers vs CHECK, no tests in the write up).",
+      "say": "The boundary is invariants in the database and workflow in the app. The itinerary insert is one transaction that rolls back on any error, including a trigger rejection, so you never get half an itinerary. Weak points I'd fix: the procedure takes one activity per call, the range rules should be CHECK constraints, and the scalar function in the browse query should become a set based view.",
+      "evidence": [
+        "portfolio: - sp_add_full_itinerary_single: Inserts a complete itinerary (activity, transport, accommodation, season info, tag) in a single atomic call. It replaces five separate inserts plus consistency checks at the application layer.",
+        "portfolio: The client passes destination, activity, transport, accommodation, season, and tag to sp_add_full_itinerary_single. The procedure inserts each child record, links them through the itinerary table, fires the duration and cost triggers, and returns the new itinerary_id. The client makes one round trip, and the database validates the whole insert and applies it atomically."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer"
+      ]
+    },
+    {
+      "id": "tdb-28",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain this project to a product manager.",
+      "easy": "Talk about the traveler's one click itinerary and the bugs that cannot reach users because the database blocks them.",
+      "deep": "PM version: user story (select options, get a full itinerary in one call), integrity guarantees that protect the experience (no negative prices, no zero length activities, no hotels in nonexistent cities), and faster feature work because new clients inherit the rules.",
+      "say": "The user story was a traveler picking options and getting a full itinerary back in one step. Behind that, the database refuses bad data, like a negative price or an activity with no duration, no matter which app or import sends it. For a product team that means new features don't have to reimplement those checks, and a bug in one client can't corrupt everyone's data.",
+      "evidence": [
+        "portfolio: The client passes destination, activity, transport, accommodation, season, and tag to sp_add_full_itinerary_single. The procedure inserts each child record, links them through the itinerary table, fires the duration and cost triggers, and returns the new itinerary_id. The client makes one round trip, and the database validates the whole insert and applies it atomically."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "pm"
+      ]
+    },
+    {
+      "id": "tdb-29",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a recruiter.",
+      "easy": "Plain description plus the SQL skill list.",
+      "deep": "Recruiter version: designed a 12 table relational database for travel itineraries, wrote stored procedures, triggers, and a function, drew the ERD; skills are SQL, data modeling, normalization (3NF), stored procedures, triggers.",
+      "say": "I designed a database for a travel planning app: twelve tables, an entity relationship diagram, and SQL code that builds a full trip itinerary in one step and blocks bad data like negative prices. The skills are SQL, data modeling, normalization, stored procedures, and triggers.",
+      "evidence": [
+        "portfolio: TAGS: SQL, Data Modeling, Stored Procedures, Triggers, User Defined Functions, ERD Design, 3NF"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    },
+    {
+      "id": "tdb-30",
+      "type": "how",
+      "level": 2,
+      "q": "Walk the user story end to end: what happens, in order, when a traveler creates a trip?",
+      "easy": "The app sends the traveler's choices in one call. The database inserts each piece, links them to a new itinerary, runs the duration and cost checks, and returns the new ID, all or nothing.",
+      "deep": "1. Client calls sp_add_full_itinerary_single with destination, activity, transport, accommodation, season, and tag. 2. The procedure opens a transaction. 3. It inserts each child record; each activity insert fires trg_check_activity_duration and trg_check_activity_cost. 4. It inserts the itinerary row with foreign keys to the children (foreign key checks run here, so a nonexistent destination fails). 5. It inserts junction rows for activity and tag links. 6. On success, COMMIT and return itinerary_id; on any error, ROLLBACK and rethrow so the client sees the reason. 7. The client can immediately call sp_get_full_itinerary with that ID. Effects: one network round trip instead of five inserts plus checks; the validation is identical for web, mobile, batch import, and direct SQL; and the duration and cost checks have already run by the time the traveler sees the itinerary.",
+      "evidence": [
+        "portfolio: The client passes destination, activity, transport, accommodation, season, and tag to sp_add_full_itinerary_single. The procedure inserts each child record, links them through the itinerary table, fires the duration and cost triggers, and returns the new itinerary_id. The client makes one round trip, and the database validates the whole insert and applies it atomically.",
+        "portfolio: - Travelers creating a trip get one call that returns a complete itinerary, with the duration and cost checks already run."
+      ],
+      "sources": [],
+      "tags": [
+        "user-story",
+        "transactions",
+        "flow"
+      ]
+    }
+  ],
+  "sources": []
+}
