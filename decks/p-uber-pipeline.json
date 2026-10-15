@@ -1,0 +1,692 @@
+{
+  "deck_id": "p-uber-pipeline",
+  "title": "Uber Data Engineering Pipeline",
+  "group": "Portfolio",
+  "repo": "",
+  "summary_easy": "Tanay built the full path from raw New York City taxi trip data to an interactive Power BI dashboard on Google Cloud: a data lake in Cloud Storage, Python cleaning jobs on Compute Engine, a star schema loaded into partitioned BigQuery tables, and exploratory analysis in Jupyter. The goal was to do every stage of the data lifecycle once on real cloud services.",
+  "summary_deep": "Raw and intermediate Parquet files live in Cloud Storage as the data lake. Compute Engine VMs run Python ETL that reads from Cloud Storage, transforms with pandas and NumPy, and writes cleaned Parquet back. The data is modeled as a star schema (designed in Lucid Charts, fact and dimension tables with explicit primary and foreign keys) and loaded into BigQuery as partitioned tables for time range queries, which matters because BigQuery's on demand cost is bytes scanned. Jupyter EDA covered trip distances, fare structure, revenue concentration, and usage by borough and time of day, feeding a Power BI dashboard with heat maps, time series, and slicers. The write up names no orchestrator, tests, or monitoring, and the pandas transform is single machine, so the interview probes are scaling, ELT versus ETL, idempotent scheduling, and unenforced keys in BigQuery.",
+  "sheet": {
+    "easy": "## What it is\n- Data engineering project (Jul 2024 to Dec 2024): raw **NYC taxi trip data** to a stakeholder dashboard, every layer on Google Cloud.\n- Not Uber's internal data: public taxi trip records.\n\n## The layers\n| Layer | Service | Job |\n|---|---|---|\n| Storage | Cloud Storage | data lake: raw and intermediate Parquet |\n| Compute | Compute Engine VMs | Python ETL with pandas and NumPy, writes cleaned Parquet |\n| Analytics | BigQuery | SQL, cleaned data in partitioned tables |\n| Explore | Jupyter | distances, fares, revenue concentration, boroughs, times of day |\n| Present | Power BI | heat maps, time series, slicers |\n\n## Modeling\n- **Star schema** designed in Lucid Charts: a trip fact table plus dimension tables, explicit primary and foreign keys.\n- Fact = numbers about each trip (fare, tip, distance). Dimension = what you slice by (time, place, payment type).\n- Grain = what one row means; for this source, one trip.\n\n## Why these choices\n- **Parquet**: columnar, compressed, typed; smaller and faster than CSV.\n- **Partitioning**: BigQuery charges by bytes scanned; a one week query reads one week.\n\n## Honest gaps\n- Write up names no orchestrator, tests, or monitoring.\n- The pandas step runs on one machine and is the first thing to break at scale.\n\n## Next\n- Transform inside BigQuery with dbt, a daily scheduled load, and checks that totals match at every step.\n",
+    "deep": "## Stack exactly as written\n- Data: raw NYC taxi trip data. Model: star schema in Lucid Charts, fact and dimension tables, explicit PK and FK.\n- GCP, three layers: Cloud Storage (data lake, raw and intermediate Parquet); Compute Engine VMs (Python ETL: read GCS, transform with pandas and NumPy, write cleaned Parquet); BigQuery (SQL analytics, cleaned data loaded as partitioned tables for time range queries).\n- Jupyter EDA: trip distance distribution, fare structure, revenue concentration, usage across boroughs and times of day.\n- Power BI: geographic heat maps, time series views, slicers.\n- Not stated: orchestrator, partition column, table names, grain, cleaning rules, Power BI connection mode. Do not claim them.\n\n## Dimensional modeling\n- Kimball steps: business process, grain, dimensions, facts.\n- Grain: one row per trip (atomic for this source).\n- Illustrative tables: `fact_trip` (keys plus passenger_count, trip_distance, fare_amount, extra, mta_tax, tip_amount, tolls_amount, improvement_surcharge, total_amount), `dim_datetime`, `dim_location` (role playing: pickup, dropoff), `dim_rate_code` (1 standard, 2 JFK, 3 Newark, 4 Nassau or Westchester, 5 negotiated, 6 group), `dim_payment_type` (1 card, 2 cash, 3 no charge, 4 dispute, 5 unknown, 6 voided).\n- Additivity: additive (fares, tips, distance), semi additive (balances, snapshots), non additive (ratios). Tip rate $= \\sum tip / \\sum fare$.\n- Keys: surrogate vs natural; SCD Type 1 overwrite, Type 2 new row with effective dates; degenerate dimension (trip ID in the fact).\n- Star vs snowflake vs one big table: star for Power BI and maintainability; tiny dimensions broadcast cheaply in BigQuery.\n\n## Storage and formats\n- Parquet: row groups, column chunks, pages; dictionary and RLE encoding; Snappy; footer schema and min and max stats; projection and predicate pushdown.\n- Lake zones: raw (immutable), clean, curated; date prefixed paths for cheap reprocessing.\n\n## BigQuery\n- Capacitor columnar storage, Dremel execution, slots; storage and compute separate.\n- On demand cost = bytes scanned. `SELECT *` is the expensive shape; LIMIT does not reduce bytes on a regular table.\n- Partitioning: time unit column, ingestion time, integer range. Prune only on direct partition column filters. `require_partition_filter`.\n- Clustering: up to four columns, block pruning.\n- PK and FK are declared but not enforced: check integrity in the pipeline.\n\n```sql\nCREATE TABLE taxi.fact_trip\nPARTITION BY DATE(pickup_ts)\nCLUSTER BY pickup_location_id, payment_type_id\nOPTIONS (require_partition_filter = TRUE) AS\nSELECT * FROM taxi.stage_trip;\n```\n\n## ETL vs ELT\n| | ETL (as built) | ELT (next) |\n|---|---|---|\n| Transform | pandas on a VM | SQL in BigQuery (dbt, Dataform) |\n| Scale | one machine's memory | warehouse workers |\n| Tests | ad hoc | model tests next to SQL |\n\n## Orchestration (to add)\n- Daily DAG: land, transform, validate, load one partition (WRITE_TRUNCATE), refresh BI. Idempotent; backfill is a loop.\n- GCP: Cloud Composer (Airflow), Workflows plus Cloud Scheduler, Cloud Run jobs on GCS events.\n\n## Data quality and reconciliation\n- Taxi quirks: negative amounts, zero distance, zero passengers, dropoff before pickup, out of month timestamps, zero coordinates on old files.\n- Reconcile counts and SUM(total_amount) raw to clean to BigQuery to dashboard; orphan key anti joins.\n\n## Power BI\n- Import vs DirectQuery vs composite. One to many single direction relationships, marked date table, DAX measures.\n\n## Scale\n- 10x: VM memory, full reloads, DirectQuery scans. 100x: ELT or Spark on Dataproc, incremental loads, clustering, reservations.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "I built a full data pipeline on Google Cloud, from a raw file of New York taxi trips to a Power BI dashboard. Raw and cleaned Parquet live in Cloud Storage, Python jobs on Compute Engine do the cleaning with pandas, and the cleaned data is modeled as a star schema and loaded into BigQuery as time partitioned tables. Most exercises stop at a notebook, and I wanted every layer once on real cloud services.",
+      "keypoints": [
+        "Raw NYC taxi trip data to dashboard",
+        "Cloud Storage as lake, Parquet",
+        "Python ETL on Compute Engine with pandas",
+        "Star schema, partitioned BigQuery tables",
+        "Power BI with maps, time series, slicers"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "Most data engineering exercises stop at a notebook. I wanted the whole lifecycle on a real cloud stack: ingestion, storage, transformation, modeling, querying, and visualization. The data is the public New York City taxi trip records. I designed a star schema first, in Lucid Charts, with a trip fact table and dimension tables for things like time, location, and payment type, with explicit primary and foreign keys. The infrastructure had three layers on Google Cloud. Cloud Storage was the data lake, holding raw and intermediate Parquet files. Compute Engine VMs ran Python ETL jobs that read from Cloud Storage, cleaned and reshaped the data with pandas and NumPy, and wrote cleaned Parquet back. BigQuery was the analytics layer, with the cleaned data loaded as partitioned tables, so a query over one week only scans that week. On top, I did exploratory analysis in Jupyter, looking at trip distance distributions, fare structure, revenue concentration, and usage across boroughs and times of day. That fed a Power BI dashboard with heat maps, time series, and slicers so stakeholders could explore on their own. The lesson was the shift from local CSVs to object storage and elastic compute. Storage and the warehouse scale by configuration. I'd be honest that the pandas step doesn't, since it's bounded by one machine's memory. What I'd change: move the transform into BigQuery with dbt, add an orchestrator that loads one day's partition at a time idempotently, and add reconciliation checks so the dashboard totals provably match the raw data.",
+      "keypoints": [
+        "Full lifecycle, not a notebook",
+        "Star schema designed first, explicit keys",
+        "Three GCP layers: Cloud Storage, Compute Engine, BigQuery",
+        "Partitioned tables for time range queries",
+        "Jupyter EDA, Power BI dashboard",
+        "Honest: pandas step is single machine",
+        "Next: ELT with dbt, orchestrator, reconciliation"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, layer by layer, including what you'd change.",
+      "script": "I'll go layer by layer and then through the parts I'd rebuild. Source and model. The data is the public New York City taxi trip records, one record per trip with timestamps, locations, rate code, payment type, passenger count, distance, and the fare components: fare, extras, tax, tip, tolls, surcharge, total. Before writing code I modeled it as a star schema in Lucid Charts. The atomic grain for this source is one row per trip. Dimensions are what you slice by: a date and time dimension, a location dimension that plays two roles for pickup and dropoff, and small lookup dimensions for rate code and payment type, which the source stores as integer codes. Measures stay in the fact table, and they're additive, which matters later: tip rate has to be computed as a sum of tips over a sum of fares, never as an average of per trip percentages. Storage. Cloud Storage is the data lake, with raw files kept as received and intermediate files as Parquet. Parquet matters for three reasons. It's columnar, so a reader can pull only the columns it needs. The footer stores min and max statistics per row group, so filters can skip data. And types are stored in the file, so a timestamp stays a timestamp, which removes a whole class of CSV parsing bugs. Compute. Compute Engine VMs run Python ETL. A job reads from Cloud Storage, casts types and cleans with pandas and NumPy, builds the fact and dimension tables, and writes cleaned Parquet back. The VM holds no state, so it can be resized or replaced without touching data. Warehouse. The cleaned data is loaded into BigQuery as partitioned tables. BigQuery's on demand cost is bytes scanned, so time partitioning is a cost decision as much as a speed one: a query filtered to one month reads only that month's partitions. Two details I'd point out. Partition pruning only happens when you filter the partition column directly. And BigQuery doesn't enforce primary or foreign keys, so referential integrity has to be checked in the pipeline. Consumption. Jupyter for exploratory analysis of distances, fare structure, revenue concentration, and usage by borough and time of day, then Power BI with geographic heat maps, time series, and slicers. Power BI's model wants a star: one to many relationships from each dimension to the fact table, and measures defined once in DAX. What I'd change, honestly. First, the transform. Pandas on one VM is the part that doesn't scale by configuration; it has to fit in memory. At 10x I'd chunk by day or move to DuckDB or Polars; at 100x the transform belongs in BigQuery as ELT with dbt, or in Spark on Dataproc. My write up says scaling becomes a configuration change, and that's true for storage and the warehouse, not for the pandas step. Second, orchestration. The write up doesn't describe a scheduler. I'd add a daily DAG that loads raw, transforms, validates, and overwrites exactly one date partition, so reruns are idempotent and backfills are a loop. Third, correctness. Row counts and revenue totals reconciled from raw to clean to BigQuery to the dashboard, every dropped row tied to a named rule, and an orphan key check. Taxi data has negative fares, zero distances, and impossible timestamps, so those rules are where the real decisions are. The design choice I'd defend is the layering itself: immutable raw data, stateless compute, a modeled and partitioned warehouse, and a BI layer that only reads modeled tables.",
+      "keypoints": [
+        "Grain one row per trip; role playing location and time dimensions",
+        "Additive measures; ratios as ratio of sums",
+        "Parquet: columnar, statistics for skipping, typed",
+        "Stateless VMs between two storage layers",
+        "BigQuery bills bytes scanned; partition pruning; keys not enforced",
+        "Power BI wants a star; DAX measures",
+        "Rebuild: ELT with dbt, daily idempotent DAG, reconciliation"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone who isn't technical.",
+      "script": "Companies collect huge piles of raw records, and someone has to turn them into a dashboard people can trust. I built that whole chain myself on Google's cloud, using public data on New York taxi trips. First the raw files go into cheap cloud storage. Then a program cleans them, fixing types and removing trips that make no sense. Then the cleaned data is organized into tables designed for questions like 'when and where do trips peak' and loaded into a cloud database. At the end is a dashboard with maps, charts over time, and filters, so someone can explore without writing code. The main thing I learned is that in the cloud, handling ten times more data is mostly a setting, except for the cleaning step, which I'd rebuild.",
+      "keypoints": [
+        "Raw records to a trusted dashboard",
+        "Public NYC taxi trip data on Google Cloud",
+        "Store, clean, organize, load, visualize",
+        "Maps, time charts, filters for self service",
+        "Cleaning step is the part to rebuild for scale"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the architecture.",
+      "script": "I start on the left with a box labelled raw taxi trip file, and an arrow into a bucket labelled Cloud Storage. Inside the bucket I draw two folders, raw and intermediate, and write Parquet next to them, and I say raw is never modified so any bug can be replayed. Second, below the bucket, a box labelled Compute Engine VM with pandas and NumPy. Two arrows: one up from the raw folder into the VM, one back from the VM into the intermediate folder. I say the VM holds no data, so it can be resized or replaced. Third, to the right, a BigQuery box. Inside it I draw the star: a fact_trip table in the middle and four dimensions around it, datetime, location, rate code, and payment type. I write grain: one row per trip, and next to location I write pickup and dropoff, because it plays two roles. Under the fact table I draw it sliced into daily partitions and say a one month query reads only those partitions, which is what you pay for. Fourth, on the far right, Power BI with three small icons: a heat map, a time series, and a slicer. Jupyter hangs off BigQuery as the exploration step. Last, I circle the VM in a different color and write 'single machine, first to break', and draw the dashed future path: raw straight into BigQuery, dbt models, and an orchestrator box above everything that runs one day at a time.",
+      "keypoints": [
+        "Raw file to Cloud Storage, raw and intermediate zones",
+        "Stateless VM with pandas between storage hops",
+        "Star schema inside BigQuery, grain one trip",
+        "Daily partitions, bytes scanned is cost",
+        "Power BI and Jupyter as consumers",
+        "Circle the VM as the scaling limit; draw ELT and orchestrator"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What was the grain of the fact table, and why does grain matter?",
+      "script": "The grain is what one row means, and for this source the atomic grain is one row per trip, because that's the finest level the records have. Declaring it first stops you from mixing levels, like putting a daily total on a trip row, which double counts when summed. Every dimension has to be true at that grain: pickup time, dropoff time, the two locations, rate code, and payment type. Every measure has to be additive at that grain, so fares, tips, tolls, and distance live on the trip row and ratios like tip rate are computed from sums at query time.",
+      "keypoints": [
+        "Grain is what one row means",
+        "Atomic grain: one row per trip",
+        "Mixed grain causes double counting",
+        "Dimensions must be true at that grain",
+        "Ratios computed from sums at query time"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why partition the BigQuery tables, and what does it save?",
+      "script": "BigQuery's on demand pricing charges for bytes scanned, and it stores data by column. Partitioning on time splits the table into daily chunks, so a query over one week reads seven partitions instead of the whole table. That cuts cost and latency together. Two details matter. The filter has to be on the partition column directly, or pruning doesn't happen. And I'd set require partition filter so nobody accidentally scans everything. Clustering on location would be the next step, since the borough analysis filters on it.",
+      "keypoints": [
+        "On demand billing is bytes scanned",
+        "Daily partitions; a week reads seven",
+        "Filter the partition column directly to prune",
+        "require_partition_filter as a guard",
+        "Cluster on location next"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you orchestrate this?",
+      "script": "My write up doesn't describe a scheduler, so I'd add one. I'd model it as a daily DAG: land the raw file, transform it, validate it, load exactly that date's partition into BigQuery with an overwrite, then refresh the dashboard. Overwriting one partition makes every task idempotent, so a rerun can't duplicate data, and a backfill is just a loop over dates. On Google Cloud that's Cloud Composer, which is managed Airflow, or something lighter like Cloud Scheduler triggering Cloud Run jobs. I'd also add retries, a failure alert, and a freshness check.",
+      "keypoints": [
+        "Not in the write up; say so",
+        "Daily DAG: land, transform, validate, load, refresh",
+        "Partition overwrite makes tasks idempotent",
+        "Backfill is a loop over dates",
+        "Cloud Composer or Scheduler plus Cloud Run"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why transform in pandas before loading instead of in BigQuery?",
+      "script": "Pandas made each step visible and easy to debug while I was learning the stack, and Python handles cleaning logic that's awkward in SQL. That's the case for ETL. The case against is scale and operations: the transform is bounded by one VM's memory and it's a second system to run. If I rebuilt it, I'd load raw Parquet into a staging dataset and build the star schema with SQL models in dbt. BigQuery scales the transform, the tests sit next to the models, and the raw table stays queryable for debugging.",
+      "keypoints": [
+        "ETL: visible steps, Python flexibility",
+        "Cost: single VM memory, extra system",
+        "ELT: raw to staging, SQL models with dbt",
+        "Transform scales with BigQuery",
+        "Tests and lineage live with the models"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "This is a well known tutorial project. What did you actually learn?",
+      "script": "It's a common dataset and a common stack, and I don't present it as novel. What I can defend is understanding each choice. Parquet because it's typed and columnar with statistics for skipping. Time partitioning because BigQuery bills bytes scanned. A star schema at trip grain with additive measures, so tip rate is a ratio of sums. And I know where it breaks: the pandas step is bounded by one machine, and BigQuery won't enforce my keys. If I rebuilt it, the transform would be ELT with dbt and an orchestrator would load one day at a time.",
+      "keypoints": [
+        "Concede: common dataset and stack",
+        "Defend: can explain every choice",
+        "Parquet, partitioning, grain, additive measures",
+        "Know the failure points: pandas, unenforced keys",
+        "Rebuild plan: ELT with dbt plus orchestrator"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your lesson says scaling is a configuration change. That's not true for your pandas step.",
+      "script": "Right, and I'd correct the sentence. It holds for Cloud Storage and BigQuery, where more data really is a setting. The pandas job runs on one VM and has to fit in memory, so a bigger machine helps for a while and then it doesn't. What the architecture does get right is isolation. The VM only reads from and writes to Cloud Storage, so replacing pandas with BigQuery SQL or Spark on Dataproc doesn't touch storage, the warehouse, or the dashboard. That's the change I'd make at 100x.",
+      "keypoints": [
+        "Concede: pandas step doesn't scale by config",
+        "Storage and BigQuery do",
+        "Bigger VM helps only up to a point",
+        "Defend: stateless compute isolates the change",
+        "At 100x: BigQuery SQL or Spark on Dataproc"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "ub-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is this project, and why did you build it?",
+      "easy": "Tanay built the whole path from a raw file of New York City taxi trips to a dashboard a stakeholder can click through, on Google Cloud: storage, cleaning, a star schema, SQL in BigQuery, and Power BI. The point was to do every stage of the data lifecycle once, on real cloud services, instead of stopping at a notebook.",
+      "deep": "A data engineering project (Jul 2024 to Dec 2024). Ingestion and storage in Cloud Storage as a data lake of raw and intermediate Parquet files; transformation in Python (pandas and NumPy) on Compute Engine VMs that read from and write back to Cloud Storage as cleaned Parquet; modeling as a star schema with fact and dimension tables and explicit primary and foreign keys, designed in Lucid Charts; analytics in BigQuery with the cleaned data loaded as partitioned tables for time range queries; exploratory analysis in Jupyter; and an interactive Power BI dashboard with geographic heat maps, time series views, and slicers. The motivation is stated plainly in the write up: most data engineering exercises stop at a notebook, and the deliverable here was the entire path from raw file to stakeholder ready dashboard.",
+      "say": "I wanted one project that covered the whole data lifecycle on a real cloud stack, so I took raw New York taxi trip data all the way to a Power BI dashboard on Google Cloud. Cloud Storage held the raw and cleaned Parquet, Python jobs on Compute Engine did the cleaning, I modeled it as a star schema, and BigQuery served the SQL. The lesson I took away was how much changes when storage and compute are separate and elastic.",
+      "evidence": [
+        "portfolio: META: Data Engineering / Jul 2024 to Dec 2024",
+        "portfolio: Most data engineering exercises stop at a notebook.",
+        "portfolio: I wanted the full lifecycle in one project, end to end on a real cloud stack: ingestion, storage, transformation, modeling, querying, and visualization.",
+        "portfolio: The deliverable was the entire path from a raw data file to a stakeholder ready dashboard, rather than a single model or chart.",
+        "portfolio: I modeled the raw NYC taxi trip data as a star schema in Lucid Charts, with fact and dimension tables and explicit primary and foreign key relationships."
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "gcp",
+        "etl",
+        "star-schema"
+      ]
+    },
+    {
+      "id": "ub-02",
+      "type": "how",
+      "level": 1,
+      "q": "Describe the architecture layer by layer.",
+      "easy": "Three layers on Google Cloud. Storage: Cloud Storage holds raw and intermediate Parquet files. Compute: Compute Engine virtual machines run Python jobs that read from storage, clean with pandas and NumPy, and write cleaned Parquet back. Analytics: BigQuery holds the cleaned data as partitioned tables, and Power BI sits on top.",
+      "deep": "Storage layer: Google Cloud Storage (GCS), object storage organized in buckets, used as the data lake for raw and intermediate Parquet. Compute layer: Compute Engine, Google's infrastructure as a service virtual machines, running Python ETL jobs; data moves GCS to VM memory (pandas DataFrame) to GCS, so the VM is stateless with respect to data and can be resized or replaced. Analytics layer: BigQuery, a serverless columnar warehouse that separates storage from compute, with the cleaned data loaded as partitioned tables so time range queries scan only the partitions they need. Presentation: Power BI on top of the modeled data, after exploratory analysis in Jupyter. The design separates durable storage (GCS, BigQuery) from disposable compute (VMs), which is what the write up's lesson about elastic compute refers to. The write up does not name an orchestrator or scheduler, so the honest description of the compute layer is 'Python ETL jobs on VMs'.",
+      "evidence": [
+        "portfolio: The infrastructure was deployed on Google Cloud Platform in three layers:",
+        "portfolio: - Storage layer. Cloud Storage as the data lake for raw and intermediate Parquet files.",
+        "portfolio: - Compute layer. Compute Engine VMs running Python ETL jobs that read from Cloud Storage, transform with Pandas and NumPy, and write back as cleaned Parquet.",
+        "portfolio: - Analytics layer. BigQuery for SQL analytics at scale, with the cleaned data loaded as partitioned tables for efficient time range queries.",
+        "portfolio: End to end cloud pipeline  |  Star schema modeling  |  Cloud Storage + Compute Engine + BigQuery  |  Interactive BI dashboard"
+      ],
+      "sources": [],
+      "tags": [
+        "architecture",
+        "gcs",
+        "compute-engine",
+        "bigquery"
+      ]
+    },
+    {
+      "id": "ub-03",
+      "type": "how",
+      "level": 1,
+      "q": "Trace one trip record from the raw file to the dashboard.",
+      "easy": "The raw trip file lands in Cloud Storage. A Python job on a virtual machine reads it, cleans it, splits it into fact and dimension tables, and writes cleaned Parquet back. Those files are loaded into BigQuery tables, SQL answers the analysis questions, and Power BI shows the results as maps, time series, and filters.",
+      "deep": "1. Ingest: the raw NYC taxi trip file is stored unchanged in a Cloud Storage bucket (the raw zone). 2. Transform: a Compute Engine VM runs a Python job that reads the object (for Parquet, pandas.read_parquet through a GCS filesystem layer, or a download first), applies type casting and cleaning with pandas and NumPy, and builds the star schema tables. 3. Write back: cleaned tables are written to Cloud Storage as Parquet (the intermediate or clean zone). 4. Load: Parquet is loaded into BigQuery as partitioned tables; batch load jobs from GCS read Parquet's embedded schema. 5. Query: SQL in BigQuery joins the fact table to dimensions for analysis. 6. Explore: Jupyter for distributions of trip distance, fare structure, revenue concentration, and usage by borough and time of day. 7. Present: Power BI with heat maps, time series, and slicers. The steps listed in the write up are storage, Python ETL on VMs, partitioned BigQuery tables, Jupyter EDA, and Power BI; the reading and loading mechanics in steps 2 and 4 are the standard way those services connect, so describe your own commands if asked.",
+      "evidence": [
+        "portfolio: - Storage layer. Cloud Storage as the data lake for raw and intermediate Parquet files.",
+        "portfolio: - Compute layer. Compute Engine VMs running Python ETL jobs that read from Cloud Storage, transform with Pandas and NumPy, and write back as cleaned Parquet.",
+        "portfolio: - Analytics layer. BigQuery for SQL analytics at scale, with the cleaned data loaded as partitioned tables for efficient time range queries.",
+        "portfolio: Exploratory analysis in Jupyter surfaced patterns in trip distance distribution, fare structure, revenue concentration, and service usage across boroughs and times of day.",
+        "portfolio: The findings then fed an interactive Power BI dashboard with geographical heat maps, time series views, and slicers for stakeholder driven exploration."
+      ],
+      "sources": [],
+      "tags": [
+        "data-flow",
+        "etl",
+        "parquet"
+      ]
+    },
+    {
+      "id": "ub-04",
+      "type": "define",
+      "level": 1,
+      "q": "What is a star schema?",
+      "easy": "A way of laying out analytics tables: one central table of events (the fact table, here trips) surrounded by lookup tables that describe them (dimension tables such as time, location, and payment type). Drawn out, the dimensions sit around the fact table like the points of a star.",
+      "deep": "Dimensional modeling (Kimball). The fact table holds one row per measurement event at a declared grain, with numeric measures and a foreign key to each dimension. Dimension tables are wide, denormalized, descriptive tables keyed by a primary key, holding the attributes people filter and group by. Queries follow one pattern: filter dimensions, join to the fact table on keys, aggregate measures (a star join). Why it works: simple joins (one hop), predictable query shapes for BI tools, dimension attributes reused across facts (conformed dimensions), and measures that aggregate cleanly. Contrast with third normal form, which minimizes redundancy for transactional writes, and with snowflake schemas, which normalize dimensions into sub dimensions. Tanay designed the schema in Lucid Charts with explicit primary and foreign key relationships before building it.",
+      "evidence": [
+        "portfolio: I modeled the raw NYC taxi trip data as a star schema in Lucid Charts, with fact and dimension tables and explicit primary and foreign key relationships."
+      ],
+      "sources": [],
+      "tags": [
+        "star-schema",
+        "dimensional-modeling",
+        "kimball"
+      ]
+    },
+    {
+      "id": "ub-05",
+      "type": "define",
+      "level": 1,
+      "q": "What goes in a fact table versus a dimension table, and what are additive, semi additive, and non additive measures?",
+      "easy": "Facts are the numbers you add up about events (fare, tip, distance). Dimensions are the descriptions you slice by (when, where, how paid). Additive measures can be summed in any direction; others cannot.",
+      "deep": "Fact table: foreign keys to dimensions plus numeric measures; tall and narrow; grows with every event. Dimension table: a primary key (often a surrogate integer) plus descriptive attributes; short and wide; changes slowly. Measures by additivity: additive (sum across every dimension: fare_amount, tip_amount, total_amount, trip_distance in taxi data); semi additive (sum across some dimensions but not time, such as an account balance or a count of active vehicles at a point in time); non additive (cannot be summed at all: ratios and averages such as tip percentage or average speed). Rule: store the additive components and compute ratios at query time, for example tip rate as SUM(tip_amount) / SUM(fare_amount), never as an average of per trip percentages, which weights short trips the same as long ones. Primary key: uniquely identifies a row. Foreign key: a column whose values must exist as a primary key in the referenced table, which in BigQuery is declared but not enforced, so integrity has to be checked in the ETL.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "fact-table",
+        "dimension-table",
+        "measures",
+        "keys"
+      ]
+    },
+    {
+      "id": "ub-06",
+      "type": "concept",
+      "level": 1,
+      "q": "What is the grain of a fact table, and what grain fits taxi trip data?",
+      "easy": "The grain is the exact meaning of one row. For taxi data the natural grain is one row per trip, because that is the most detailed level the source records.",
+      "deep": "Kimball's four steps: (1) pick the business process (taxi trips), (2) declare the grain (one row per completed trip), (3) identify the dimensions true at that grain (pickup time, dropoff time, pickup and dropoff location, rate code, payment type, vendor), (4) identify the facts (passenger_count, trip_distance, fare_amount, extra, mta_tax, tip_amount, tolls_amount, improvement_surcharge, total_amount). Declaring grain first prevents mixing levels, for example a daily revenue column inside a per trip table, which double counts when summed. Atomic grain keeps every question answerable; aggregate tables (trips per zone per hour) can be built on top for speed. The write up states a star schema with fact and dimension tables but not the grain, so in an interview confirm it against the Lucid Charts diagram; one row per trip is the grain that matches the source.",
+      "evidence": [
+        "portfolio: I modeled the raw NYC taxi trip data as a star schema in Lucid Charts, with fact and dimension tables and explicit primary and foreign key relationships."
+      ],
+      "sources": [],
+      "tags": [
+        "grain",
+        "kimball",
+        "fact-table"
+      ]
+    },
+    {
+      "id": "ub-07",
+      "type": "how",
+      "level": 2,
+      "q": "Sketch a star schema for the NYC taxi trip data.",
+      "easy": "One trip fact table in the middle, with keys out to a time dimension, a location dimension used twice (pickup and dropoff), a rate code dimension, and a payment type dimension. Fares, tips, tolls, distance, and passenger counts live in the fact table.",
+      "deep": "Illustrative design built from the public NYC TLC trip record columns (the write up does not list the tables, so present this as the shape and give your own names if asked):\n\n```sql\nfact_trip(trip_id PK, pickup_datetime_id FK, dropoff_datetime_id FK,\n          pickup_location_id FK, dropoff_location_id FK,\n          rate_code_id FK, payment_type_id FK, vendor_id,\n          passenger_count, trip_distance, fare_amount, extra, mta_tax,\n          tip_amount, tolls_amount, improvement_surcharge, total_amount)\ndim_datetime(datetime_id PK, ts, date, hour, weekday, month, year)\ndim_location(location_id PK, latitude, longitude or zone, borough)\ndim_rate_code(rate_code_id PK, rate_code_name)\ndim_payment_type(payment_type_id PK, payment_type_name)\n```\n\nThe TLC data dictionary codes rate codes (1 standard, 2 JFK, 3 Newark, 4 Nassau or Westchester, 5 negotiated, 6 group ride) and payment types (1 credit card, 2 cash, 3 no charge, 4 dispute, 5 unknown, 6 voided), which is exactly what small lookup dimensions are for. dim_location plays two roles (pickup and dropoff), as does dim_datetime. Borough as a location attribute is what makes the 'usage across boroughs' analysis a simple GROUP BY.",
+      "evidence": [
+        "portfolio: I modeled the raw NYC taxi trip data as a star schema in Lucid Charts, with fact and dimension tables and explicit primary and foreign key relationships.",
+        "portfolio: Exploratory analysis in Jupyter surfaced patterns in trip distance distribution, fare structure, revenue concentration, and service usage across boroughs and times of day."
+      ],
+      "sources": [],
+      "tags": [
+        "star-schema",
+        "nyc-taxi",
+        "design"
+      ]
+    },
+    {
+      "id": "ub-08",
+      "type": "compare",
+      "level": 2,
+      "q": "Star schema, snowflake schema, or one big table: which fits BigQuery and Power BI?",
+      "easy": "A star keeps descriptions in a few flat lookup tables. A snowflake splits those lookups further. One big table copies every description onto every row so no joins are needed. BigQuery handles wide tables well, and Power BI works best with a star.",
+      "deep": "Snowflake: normalizes dimensions (location to borough table), saving a little storage at the cost of more joins and harder BI modeling. One big table (OBT): fully denormalized, often with nested and repeated fields in BigQuery; no join cost and simplest SQL, but dimension changes require rewriting the big table, and attributes are duplicated across billions of rows (cheap in columnar storage because each column compresses well). Star: one hop joins, dimensions update in one place, and Power BI's VertiPaq engine and relationship model are designed for it (one to many relationships, single direction filtering from dimension to fact). For this project, the star schema is the right choice for the Power BI layer and for teaching; a BigQuery only consumer might prefer a denormalized table or a view that flattens the star. A practical hybrid: keep the star as the modeled layer and expose wide views for ad hoc SQL.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "star-schema",
+        "snowflake",
+        "obt",
+        "bigquery",
+        "power-bi"
+      ]
+    },
+    {
+      "id": "ub-09",
+      "type": "define",
+      "level": 2,
+      "q": "Define surrogate key, natural key, role playing dimension, and degenerate dimension.",
+      "easy": "A surrogate key is a made up integer ID for a dimension row. A natural key is the ID from the source. A role playing dimension is one table used in several roles, like a location used for both pickup and dropoff. A degenerate dimension is an ID that lives in the fact table with no lookup table of its own.",
+      "deep": "Surrogate keys decouple the warehouse from source ID changes and support slowly changing dimensions: Type 1 overwrites an attribute, Type 2 adds a new row with effective dates so history is preserved, which needs a surrogate key because the natural key repeats. Natural keys (a TLC zone ID, a payment type code) are fine for small static lookups. Role playing: dim_location joined twice under aliases (pickup_location, dropoff_location); in Power BI only one relationship can be active, so the second role uses USERELATIONSHIP in DAX or a duplicated dimension. Degenerate dimension: a transaction identifier such as a trip ID kept in the fact table. A common modeling mistake in public taxi star schema tutorials is turning measures such as passenger_count or trip_distance into dimension tables; they are numeric facts and belong in the fact table, unless banded (distance buckets), which then is a legitimate dimension.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "surrogate-key",
+        "scd",
+        "role-playing",
+        "degenerate-dimension"
+      ]
+    },
+    {
+      "id": "ub-10",
+      "type": "define",
+      "level": 1,
+      "q": "What is Parquet, and why use it instead of CSV?",
+      "easy": "Parquet stores data by column instead of by row, compressed, with the data types written into the file. Analytics queries that touch a few columns read only those columns, and files are much smaller than CSV.",
+      "deep": "Layout: a file holds row groups; each row group holds one column chunk per column; chunks are split into pages with encodings such as dictionary and run length encoding, then compressed (Snappy by default in pyarrow). The footer stores the schema and min and max statistics per column chunk, which lets readers skip row groups that cannot match a filter (predicate pushdown) and read only the requested columns (projection pushdown). Against CSV: typed (timestamps stay timestamps, no reparsing), smaller on disk, faster to scan, and splittable for parallel readers; CSV is human readable and universal but untyped, row oriented, and ambiguous about quoting, nulls, and encodings. The write up keeps raw and intermediate data as Parquet in Cloud Storage, and BigQuery batch loads read Parquet's embedded schema. The lesson line about moving from local CSV files to cloud storage is the same shift.",
+      "evidence": [
+        "portfolio: - Storage layer. Cloud Storage as the data lake for raw and intermediate Parquet files.",
+        "portfolio: Moving from local CSV files to distributed cloud storage and compute changed how I think about data work more than any individual tool did."
+      ],
+      "sources": [],
+      "tags": [
+        "parquet",
+        "columnar",
+        "file-formats"
+      ]
+    },
+    {
+      "id": "ub-11",
+      "type": "define",
+      "level": 2,
+      "q": "What makes Cloud Storage a data lake here, and how should the zones be organized?",
+      "easy": "A data lake is cheap storage that keeps files in their raw form, so they can be reprocessed later. Here Cloud Storage holds both the raw files and the cleaned intermediate files the warehouse loads.",
+      "deep": "Cloud Storage is object storage: immutable objects in buckets, addressed by key, with high durability, storage classes (Standard, Nearline, Coldline, Archive) priced by access frequency, and no compute attached. A data lake pattern separates zones by prefix or bucket: raw (exactly as received, never modified), intermediate or clean (typed, validated Parquet), and curated (modeled tables ready to load). Keeping raw immutable means any bug in the transform can be fixed and replayed. Partitioning object paths by date (for example trips/date=2024-01-01/) makes reprocessing and loading one day cheap. A warehouse such as BigQuery adds schema, SQL, and query compute; the lake holds files the warehouse can load or query in place (external tables). The write up places raw and intermediate Parquet in Cloud Storage and cleaned data in BigQuery, which is the lake then warehouse pattern.",
+      "evidence": [
+        "portfolio: - Storage layer. Cloud Storage as the data lake for raw and intermediate Parquet files.",
+        "portfolio: When data lives in object storage and compute is elastic, scaling up by an order of magnitude becomes a configuration change rather than a bottleneck."
+      ],
+      "sources": [],
+      "tags": [
+        "data-lake",
+        "gcs",
+        "object-storage"
+      ]
+    },
+    {
+      "id": "ub-12",
+      "type": "concept",
+      "level": 2,
+      "q": "How does BigQuery work, and how is it billed?",
+      "easy": "BigQuery is a managed warehouse: you load tables and write SQL, and Google supplies the machines. Storage and compute are separate, and in the on demand model you pay by how many bytes each query reads, which is why partitioning and selecting only needed columns save money.",
+      "deep": "Storage: columnar format (Capacitor) on Google's distributed file system, so a query reads only the referenced columns. Compute: the Dremel execution engine splits a query into stages run by many workers, measured in slots, with shuffle between stages. Billing: on demand pricing charges per byte scanned (after partition pruning and column selection), or capacity pricing reserves slots. Consequences: SELECT * is the most expensive query shape; LIMIT does not reduce bytes scanned on a regular table; partition filters and clustering cut cost and latency. Batch load jobs from Cloud Storage do not incur query charges, while streaming inserts are billed. Constraints are declared but not enforced, so uniqueness and referential integrity must be checked in the pipeline. The write up uses BigQuery as the analytics layer for SQL at scale with partitioned tables.",
+      "evidence": [
+        "portfolio: - Analytics layer. BigQuery for SQL analytics at scale, with the cleaned data loaded as partitioned tables for efficient time range queries."
+      ],
+      "sources": [],
+      "tags": [
+        "bigquery",
+        "dremel",
+        "cost-model"
+      ]
+    },
+    {
+      "id": "ub-13",
+      "type": "how",
+      "level": 2,
+      "q": "How do partitioning and clustering work in BigQuery, and how would you partition the trips table?",
+      "easy": "Partitioning splits a table into chunks, usually one per day, so a query for one week reads only those seven chunks. Clustering sorts the data inside each chunk by a few columns so filters on them skip more data. For trips, partition on the pickup date and cluster on location.",
+      "deep": "Partition types: time unit column (DAY, HOUR, MONTH, YEAR on a DATE or TIMESTAMP column), ingestion time, and integer range. Partition pruning only happens when the WHERE clause filters the partition column directly (wrapping it in a function on the wrong side can defeat pruning); require_partition_filter forces callers to include one. Clustering sorts storage blocks by up to four columns and prunes blocks at query time. Illustrative DDL:\n\n```sql\nCREATE TABLE taxi.fact_trip\nPARTITION BY DATE(pickup_ts)\nCLUSTER BY pickup_location_id, payment_type_id\nOPTIONS (require_partition_filter = TRUE)\nAS SELECT * FROM taxi.stage_trip;\n```\n\nThe write up says the cleaned data was loaded as partitioned tables for efficient time range queries; it does not name the partition column, so state your own. Pitfalls: too many tiny partitions (hourly on low volume data), partitioning on a column nobody filters on, and a dashboard in DirectQuery mode that issues unfiltered queries and scans everything.",
+      "evidence": [
+        "portfolio: - Analytics layer. BigQuery for SQL analytics at scale, with the cleaned data loaded as partitioned tables for efficient time range queries."
+      ],
+      "sources": [],
+      "tags": [
+        "bigquery",
+        "partitioning",
+        "clustering",
+        "cost"
+      ]
+    },
+    {
+      "id": "ub-14",
+      "type": "compare",
+      "level": 2,
+      "q": "This is ETL with pandas before loading. When would ELT inside BigQuery be better?",
+      "easy": "ETL cleans the data before loading it into the warehouse; ELT loads the raw data first and cleans it with SQL inside the warehouse. ELT is usually better once the data is large, because the warehouse scales and the VM does not.",
+      "deep": "ETL here: extract from Cloud Storage, transform in pandas and NumPy on a Compute Engine VM, load cleaned Parquet to BigQuery. Advantages: arbitrary Python logic, easy local debugging, warehouse holds only clean data. Costs: the transform is bounded by one machine's memory, it is a second system to operate, and logic is in scripts rather than versioned SQL models. ELT: load raw Parquet into a BigQuery staging dataset (or query it as an external table), then build the star schema with SQL (scheduled queries, Dataform, or dbt), so transformation scales with BigQuery's workers, lineage and tests sit next to the models, and the raw table stays queryable for debugging. ETL stays useful for heavy non SQL work (parsing, ML feature code) or when data must be scrubbed before it lands. For a learning project covering every layer, explicit Python ETL makes each stage visible; at 10x or 100x the data, the transform belongs in BigQuery or in Spark on Dataproc.",
+      "evidence": [
+        "portfolio: - Compute layer. Compute Engine VMs running Python ETL jobs that read from Cloud Storage, transform with Pandas and NumPy, and write back as cleaned Parquet.",
+        "portfolio: - Analytics layer. BigQuery for SQL analytics at scale, with the cleaned data loaded as partitioned tables for efficient time range queries."
+      ],
+      "sources": [],
+      "tags": [
+        "etl",
+        "elt",
+        "dbt",
+        "pandas"
+      ]
+    },
+    {
+      "id": "ub-15",
+      "type": "concept",
+      "level": 2,
+      "q": "How was the pipeline orchestrated, and what would proper orchestration add?",
+      "easy": "The write up names the compute (Python jobs on Compute Engine virtual machines) but not a scheduler or orchestrator, so the honest answer is to describe exactly how the jobs were run. Proper orchestration adds scheduling, ordering, retries, and a record of every run.",
+      "deep": "Orchestration models a pipeline as a directed acyclic graph of tasks (extract, transform, load, test, refresh) with dependencies, schedules, retries with backoff, alerting, and run history. Properties that matter more than the tool: idempotent tasks (rerunning a day overwrites that day's partition, for example a BigQuery load with WRITE_TRUNCATE into a partition decorator, instead of appending duplicates), parameterization by run date so backfills are a loop, and small tasks so a failure reruns only what broke. GCP options: Cloud Composer (managed Apache Airflow), Workflows with Cloud Scheduler, Cloud Run jobs triggered by a schedule or by a Cloud Storage object finalize event, or cron on the VM as the minimal version. Open source options: Airflow, Prefect, Dagster, Mage. In an interview, do not imply an orchestrator that was not used; say what triggered the jobs and how you would make them scheduled, idempotent, and observable.",
+      "evidence": [
+        "portfolio: - Compute layer. Compute Engine VMs running Python ETL jobs that read from Cloud Storage, transform with Pandas and NumPy, and write back as cleaned Parquet."
+      ],
+      "sources": [],
+      "tags": [
+        "orchestration",
+        "airflow",
+        "idempotency",
+        "honesty"
+      ]
+    },
+    {
+      "id": "ub-16",
+      "type": "how",
+      "level": 2,
+      "q": "What data quality problems does NYC taxi data have, and what checks belong in the ETL?",
+      "easy": "Public taxi data has trips with negative fares, zero distance, zero passengers, impossible timestamps, and coordinates at zero. A pipeline should count and handle each of these on purpose instead of letting them flow into revenue totals.",
+      "deep": "Known quirks of the public TLC trip records: negative fare or total amounts (often refunds or disputes), trip_distance of 0 or implausibly large, passenger_count of 0 or missing, dropoff before pickup or durations of many hours, timestamps outside the file's month, and on older files latitude and longitude of 0 or outside New York. Checks to run in pandas before writing Parquet: type casts with errors surfaced, not silently coerced; range checks with counts logged per rule; uniqueness of the fact key; every foreign key present in its dimension (BigQuery will not enforce it); and reconciliation, row counts and SUM(total_amount) from raw to clean to BigQuery, so every dropped row is explained. Decide per rule whether to drop, flag, or quarantine; flagging keeps the data honest for revenue analysis. The write up says the jobs wrote back cleaned Parquet but does not list the rules, so give your own if asked and do not claim specific percentages.",
+      "evidence": [
+        "portfolio: - Compute layer. Compute Engine VMs running Python ETL jobs that read from Cloud Storage, transform with Pandas and NumPy, and write back as cleaned Parquet."
+      ],
+      "sources": [],
+      "tags": [
+        "data-quality",
+        "validation",
+        "nyc-taxi"
+      ]
+    },
+    {
+      "id": "ub-17",
+      "type": "how",
+      "level": 2,
+      "q": "How does the Power BI layer connect to BigQuery, and what design choices matter there?",
+      "easy": "Power BI can either copy the data into its own memory (Import) or send live queries to BigQuery each time someone clicks (DirectQuery). The model inside Power BI should mirror the star schema, and slicers, maps, and time series charts sit on top.",
+      "deep": "Import: data cached in the VertiPaq columnar engine; fastest interaction, scheduled refresh, size limits, and BigQuery charges only at refresh. DirectQuery: every visual issues SQL to BigQuery; always fresh but slower, and each slicer click scans bytes, so partition filters and aggregate tables matter. Composite models mix both, for example imported aggregates with DirectQuery detail. Model design: one to many relationships from each dimension to the fact table, single direction filtering, a marked date table for time intelligence, and DAX measures (Total Revenue = SUM(fact_trip[total_amount]), Tip Rate = DIVIDE(SUM(tip_amount), SUM(fare_amount))) rather than calculated columns. The write up's dashboard has geographic heat maps (map visuals on location attributes), time series views, and slicers for stakeholder driven exploration. The write up does not say which connection mode was used; know your own answer.",
+      "evidence": [
+        "portfolio: The findings then fed an interactive Power BI dashboard with geographical heat maps, time series views, and slicers for stakeholder driven exploration."
+      ],
+      "sources": [],
+      "tags": [
+        "power-bi",
+        "directquery",
+        "dax",
+        "bi"
+      ]
+    },
+    {
+      "id": "ub-18",
+      "type": "code",
+      "level": 2,
+      "q": "Write a BigQuery query against the star schema: revenue and tip rate by borough and hour for one month.",
+      "easy": "Join trips to the location and time dimensions, filter to the month so only those partitions are read, then group by borough and hour.",
+      "deep": "Illustrative SQL on the schema sketched in ub-07:\n\n```sql\nSELECT\n  l.borough,\n  EXTRACT(HOUR FROM f.pickup_ts) AS pickup_hour,\n  COUNT(*) AS trips,\n  SUM(f.total_amount) AS revenue,\n  SAFE_DIVIDE(SUM(f.tip_amount), SUM(f.fare_amount)) AS tip_rate\nFROM taxi.fact_trip AS f\nJOIN taxi.dim_location AS l\n  ON f.pickup_location_id = l.location_id\nWHERE DATE(f.pickup_ts) BETWEEN '2024-01-01' AND '2024-01-31'  -- prunes partitions\nGROUP BY l.borough, pickup_hour\nORDER BY revenue DESC;\n```\n\nPoints an interviewer checks: the filter is on the partition column so only 31 partitions are scanned; tip rate is a ratio of sums, not an average of per trip ratios; SAFE_DIVIDE avoids division by zero; only the needed columns are referenced, so columnar storage reads less. Revenue concentration (one of the EDA themes in the write up) is a follow on window query: rank zones by revenue and take a running share with SUM(revenue) OVER (ORDER BY revenue DESC) / SUM(revenue) OVER ().",
+      "evidence": [
+        "portfolio: Exploratory analysis in Jupyter surfaced patterns in trip distance distribution, fare structure, revenue concentration, and service usage across boroughs and times of day."
+      ],
+      "sources": [],
+      "tags": [
+        "sql",
+        "bigquery",
+        "window-functions"
+      ]
+    },
+    {
+      "id": "ub-19",
+      "type": "pushback",
+      "level": 2,
+      "q": "Your lesson says scaling 10x becomes a configuration change. Pandas on one VM doesn't scale like that.",
+      "easy": "Partly true. Cloud Storage and BigQuery do scale by configuration. The pandas step does not: it runs on one machine and must fit in its memory, so a bigger VM buys some headroom and then the transform has to move to a distributed engine or into BigQuery SQL.",
+      "deep": "Concede: pandas holds the whole DataFrame in memory on one node and is mostly single threaded; a common rule of thumb is several times the file size in RAM. Resizing a Compute Engine VM is a configuration change (vertical scaling), so 10x may still be a bigger machine, but 100x needs a different engine. Defend: storage (GCS) and query compute (BigQuery) are the parts that scale without code changes, and they hold the data that grows; the VM is stateless, so swapping the transform engine does not touch the storage or warehouse layers. Options in order of effort: process files in chunks or by partition (one day per job, parallel VMs), switch to Polars or DuckDB on the same VM, push the transform into BigQuery SQL (ELT), or run Spark on Dataproc or Apache Beam on Dataflow. The sentence in the write up holds for the storage and warehouse layers; for the transform it is aspirational.",
+      "say": "That's fair for the pandas step. Storage and BigQuery scale by configuration; a pandas job on one VM doesn't, past whatever a bigger machine buys. Because the VM only reads from and writes to Cloud Storage, swapping the transform is contained. At 100x I'd move it into BigQuery SQL or Spark on Dataproc and keep everything else as it is.",
+      "evidence": [
+        "portfolio: When data lives in object storage and compute is elastic, scaling up by an order of magnitude becomes a configuration change rather than a bottleneck.",
+        "portfolio: - Compute layer. Compute Engine VMs running Python ETL jobs that read from Cloud Storage, transform with Pandas and NumPy, and write back as cleaned Parquet."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "scaling",
+        "pandas"
+      ]
+    },
+    {
+      "id": "ub-20",
+      "type": "pushback",
+      "level": 2,
+      "q": "NYC taxi data into BigQuery is a tutorial everyone has done. What's yours?",
+      "easy": "Fair: the dataset and the stack are common learning choices. What Tanay can defend is having done every stage on real cloud services, and being able to explain each design choice and its weakness, which is what interviews probe.",
+      "deep": "Concede: public taxi data and a GCS, VM, BigQuery, BI stack is a well known learning path, and the write up claims a full lifecycle, not novelty. Defend with depth instead of breadth: why Parquet instead of CSV (typed, columnar, pushdown), why partition by time (bytes scanned drive cost), what the grain is and why measures stay in the fact table, why tip rate must be a ratio of sums, what BigQuery does not enforce (keys), and what breaks at 100x (the pandas transform). Then say what you would change, which separates understanding from following steps: ELT in BigQuery, a real orchestrator with idempotent daily partitions, data quality checks with reconciliation counts, and a semantic layer for Power BI.",
+      "say": "It's a common dataset and a common stack, and I wouldn't pitch it as novel. What I got from it was doing every layer myself on real cloud services. I can tell you why the data is Parquet, why the table is partitioned on time, and what breaks first at 100x, which is the pandas step. If I rebuilt it, I'd move the transform into BigQuery and add an orchestrator.",
+      "evidence": [
+        "portfolio: I wanted the full lifecycle in one project, end to end on a real cloud stack: ingestion, storage, transformation, modeling, querying, and visualization."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "originality"
+      ]
+    },
+    {
+      "id": "ub-21",
+      "type": "pushback",
+      "level": 3,
+      "q": "Why bother with a star schema in BigQuery? Joins cost money; just denormalize.",
+      "easy": "Denormalizing is a good choice for BigQuery alone. The star schema was chosen for modeling clarity and for Power BI, which is designed around a star. Both can coexist: keep the star and expose a flattened view.",
+      "deep": "BigQuery guidance favors denormalized tables with nested and repeated fields for very large joins, because shuffles across workers cost time. But dimension tables in taxi data are tiny (a few hundred locations, six payment types), so BigQuery broadcasts them to every worker and the join is cheap. The star keeps one source of truth per attribute (rename a borough once), keeps the fact table narrow, matches Power BI's relationship model, and is what interviewers mean by dimensional modeling. A flattened view or materialized table on top serves ad hoc SQL users. The real costs of a star in BigQuery appear with large dimensions joined to large facts, where denormalization or clustering on the join key helps.",
+      "say": "For BigQuery alone, a wide table is a fine answer. Here the dimensions are tiny, a few hundred locations and six payment types, so BigQuery broadcasts them and the joins are cheap. The star gives one place to change each attribute and it's the shape Power BI wants. If SQL users wanted a flat table, I'd add a view on top.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "star-schema",
+        "denormalization",
+        "bigquery"
+      ]
+    },
+    {
+      "id": "ub-22",
+      "type": "pushback",
+      "level": 1,
+      "q": "It's called the Uber pipeline. Is this Uber's data?",
+      "easy": "No. The write up states the data is NYC taxi trip data, the public trip records, and the project should be described that way so nobody assumes access to a company's internal data.",
+      "deep": "The write up says Tanay modeled the raw NYC taxi trip data as a star schema. Say it plainly in the first sentence of any description: public New York City taxi trip records, modeled and analyzed as a ride hailing style analytics pipeline. Overstating the data source is the fastest way to lose credibility in a data engineering interview, and the project's value lies in the pipeline, which does not depend on whose trips they are.",
+      "say": "No, it's the public New York City taxi trip data. The name comes from the ride hailing style of analysis, and I say the source up front so there's no confusion. The point of the project is the pipeline, not the data owner.",
+      "evidence": [
+        "portfolio: I modeled the raw NYC taxi trip data as a star schema in Lucid Charts, with fact and dimension tables and explicit primary and foreign key relationships."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "honesty",
+        "data-source"
+      ]
+    },
+    {
+      "id": "ub-23",
+      "type": "pushback",
+      "level": 2,
+      "q": "No orchestrator, no tests, no monitoring. Isn't this a set of scripts rather than a pipeline?",
+      "easy": "Mostly a fair description: the write up covers storage, compute, warehouse, and dashboard, and does not describe scheduling, tests, or monitoring. Those are the first things Tanay would add, and they can explain how.",
+      "deep": "Concede what the write up does not show: an orchestrator, automated data quality tests, alerting, or CI. Defend the parts that are pipeline design rather than scripting: raw data kept separate from cleaned data in a lake, stateless compute between two storage layers, a modeled warehouse layer with partitioning, and a consumption layer. Then give the plan: a DAG per day (load raw, transform, validate, load partition, refresh dashboard) in Cloud Composer or a lighter scheduler; idempotent partition overwrites; tests for keys, ranges, and row count reconciliation; freshness checks with an alert; and the transform code in version control with CI. That answer shows the gap is understood and bounded.",
+      "say": "Fair, the write up doesn't cover scheduling, tests, or monitoring. What's there is the layering: raw kept separate, stateless compute, a modeled and partitioned warehouse, and a dashboard. The next step is a daily DAG that overwrites one partition at a time, with key, range, and row count checks, and a freshness alert.",
+      "evidence": [
+        "portfolio: The infrastructure was deployed on Google Cloud Platform in three layers:"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "orchestration",
+        "testing",
+        "monitoring"
+      ]
+    },
+    {
+      "id": "ub-24",
+      "type": "pushback",
+      "level": 2,
+      "q": "How do you know the numbers on the dashboard are right?",
+      "easy": "By reconciling at each hop: the same row counts and revenue totals from the raw file, the cleaned Parquet, the BigQuery table, and the dashboard, with every dropped row explained by a named rule. The write up does not describe reconciliation, so this is the answer to give as practice, not a claim.",
+      "deep": "Checks, layer by layer: raw to clean, row count and SUM(total_amount) with counts per cleaning rule; clean to BigQuery, load job output row count equals Parquet row count, and keys unique; fact to dimensions, zero orphan foreign keys (an anti join), since BigQuery does not enforce them; BigQuery to Power BI, a card visual showing total trips and revenue for a fixed month that matches a saved SQL query. Spot checks on known patterns (trips by hour should dip overnight). Measure definitions in one place (DAX measures) so two visuals cannot compute revenue differently. For stakeholders, publish the definitions next to the dashboard.",
+      "say": "I'd reconcile at each hop. Row counts and revenue totals from raw to cleaned to BigQuery to the dashboard, with every dropped row tied to a rule. Then an orphan key check, because BigQuery won't enforce foreign keys. My write up doesn't describe that step, so that's what I'd add first.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "data-quality",
+        "reconciliation"
+      ]
+    },
+    {
+      "id": "ub-25",
+      "type": "case",
+      "level": 2,
+      "q": "What breaks at 10x and 100x the data, and what would a production version need?",
+      "easy": "At 10x, the pandas transform on one machine runs out of memory first, and dashboard queries start to cost real money. At 100x, the transform has to move to BigQuery SQL or Spark, and loads need to be incremental by day.",
+      "deep": "10x: VM memory (resize, chunk by file or day, or switch to Polars or DuckDB); full reloads take too long, so load by partition; DirectQuery dashboards scan more bytes per click, so add aggregate tables or Import mode. 100x: transform moves into BigQuery (ELT with dbt or Dataform) or Spark on Dataproc; incremental models keyed on pickup date; clustering on location; partition expiration or long term storage pricing for old data; slot reservations if query volume is steady. Production needs: an orchestrator with idempotent daily runs and backfills; data quality tests and reconciliation; schema evolution handling (TLC has changed columns over the years, for example moving from coordinates to zone IDs); IAM with least privilege per layer; cost monitoring; lineage and documentation; and dashboard measure definitions owned in one place.",
+      "evidence": [
+        "portfolio: - Compute layer. Compute Engine VMs running Python ETL jobs that read from Cloud Storage, transform with Pandas and NumPy, and write back as cleaned Parquet.",
+        "portfolio: - Analytics layer. BigQuery for SQL analytics at scale, with the cleaned data loaded as partitioned tables for efficient time range queries."
+      ],
+      "sources": [],
+      "tags": [
+        "scaling",
+        "production",
+        "limitations"
+      ]
+    },
+    {
+      "id": "ub-26",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next with this project?",
+      "easy": "Move the cleaning into BigQuery SQL with tests, schedule it to process one day at a time, add checks that totals match at every step, and tighten the dashboard so it reads only small summary tables.",
+      "deep": "1. ELT: land raw Parquet in a staging dataset and build the star with dbt or Dataform models, with tests for unique and not null keys, accepted values for rate and payment codes, and relationships between fact and dimensions. 2. Orchestrate: one DAG per day with idempotent partition overwrites and a backfill command. 3. Reconcile: row and revenue totals per layer stored as a run log. 4. Performance: cluster the fact table on location, build hourly aggregates for the dashboard, and choose Import mode for the aggregates. 5. Extend the model: zone level geography for the heat maps if the source has zone IDs, and a weather or events dimension to explain demand spikes. 6. Write the cost per month of the pipeline into the README, since cost per query is a design input in BigQuery.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next-steps",
+        "dbt",
+        "orchestration"
+      ]
+    },
+    {
+      "id": "ub-27",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager.",
+      "easy": "Lead with full lifecycle ownership on cloud services, then the one lesson, then what you would add.",
+      "deep": "Hiring manager version: data engineering beyond the notebook, every layer on GCP (Cloud Storage, Compute Engine, BigQuery, Power BI), a star schema with explicit keys, partitioned tables for time range queries, and a stakeholder dashboard; candid about the parts not built (orchestration, tests).",
+      "say": "I took public New York taxi trip data from a raw file to a stakeholder dashboard on Google Cloud, and built every layer myself: Cloud Storage as the lake, Python jobs on Compute Engine for cleaning, a star schema in BigQuery with partitioned tables, and Power BI on top. The biggest lesson was separating storage from compute. What I'd add for production is scheduling and data tests.",
+      "evidence": [
+        "portfolio: I modeled the raw NYC taxi trip data as a star schema in Lucid Charts, with fact and dimension tables and explicit primary and foreign key relationships.",
+        "portfolio: The infrastructure was deployed on Google Cloud Platform in three layers:"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "ub-28",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the design to a staff data engineer.",
+      "easy": "Give the layers, the modeling choices, and the known weak point (single node pandas), then the ELT and orchestration plan.",
+      "deep": "Staff version: lake (raw and intermediate Parquet in GCS) to stateless compute (pandas on VMs) to warehouse (BigQuery partitioned tables) to BI (Power BI). Star schema at trip grain, role playing location and time dimensions, measures kept additive, ratios computed as ratios of sums. Weak point: the transform is bounded by one VM; constraints are not enforced in BigQuery; no orchestrator in the write up. Plan: ELT with dbt, idempotent daily partitions, reconciliation tests.",
+      "say": "Parquet lands raw in Cloud Storage, a stateless pandas job on a VM cleans it and writes cleaned Parquet back, and BigQuery loads it into time partitioned tables modeled as a star. The weak point is the transform, since it's bounded by one machine's memory, and BigQuery won't enforce my keys. My next version is ELT in BigQuery with dbt tests and idempotent daily partition loads.",
+      "evidence": [
+        "portfolio: - Storage layer. Cloud Storage as the data lake for raw and intermediate Parquet files.",
+        "portfolio: - Compute layer. Compute Engine VMs running Python ETL jobs that read from Cloud Storage, transform with Pandas and NumPy, and write back as cleaned Parquet.",
+        "portfolio: - Analytics layer. BigQuery for SQL analytics at scale, with the cleaned data loaded as partitioned tables for efficient time range queries."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer"
+      ]
+    },
+    {
+      "id": "ub-29",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain this project to a product manager.",
+      "easy": "Frame it as a reliable path from raw activity data to a dashboard that answers when, where, and how riders travel and pay.",
+      "deep": "PM version: the dashboard answers where trips start, when demand peaks, how fares and tips are structured, and where revenue concentrates; slicers let a stakeholder ask their own questions; the pipeline behind it means the numbers come from one modeled source rather than spreadsheets.",
+      "say": "The goal was a dashboard a stakeholder could explore on their own: where trips start, when demand peaks, and where revenue concentrates, with maps, time series, and filters. Behind it is one modeled source of truth on Google Cloud, so every chart pulls the same definitions. If you asked a new question, it's usually a new filter, not a new spreadsheet.",
+      "evidence": [
+        "portfolio: Exploratory analysis in Jupyter surfaced patterns in trip distance distribution, fare structure, revenue concentration, and service usage across boroughs and times of day.",
+        "portfolio: The findings then fed an interactive Power BI dashboard with geographical heat maps, time series views, and slicers for stakeholder driven exploration."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "pm"
+      ]
+    },
+    {
+      "id": "ub-30",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a recruiter.",
+      "easy": "Plain words and the tool list: Google Cloud, BigQuery, Python, SQL, star schema, Power BI.",
+      "deep": "Recruiter version: built a data pipeline on Google Cloud from raw taxi trip data to an interactive dashboard; skills are GCP (Cloud Storage, Compute Engine, BigQuery), Python with pandas, SQL, star schema modeling, and Power BI.",
+      "say": "I built a data pipeline on Google Cloud that takes raw New York taxi trip data, cleans it with Python, organizes it into analysis ready tables in BigQuery, and ends in a Power BI dashboard with maps and filters. It covers the whole job of a data engineer in one project: storage, processing, modeling, SQL, and reporting.",
+      "evidence": [
+        "portfolio: TAGS: GCP, BigQuery, Power BI, SQL, Python, ETL, Star Schema"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": []
+}
