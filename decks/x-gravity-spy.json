@@ -1,0 +1,1151 @@
+{
+  "deck_id": "x-gravity-spy",
+  "title": "Gravity Spy 2.0 Research Assistant",
+  "group": "Experience",
+  "repo": "",
+  "summary_easy": "Tanay is a research assistant on Gravity Spy 2.0, an NSF funded citizen science project that helps LIGO find which detector hardware causes the noise bursts, called glitches, in gravitational wave data. Tanay built the pipeline that cleans more than 276,000 volunteer classifications and trained a neural network that predicts whether volunteers will call a sensor's signal similar to a glitch. The model ranks pairs well (0.89 AUC against volunteer labels), and its calibration error, the gap between its confidence and how often it is right, was cut in half, which matters more for how the scores will be used.",
+  "summary_deep": "Gravity Spy 2.0 asks Zooniverse volunteers to compare a glitch in LIGO's strain channel with auxiliary channel spectrograms at the same GPS time, as a first step toward causal inference about which subsystems (PEM, SUS, LSC, ISI, ASC, CAL and others) produce glitches. Tanay's ingestion pipeline (Python, pandas, Panoptes API) parses 276,000+ classifications from 23 months, reconciles five undocumented subject metadata schemas across 25,104 subjects and 8,293 channels, filters roughly 38 science team accounts, and writes a subject level label file, a missing GPS file, and a GPS time by channel pivot over 455 subsystems. An OpenCV workflow turns 49,000 1200x1200 mosaics into paired 224x224 heatmaps. A siamese two input CNN with a shared ImageNet MobileNetV2 backbone predicts the volunteer similarity label at 0.89 validation AUC on a held out 2,000 subject set. Label smoothing, AdamW, and AUC based early stopping together brought Expected Calibration Error from 0.10 to 0.05, which matters because the scores are meant to be aggregated to rank hardware. Descriptive analysis shows the top ten volunteers produce 50% of classifications and 52% of multi volunteer subjects reach perfect consensus, so labels are noisy; open items are an ablation, a temperature scaling baseline, a time blocked split, and the subsystem level causal aggregation.",
+  "sheet": {
+    "easy": "## What it is\n- **Gravity Spy 2.0**: NSF funded citizen science on Zooniverse that supports LIGO. Tanay is a research assistant at Syracuse, Feb 2026 to present.\n- **Goal**: find which detector subsystems cause **glitches** (short noise bursts) in gravitational wave data, so engineers fix hardware instead of chasing symptoms.\n- Volunteers compare a glitch in the main **strain** channel with **auxiliary channels** (other sensors) at the same moment and say whether they look alike.\n\n## What Tanay built\n1. **Ingestion** (Python, pandas, Zooniverse Panoptes API): 276,000+ volunteer classifications from 23 months; five undocumented metadata schemas reconciled; about 38 science team accounts removed.\n2. **Three outputs**: a subject level label file, a file of subjects missing GPS time, and a GPS time by channel matrix (8,293 channels, 455 subsystems such as PEM, SUS, LSC, ISI, ASC, CAL).\n3. **Images** (OpenCV): 49,000 spectrograms; each 1200x1200 mosaic turned into a pair of 224x224 heatmaps.\n4. **Model** (TensorFlow, Keras): two input CNN, one shared MobileNetV2, predicts the volunteer similarity label.\n\n## Results\n| Measure | Value | Caveat |\n| --- | --- | --- |\n| Validation AUC | 0.89 on 2,000 held out subjects | agreement with volunteers, no baseline yet |\n| Expected Calibration Error | 0.10 to 0.05 | three changes together, not ablated |\n| Effort skew | top ten volunteers = 50% of classifications | label reflects a few people |\n| Consensus | 52% of multi volunteer subjects unanimous | labels are noisy |\n\n## Words to know\n- **Strain**: fractional change in arm length, the main LIGO signal.\n- **Glitch**: short non astrophysical noise burst.\n- **Auxiliary channel**: any other sensor; a **witness** if it lights up with a glitch.\n- **Spectrogram**: time by frequency picture of a signal.\n- **AUC**: chance a similar pair scores above a dissimilar one.\n- **Calibration / ECE**: whether 0.8 confidence means 80% right; ECE is the average gap.\n\n## Honest limits\n- Labels are volunteer perception; similarity shows association only.\n- No ablation of label smoothing, AdamW, and early stopping; no temperature scaling baseline.\n- Holdout by subject, not by time or channel.\n",
+    "deep": "## Role and scope\n- Research Assistant, Gravity Spy 2.0, Syracuse University, NSF funded, Feb 2026 to present. Code in the Syracuse CCDS GravitySpy Classifier repository.\n- Science goal: causal inference on detector noise, which auxiliary subsystems produce transient glitches in strain.\n- Gravity Spy 2.0 (NSF grant from 2020) stages: (1) compare strain glitches with auxiliary channels by similarity; (2) collections with hypothesized common causality; (3) root causes over a channel network. Tanay's model sits at the Stage 1 task.\n\n## Physics background\n- Strain $h = \\Delta L / L$ on 4 km arms; arm length changes of order $10^{-18}$ m.\n- Glitches: transient non Gaussian noise; more than 1.4 million Omicron triggers (SNR above 7.5) through O3, about one per minute of observing; 27 volunteer classes at O4 start.\n- Q-scans at 0.5, 1.0, 2.0, 4.0 s. More than 200,000 auxiliary channels per detector. Names: IFO:SUBSYSTEM-DESCRIPTOR.\n- Subsystems: PEM (Physical Environment Monitoring), SUS (Suspension), LSC (Length Sensing and Control), ISI (Internal Seismic Isolation), ASC (Alignment Sensing and Control), CAL (Calibration); also HPI, IMC, OMC, PSL, SQZ, TCS.\n\n## Pipeline\n| Stage | What | Number (source: portfolio experience section) |\n| --- | --- | --- |\n| Ingest | Panoptes API, pandas, JSON columns (annotations, subject_data, metadata) | 276,000+ classifications, 23 months |\n| Reconcile | five undocumented subject metadata schemas onto one | 25,104 glitch subjects |\n| Filter | science team accounts out of the volunteer population | roughly 38 accounts |\n| Outputs | subject level label file; missing GPS file; GPS time by channel pivot | 8,293 channels, 455 subsystems |\n| Images | OpenCV, batch API calls, 1200x1200 mosaic to paired 224x224 heatmaps | 49,000 spectrograms |\n\nEngineering notes: GPS time is seconds since 1980-01-06 UTC with no leap seconds (18 ahead of UTC since 2017). The pivot is sparse (as arithmetic, 25,104 x 8,293 is about 208 million cells), so store long or sparse. Keep missing distinct from zero. OpenCV decodes BGR; Keras ImageNet models expect RGB; `cv2.INTER_AREA` for shrinking; MobileNetV2 preprocessing scales to [-1, 1].\n\n## Model\n- Siamese: one MobileNetV2 (ImageNet, no top, average pooling, 1280 dimensional) applied to strain and auxiliary inputs; head on embeddings (cosine, concatenation, or $[|a-b|, a \\odot b]$); sigmoid; binary cross entropy.\n- MobileNetV2: inverted residual, linear bottleneck, expansion 6, ReLU6, about 3.4M parameters and 300M multiply adds at 224. Depthwise separable cost ratio $\\frac{1}{N} + \\frac{1}{k^2}$.\n- Why shared weights: one embedding space, one backbone of parameters, cacheable embeddings. Alternatives: separate backbones (drift, 2x parameters), early fusion 6 channel input (pixel alignment but loses pretrained first layer).\n\n## Metrics and formulas\n$$\\text{AUC} = \\frac{1}{|P||N|}\\sum_{i\\in P}\\sum_{j\\in N}\\left[\\mathbb{1}(s_i>s_j)+\\tfrac12\\mathbb{1}(s_i=s_j)\\right],\\quad \\text{Gini}=2\\,\\text{AUC}-1$$\n$$\\text{ECE}=\\sum_{m=1}^{M}\\frac{|B_m|}{n}\\left|\\text{acc}(B_m)-\\text{conf}(B_m)\\right|$$\n- Label smoothing (Keras binary): $y' = y(1-\\varepsilon) + \\varepsilon/2$; optimal logit $\\log\\frac{1-\\varepsilon/2}{\\varepsilon/2}$.\n- AdamW: $\\theta_t = \\theta_{t-1} - \\eta\\left(\\frac{\\hat m_t}{\\sqrt{\\hat v_t}+\\epsilon} + \\lambda\\theta_{t-1}\\right)$.\n- Temperature scaling: $\\hat p = \\sigma(z/T)$, $T$ by validation NLL; AUC unchanged.\n- Early stopping: `EarlyStopping(monitor='val_auc', mode='max', restore_best_weights=True)`.\n\n## Results with caveats\n| Result | Value | Compared against | Caveat |\n| --- | --- | --- | --- |\n| Validation AUC | 0.89, held out 2,000 subjects | chance 0.5; no baseline yet | volunteer label; possible early stopping selection bias; subject split |\n| ECE | 0.10 to 0.05 | model before the three changes | combined change; bin count unstated; no temperature scaling comparison |\n| Effort | top ten volunteers 50% of classifications | uniform effort | Lorenz or Gini would describe it better |\n| Consensus | 52% perfect consensus on multi volunteer subjects | none | depends on votes per subject; not chance corrected (use Fleiss or Krippendorff) |\n\n## Validation and testing\n- Held out 2,000 subject validation set; AUC based early stopping.\n- Not in the write up: separate test split, bootstrap intervals, unit tests on schema mapping.\n\n## Limitations\n- Similarity is association; common causes (ground motion) light up many channels.\n- Labels are perceptual, noisy, and concentrated in a few volunteers.\n- 224x224 inputs lose detail from 1200x1200 mosaics.\n- Leakage risk from time clustering and repeated channels across a subject split.\n\n## Scale\n- 10x channels: pairs grow 10x; prefilter channels, cache 1280 dimensional embeddings, batch GPU inference.\n- 100x glitches: incremental exports, idempotent upserts by classification_id, schema validation at ingest, sparse columnar storage, ECE drift monitoring and scheduled recalibration.\n\n## Next (plans, not results)\n- Time blocked test split, bootstrap intervals, stated ECE binning.\n- Baselines: frozen embedding cosine, Gravity Spy similarity embedding.\n- Ablation of the three changes plus temperature scaling.\n- Soft or skill weighted labels; robustness without the top ten volunteers.\n- Subsystem by glitch class aggregation, time shifted nulls, benchmark against hveto and OmegaNeuron; short list for commissioners.\n\n## Prep gaps to fill from the repo\nAggregation rule, split method, head design, frozen layers, $\\varepsilon$, AdamW settings, epochs and patience, AUC implementation, ECE bins and convention, schema field differences, how team accounts were identified, missing GPS count, distinct volunteers, definition of a subsystem group.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: tell me about your research assistant role.",
+      "script": "I'm a research assistant on Gravity Spy 2.0, an NSF funded citizen science project that supports LIGO. The science goal is causal inference, finding which detector subsystems produce the glitches that contaminate gravitational wave data. I built the ingestion pipeline over 276,000+ volunteer classifications and five undocumented metadata schemas. Then I trained a two input CNN with a shared MobileNetV2 backbone that predicts when volunteers will call an auxiliary channel similar to a glitch. It reaches 0.89 validation AUC. The part I care most about is calibration, where Expected Calibration Error went from 0.10 to 0.05.",
+      "keypoints": [
+        "NSF funded Gravity Spy 2.0, supports LIGO, ongoing since Feb 2026",
+        "Causal goal: which subsystems produce glitches",
+        "276,000+ classifications, five undocumented schemas",
+        "Two input CNN, shared MobileNetV2 backbone, similarity label",
+        "0.89 validation AUC",
+        "ECE 0.10 to 0.05 as the headline"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through the project.",
+      "script": "Gravity Spy 2.0 is an NSF funded citizen science project that supports LIGO. LIGO's strain data is full of glitches, short noise bursts that can hide or mimic real signals. Each detector also records a huge number of auxiliary channels: suspensions, seismic isolation, length and alignment control, the building environment. The science question is which of those subsystems produce the glitches, so commissioners can fix hardware instead of chasing symptoms.\n\nVolunteers on Zooniverse look at a glitch next to auxiliary channels from the same moment and judge whether they look alike. My first job was the data. I pull classifications through the Panoptes API with pandas, and the pipeline parses 276,000+ of them from 23 months of observations. The hard part was that subject metadata came in five undocumented schemas from different project iterations. I reconciled them onto one, filtered out roughly 38 science team accounts so the labels are really volunteer labels, and wrote three outputs: a subject level file with aggregated labels, a separate file for subjects with no GPS time, and a GPS time by channel matrix across 455 subsystems.\n\nThen images. An OpenCV workflow pulled 49,000 spectrograms and turned each 1200 pixel mosaic into a pair of 224 pixel heatmaps. The model is a two input CNN where both images pass through one shared MobileNetV2 backbone, and a small head predicts the volunteer similarity label. It reaches 0.89 AUC on 2,000 held out subjects.\n\nI care more about calibration, because these scores get added up to rank hardware. Label smoothing, AdamW, and early stopping on AUC took Expected Calibration Error from 0.10 to 0.05.\n\nWhat's still open: those three changes aren't ablated, there's no temperature scaling baseline yet, and I want a test split by time. The descriptive side sets expectations too. The top ten volunteers did half the work, and only 52% of multi volunteer subjects are unanimous, so the label is noisy.",
+      "keypoints": [
+        "Problem: glitches in strain, auxiliary channels as clues, causal goal",
+        "Ingestion: Panoptes, 276,000+ classifications, five schemas, ~38 team accounts removed",
+        "Three outputs including the missing GPS file and the GPS time by channel matrix",
+        "49,000 spectrograms, 1200 mosaic to paired 224 heatmaps",
+        "Shared MobileNetV2, 0.89 AUC on 2,000 held out subjects",
+        "Calibration first: ECE 0.10 to 0.05",
+        "Open items: ablation, temperature scaling, time split; noisy labels"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "I'll start with the physics, because it shapes the engineering. LIGO measures strain, a fractional change in the length of 4 kilometer arms, and the data is full of glitches: short bursts of non Gaussian noise that can hide or mimic a real event. Each detector also records more than two hundred thousand auxiliary channels. Those barely respond to gravitational waves, so a transient in an auxiliary channel at the same GPS time as a glitch is a clue about the source. Gravity Spy 2.0 asks volunteers to compare a strain glitch with auxiliary channels and judge whether they look alike. The science goal is causal: which subsystems, PEM, SUS, LSC, ISI, ASC, CAL and the rest, produce which glitches.\n\nThe data layer was most of the early work. I pull classifications through the Zooniverse Panoptes API with pandas, and the pipeline parses 276,000+ of them from 23 months of observations. Zooniverse exports carry annotations and subject metadata as JSON strings, and the subject metadata came in five undocumented schemas from different project iterations, which I reconciled onto one. I filtered roughly 38 science team accounts, because the target is volunteer judgment and team accounts include testing and expert labels. The pipeline writes three outputs: a subject level flat file with aggregated labels, a separate file for subjects missing GPS metadata so nothing disappears silently, and a pivot matrix of GPS time by channel, covering 8,293 channels across 455 subsystems.\n\nImages next. An OpenCV workflow pulled 49,000 spectrograms through batched API calls and turned each 1200 by 1200 mosaic into a pair of 224 by 224 heatmaps, sized for an ImageNet backbone.\n\nThe model is a two input CNN with one MobileNetV2 backbone shared across both inputs. Sharing puts both images in one embedding space, keeps the parameter count at one backbone, and lets embeddings be cached, so a glitch's strain embedding can be computed once and reused against every channel. A small head on the pooled embeddings outputs a sigmoid similarity trained against the volunteer label. It reaches 0.89 validation AUC on a held out 2,000 subject set.\n\nI treat calibration as the real deliverable. These scores are meant to be summed across many glitches to rank channels and subsystems, and sums of probabilities only mean something when the probabilities are calibrated. Label smoothing caps the target logit, AdamW's decoupled weight decay keeps weights and logits small, and early stopping on validation AUC cuts the late epochs where only confidence grows. Together they brought Expected Calibration Error from 0.10 to 0.05.\n\nThe descriptive analysis shapes how I read all of this. The top ten volunteers produced half of all classifications, and on subjects seen by more than one volunteer only 52% reach perfect consensus. So the label is noisy and concentrated, and the AUC ceiling against it sits well below one.\n\nI'd raise the weak points myself. The three calibration changes are reported together, so I can't attribute the gain, and temperature scaling is the baseline they should beat. The holdout is by subject, which keeps a glitch's pairs together but doesn't control for nearby times or repeated channels, so I want a split by GPS time blocks. There's no simple baseline beside the 0.89 yet, such as cosine similarity of frozen embeddings. And similarity only shows association. The causal step is aggregating calibrated scores by subsystem and glitch class, comparing against time shifted nulls, benchmarking against hveto and OmegaNeuron, and handing commissioners a short list to test with injections.",
+      "keypoints": [
+        "Physics first: strain, glitches, auxiliary channels as witnesses",
+        "Panoptes ingestion, JSON columns, five schemas, team accounts filtered",
+        "Three outputs and why the missing GPS file exists",
+        "Siamese MobileNetV2: shared embedding space, cacheable embeddings",
+        "0.89 AUC on 2,000 held out subjects",
+        "Calibration mechanisms and ECE 0.10 to 0.05",
+        "Label noise: top ten volunteers 50%, 52% consensus",
+        "Self critique: no ablation, no temperature scaling, subject split, no baseline, similarity is association"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone without a technical background.",
+      "script": "LIGO is a pair of observatories that detect gravitational waves, ripples in space from colliding black holes. The detectors are so sensitive that they pick up all kinds of noise, short bursts called glitches, and the hard part is working out which piece of equipment causes each kind. Gravity Spy is an NSF funded project where thousands of volunteers look at images and say whether a sensor's signal looks like the glitch. I built the system that collects and cleans more than 276,000 of those volunteer answers. Then I trained a neural network that predicts what volunteers would say, so their judgment can cover far more cases than people could ever look at. I also made the model's confidence scores more honest, which matters because scientists add those scores up to decide what to investigate.",
+      "keypoints": [
+        "What LIGO is and what a glitch is, in plain words",
+        "Volunteers compare sensor images with glitches",
+        "Cleaned more than 276,000 volunteer answers",
+        "Network predicts volunteer answers to scale their judgment",
+        "Trustworthy confidence scores matter for deciding what to fix"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the system on the whiteboard.",
+      "script": "First I draw the source on the left: a box for LIGO with two outputs, the strain channel on top and a stack of auxiliary channels below, labeled PEM, SUS, LSC, ISI, ASC, CAL. While drawing I say that a glitch in strain plus a matching transient in an auxiliary channel at the same GPS time is the clue we're after.\n\nSecond, the data path, left to right. Zooniverse volunteers, then the Panoptes API, then my ingestion box. Inside it I write three steps: parse 276,000+ classifications, reconcile five schemas, drop about 38 team accounts. Three arrows come out to three outputs: the subject level label file, the missing GPS file, and the GPS time by channel matrix. I say why the missing GPS file exists: nothing disappears silently.\n\nThird, the model. I draw two 224 by 224 squares, strain and auxiliary, both arrows into one MobileNetV2 box, and I write shared weights on it. Two embedding vectors come out, meet in a small head, and a sigmoid gives the similarity score. Next to it I write AUC 0.89 on 2,000 held out subjects.\n\nFourth, a reliability diagram in the corner: the diagonal, a curve off it labeled before, a curve close to it labeled after, and ECE from 0.10 to 0.05. I say calibration is the point because the scores get summed.\n\nLast, on the right, a dotted box for what comes next: aggregate scores by subsystem and glitch class, compare with hveto and OmegaNeuron, and send a short list to commissioners. I leave it dotted on purpose, because that part isn't done.",
+      "keypoints": [
+        "Source box: strain plus auxiliary subsystems",
+        "Data path with the three ingestion steps and three outputs",
+        "Siamese model drawing with shared weights",
+        "AUC 0.89 written beside the model",
+        "Reliability diagram with ECE 0.10 to 0.05",
+        "Dotted box for unfinished causal step"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you reconcile the five metadata schemas?",
+      "script": "The subject metadata came from different iterations of the project, and none of it was documented, so the first job was finding out what each version contained. I reconciled all five onto one schema so every subject reads the same way downstream. Two decisions around that matter. Subjects without GPS time can't be aligned with auxiliary data, so they go to their own file instead of being dropped, which keeps the loss visible. And roughly 38 science team accounts come out before anything is aggregated, because their classifications include testing and expert labels. If you want specifics, I can walk through which fields differed between versions.",
+      "keypoints": [
+        "Five undocumented versions from project iterations",
+        "Reconciled onto one canonical schema",
+        "Missing GPS subjects quarantined, not dropped",
+        "Science team accounts filtered before aggregation",
+        "Offer the field level differences"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What exactly is the label, and how noisy is it?",
+      "script": "Each example is a pair, a strain spectrogram and an auxiliary channel spectrogram from the same subject, and the label is the volunteers' aggregated similarity judgment. It's noisy. On subjects seen by more than one volunteer, only 52% are unanimous. Effort is also concentrated, with the top ten volunteers producing half of all classifications. That's why I smooth the targets, and why I read the AUC against a ceiling below one. The next improvement is soft labels, the fraction of volunteers who said similar, or a vote weighted by each volunteer's reliability, the way the original Gravity Spy uses per user confusion matrices.",
+      "keypoints": [
+        "Pair of spectrograms, aggregated volunteer similarity label",
+        "52% unanimous on multi volunteer subjects",
+        "Top ten volunteers produce half the classifications",
+        "Label smoothing as the response; AUC ceiling below one",
+        "Soft labels or skill weighted votes next"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How is ECE computed, and why should I trust 0.05?",
+      "script": "ECE bins the predictions, compares average confidence with observed accuracy in each bin, and averages the gaps weighted by how many predictions land in each bin. The value moves with the bin count and the binning convention, so those belong next to the number. On trust: 0.05 is a validation figure for three changes applied together, label smoothing, AdamW, and early stopping on AUC. What it doesn't have yet is an ablation or a temperature scaling baseline. Those are the next two runs I'd want before calling the training changes necessary.",
+      "keypoints": [
+        "Binned confidence versus accuracy, weighted by bin size",
+        "Bin count and convention change the value",
+        "Validation figure for three combined changes",
+        "Missing ablation and temperature scaling baseline"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why share the backbone between the two inputs?",
+      "script": "Both inputs are the same kind of image, a spectrogram rendered the same way, so one feature extractor should describe both. Sharing puts both embeddings in one space, so the head compares like with like. It halves the parameters relative to two backbones, which matters with about 25,000 labeled subjects. And it scales, because each image's embedding can be computed once and cached, so a glitch's strain embedding is reused against every channel. The cost is that the head compares pooled summaries, so fine time alignment has to survive pooling. Early fusion, stacking both images as channels, is the ablation I'd run against it.",
+      "keypoints": [
+        "Same kind of image, one feature extractor",
+        "One embedding space for a like for like comparison",
+        "Half the parameters of two backbones",
+        "Cacheable embeddings at scale",
+        "Cost: pooling loses alignment; early fusion ablation"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How does this feed the causal question?",
+      "script": "The model scores pairs, and the causal question is about subsystems, so the bridge is aggregation. I'd roll calibrated scores up the GPS time by channel matrix to subsystem by glitch class, then compare each rate against a time shifted null, so a channel that's always noisy doesn't look causal. That gives a ranked candidate list, which I'd benchmark against hveto's coincidence ranking and OmegaNeuron's similarity ranking. Then the list goes to commissioners, because strong causal evidence comes from injections and from fixes that make a glitch class disappear. This part is the plan; I haven't finished it.",
+      "keypoints": [
+        "Aggregation from pairs to subsystem by glitch class",
+        "Time shifted nulls against base rates",
+        "Benchmark against hveto and OmegaNeuron",
+        "Commissioners and injections for causal evidence",
+        "Clearly labelled as a plan"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "0.89 AUC isn't impressive.",
+      "script": "On a clean label I'd agree. This label is a crowd judgment that's unanimous on only 52% of multi volunteer subjects, so even a perfect model of the underlying truth would be marked wrong on a lot of examples, and the ceiling sits well below one. The model also sees a 224 pixel rendering of a much larger mosaic. What I'd concede is that 0.89 has nothing beside it yet. I want a frozen embedding cosine baseline and a confidence interval on the same split, so the number is read against something.",
+      "keypoints": [
+        "Concede: unremarkable on a clean task",
+        "Label ceiling from 52% consensus",
+        "Downsampled input",
+        "Missing baseline and confidence interval"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Similarity between spectrograms isn't causation.",
+      "script": "Agreed, and I don't claim it is. Ground motion can light up a seismometer, a suspension, and strain at once, so all three look similar and at most one is the coupling path. What similarity buys is a shorter search. With more than two hundred thousand channels per detector, the expensive step is choosing what to test. Calibrated scores aggregated over many glitches of one class give commissioners an ordered list, and the causal evidence then comes from injections and from fixes that remove the glitch class.",
+      "keypoints": [
+        "Concede: similarity is association",
+        "Common cause example: ground motion",
+        "Value is a shorter, ordered search",
+        "Causal evidence from injections and fixes"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "You changed three things and claim calibration improved. Which one did it?",
+      "script": "I can't attribute it from the number I report, because it's the combined effect of label smoothing, AdamW, and AUC based early stopping. Each attacks overconfidence a different way, so they're a reasonable bundle, but a bundle isn't evidence about its parts. The clean answer is leave one out runs across several seeds with intervals on ECE. The comparison I most want is temperature scaling on the original model. If that alone reaches 0.05, the cheap post hoc fix is the one to keep.",
+      "keypoints": [
+        "Concede: combined effect, no attribution",
+        "Three distinct mechanisms",
+        "Leave one out runs with seeds and intervals",
+        "Temperature scaling as the baseline to beat"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "gs-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is Gravity Spy 2.0, and what is Tanay's role on it?",
+      "easy": "Gravity Spy is an NSF funded citizen science project on Zooniverse that helps LIGO deal with detector noise. Tanay is a research assistant at Syracuse (since Feb 2026, ongoing) who builds the pipeline that turns volunteer judgments into clean tables and trains a model that predicts those judgments from spectrogram images.",
+      "deep": "The original Gravity Spy (Zevin et al. 2017) had volunteers sort LIGO glitch spectrograms into shape classes alongside a CNN. Gravity Spy 2.0, under an NSF grant that began in 2020, moves toward cause: volunteers compare a glitch in the main strain channel with the same moment in auxiliary channels and judge whether they look alike. Tanay's work has three layers. Ingestion: Python, pandas, and the Zooniverse Panoptes API over 276,000+ classifications from 23 months of observations, with five undocumented subject metadata schemas reconciled and roughly 38 science team accounts filtered out. Imaging: an OpenCV workflow over 49,000 spectrograms that turns each 1200x1200 mosaic into paired 224x224 heatmaps. Modeling: a two input CNN with a shared MobileNetV2 backbone in TensorFlow and Keras that predicts the volunteer similarity label, at 0.89 validation AUC on a held out 2,000 subject set, with Expected Calibration Error brought from 0.10 to 0.05. The code is committed to the Syracuse CCDS GravitySpy Classifier repository.",
+      "say": "I'm a research assistant on Gravity Spy 2.0, the NSF funded citizen science project that supports LIGO. I own the path from raw Zooniverse classifications to model ready image pairs, and I train the model that predicts what volunteers will say about a pair. The science goal behind it is causal: which hardware produces the glitches.",
+      "evidence": [
+        "portfolio: Research Assistant, Gravity Spy 2.0",
+        "portfolio: Syracuse University , NSF funded",
+        "portfolio: Feb 2026 to present",
+        "portfolio: I built the ingestion pipeline in Python with pandas and the Zooniverse Panoptes API. It parses",
+        "portfolio: 276,000+ volunteer classifications from 23 months of observations",
+        "portfolio: reconciling five undocumented subject metadata schemas from different project iterations",
+        "portfolio: covering 25,104 glitch subjects and 8,293 auxiliary detector channels, and filtering roughly 38",
+        "portfolio: science team accounts out of the volunteer population",
+        "portfolio: I wrote an OpenCV workflow that pulled 49,000 spectrograms through batch API calls and converted",
+        "portfolio: each 1200x1200 mosaic into paired 224x224 channel heatmaps sized for model input",
+        "portfolio: I trained a two input CNN with a shared MobileNetV2 backbone in TensorFlow and Keras to predict",
+        "portfolio: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on",
+        "portfolio: a held out 2,000 subject set",
+        "portfolio: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05",
+        "portfolio: The code is committed to the Syracuse CCDS GravitySpy"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1611.04596",
+        "https://arxiv.org/pdf/2308.15530",
+        "https://ciera.northwestern.edu/2023/05/18/gravity-spy-2-0-gears-up-for-the-next-gravitational-wave-observing-run/"
+      ],
+      "tags": [
+        "gravity-spy",
+        "overview",
+        "ligo"
+      ]
+    },
+    {
+      "id": "gs-02",
+      "type": "define",
+      "level": 1,
+      "q": "What is LIGO, and what is gravitational wave strain data?",
+      "easy": "LIGO is a pair of large laser interferometers in the US, at Hanford, Washington and Livingston, Louisiana, that detect gravitational waves by measuring tiny changes in the length of two 4 km arms. The strain channel is the main output: a time series of fractional arm length change.",
+      "deep": "Each detector is a Michelson interferometer with 4 km arms. A passing gravitational wave stretches one arm and squeezes the other, and the readout records the differential change as strain, $h = \\Delta L / L$. The Gravity Spy team puts the required sensitivity at arm length changes of order $10^{-18}$ m, which over 4 km is a strain of order $10^{-22}$. The calibrated strain channel (produced by the CAL subsystem) is the one astrophysical searches analyse; everything else the detector records is auxiliary. Because the signal is so small, anything that couples into arm length (ground motion, scattered light, electronics, acoustic and magnetic noise) appears in strain, which is why noise work is its own discipline, detector characterization. Observing runs are numbered: O1 began in 2015, O3 ended in spring 2020, and O4 began in May 2023.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/pdf/2308.15530",
+        "https://arxiv.org/html/2602.23460",
+        "https://ciera.northwestern.edu/2023/05/18/gravity-spy-2-0-gears-up-for-the-next-gravitational-wave-observing-run/"
+      ],
+      "tags": [
+        "ligo",
+        "strain",
+        "physics"
+      ]
+    },
+    {
+      "id": "gs-03",
+      "type": "define",
+      "level": 1,
+      "q": "What is a glitch, and why does LIGO care?",
+      "easy": "A glitch is a short burst of noise in the detector data that does not come from space. Glitches are frequent, and they can hide a real signal or look like one, so they have to be found, classified, and ideally fixed at the source.",
+      "deep": "Glitches are transient, non Gaussian noise: short excess power events that the stationary Gaussian noise model used by searches does not describe. They hurt in three ways: they raise the background of transient searches because they can trigger matched filters, they can overlap real events and must be subtracted or gated, and they cost observing time when data quality vetoes remove segments. Through the end of O3 the Gravity Spy dataset had accumulated more than 1.4 million Omicron triggers with SNR above 7.5, about one new glitch per minute of observing, against roughly 100 astrophysical candidates in that span. Glitches are grouped by spectrogram shape into classes such as Blip, Koi Fish, Whistle, and Low Frequency Blip; at the start of O4, volunteers chose among 27 classes including None of the Above. Some classes have known causes; many show no obvious correlation with any monitor, which is the gap Gravity Spy 2.0 targets.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/pdf/2308.15530",
+        "https://arxiv.org/abs/1611.04596"
+      ],
+      "tags": [
+        "glitch",
+        "ligo",
+        "detector-characterization"
+      ]
+    },
+    {
+      "id": "gs-04",
+      "type": "define",
+      "level": 1,
+      "q": "What is a spectrogram here, and what are the Q-transform and an Omega scan?",
+      "easy": "A spectrogram is a picture of a signal with time on the x-axis, frequency on the y-axis, and color for energy. Glitch types have characteristic shapes in these pictures, which is why people and CNNs can classify them by eye.",
+      "deep": "Gravity Spy images come from the Q-transform, a time frequency transform that tiles the plane with wavelets of constant quality factor Q (center frequency over bandwidth), so low frequencies get long windows and high frequencies short ones. The Omicron pipeline uses it to find times of excess power, and each trigger is rendered as a Q-scan (an Omega scan) at four durations, 0.5 s, 1.0 s, 2.0 s, and 4.0 s, so short and long morphologies are both visible. Color is normalized energy on a fixed colormap. The original Gravity Spy CNN merged the four durations into one square image so its kernels saw all time scales at once. Two consequences for Tanay's model: the input is a rendered image rather than raw strain, so plotting choices (colormap, color limits, axis ranges) become part of the feature; and shrinking a 1200x1200 mosaic to 224x224 inputs throws away fine time frequency detail that volunteers can see.",
+      "evidence": [
+        "portfolio: each 1200x1200 mosaic into paired 224x224 channel heatmaps sized for model input"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2308.15530"
+      ],
+      "tags": [
+        "spectrogram",
+        "q-transform",
+        "omega-scan"
+      ]
+    },
+    {
+      "id": "gs-05",
+      "type": "define",
+      "level": 1,
+      "q": "What are auxiliary channels, and how many does Tanay's data cover?",
+      "easy": "Besides the main strain signal, each LIGO detector records hundreds of thousands of other sensor streams: seismometers, microphones, magnetometers, control loop signals. These barely respond to gravitational waves, so a burst in one of them at the same moment as a glitch is a clue about where the glitch came from. Tanay's dataset covers 8,293 of them.",
+      "deep": "The Gravity Spy team puts the count at more than 200,000 auxiliary channels per detector, covering equipment state, actuator activity, seismic motion, and weather. Detector characterization relies on two properties: auxiliary channels are nearly insensitive to gravitational waves, so coincident excess power cannot be astrophysical, and they are numerous, so some channel often witnesses the noise source. A channel that reliably shows a transient at the same GPS time as a class of strain glitches is a witness; it can be used to veto data or to point commissioners at hardware. Channel names follow the pattern IFO:SUBSYSTEM-DESCRIPTOR, so a name starting L1:PEM- is a Livingston environmental sensor and one starting H1:SUS- is a Hanford suspension signal. Tanay's pipeline covers 8,293 channels, organized into 455 LIGO subsystems in the pivot matrix. For scale, the Gravity Spy 2.0 launch design showed volunteers 3 auxiliary channels per subject and about 20 distinct channels in total, so the channel set in this data is far wider than the first phase.",
+      "evidence": [
+        "portfolio: covering 25,104 glitch subjects and 8,293 auxiliary detector channels, and filtering roughly 38",
+        "portfolio: Auxiliary channels 8,293",
+        "portfolio: 455 LIGO subsystems, including PEM, SUS, LSC, ISI, ASC, and CAL"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2308.15530",
+        "https://arxiv.org/html/2602.23460"
+      ],
+      "tags": [
+        "auxiliary-channels",
+        "witness",
+        "ligo"
+      ]
+    },
+    {
+      "id": "gs-06",
+      "type": "define",
+      "level": 2,
+      "q": "Name the subsystems called out in the pivot matrix (PEM, SUS, LSC, ISI, ASC, CAL) and say what each does.",
+      "easy": "They are the families of detector hardware the auxiliary channels come from: environment sensors, mirror suspensions, length control, seismic isolation, alignment control, and calibration.",
+      "deep": "PEM, Physical Environment Monitoring: accelerometers, seismometers, microphones, magnetometers, and weather sensors in the buildings and on the chambers; the first suspect for ground motion, acoustic, and magnetic coupling. SUS, the Suspension subsystem: the multi stage pendulums holding the mirrors and their actuators; a Gravity Spy investigation tied a subclass of Low Frequency Blips to a Hanford suspension channel. LSC, Length Sensing and Control: the feedback loops that hold the optical cavities on resonance; its error and control signals carry anything that disturbs lengths. ISI, Internal Seismic Isolation: active platforms inside the vacuum that isolate optics from ground motion (HPI, the Hydraulic Pre-Isolator, is the stage outside). ASC, Alignment Sensing and Control: angular loops in pitch and yaw that keep beams centered; ASC noise couples to strain through beam spot motion. CAL, the Calibration subsystem: produces calibrated strain, and a channel such as CAL-DELTAL_EXTERNAL_DQ carries the differential arm signal itself. The pipeline groups 8,293 channels into 455 subsystems, so a subsystem there is finer than these six families; know exactly which part of the channel name defines a group.",
+      "evidence": [
+        "portfolio: 455 LIGO subsystems, including PEM, SUS, LSC, ISI, ASC, and CAL",
+        "portfolio: covering 25,104 glitch subjects and 8,293 auxiliary detector channels, and filtering roughly 38"
+      ],
+      "sources": [
+        "https://arxiv.org/html/2602.23460",
+        "https://arxiv.org/pdf/2308.15530"
+      ],
+      "tags": [
+        "pem",
+        "sus",
+        "lsc",
+        "isi",
+        "asc",
+        "cal",
+        "subsystems"
+      ]
+    },
+    {
+      "id": "gs-07",
+      "type": "concept",
+      "level": 1,
+      "q": "What is the causal question behind the project, and why is it hard?",
+      "easy": "The question is which pieces of detector hardware produce each kind of glitch, so engineers can fix the source instead of discarding noisy data. It is hard because many sensors twitch at the same moment for the same outside reason, and looking alike is weaker evidence than causing.",
+      "deep": "As stated: find which auxiliary subsystems produce the transient glitches that contaminate strain, so commissioners fix the responsible hardware instead of chasing symptoms. Four things make it hard. Common causes: an earthquake or a passing truck moves the ground, which shows up in PEM seismometers, ISI platforms, SUS actuators, and strain at once, so all of those channels correlate with the glitch and at most one is the coupling path. Nonlinear coupling: scattered light, for example, upconverts slow motion into higher frequency noise, so a true witness can look nothing like the glitch it explains. Multiple comparisons: with thousands of channels, some coincide with any glitch class by chance. Perceptual labels: volunteers judge shape similarity, a proxy for association with no intervention behind it. LIGO's strongest causal evidence comes from deliberate injections (shaking, acoustic, and magnetic injections that measure coupling) and from fixes that make a glitch class disappear. Gravity Spy 2.0 stages the work: Stage 1 compares glitches with auxiliary channels by similarity, Stage 2 builds collections with hypothesized common causality, Stage 3 analyses the channel network for root causes. Tanay's similarity model sits at the Stage 1 task.",
+      "evidence": [
+        "portfolio: Gravity Spy is NSF funded citizen science that supports LIGO. The science goal is causal",
+        "portfolio: inference on detector noise: finding which auxiliary subsystems produce the transient glitches",
+        "portfolio: that contaminate gravitational wave strain data, so detector commissioners can fix the",
+        "portfolio: responsible hardware instead of chasing symptoms."
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2308.15530"
+      ],
+      "tags": [
+        "causal-inference",
+        "common-cause",
+        "gravity-spy-2"
+      ]
+    },
+    {
+      "id": "gs-08",
+      "type": "define",
+      "level": 1,
+      "q": "What are Zooniverse and the Panoptes API, and what does a classification export look like?",
+      "easy": "Zooniverse is the website where volunteers do the classifying. Panoptes is the system behind it, with an API that lets a project team download every classification and every subject's metadata.",
+      "deep": "Panoptes is the Zooniverse backend. Its objects are projects, workflows (a versioned task design), subject sets, subjects (an image plus a metadata dictionary uploaded by the team), and classifications. The Python client exposes exports, for example `Project(id).get_export('classifications', generate=True)` with `csv_dictreader()` to read rows. The classification export has one row per classification with columns classification_id, user_name, user_id, user_ip (hashed), workflow_id, workflow_name, workflow_version, created_at, gold_standard, expert, metadata, annotations, subject_data, and subject_ids. Three of those are JSON strings: annotations holds the answers in a shape set by the workflow's task tree, subject_data holds the subject metadata as uploaded, and metadata holds client details such as classification duration. The subject export adds locations (image URLs), classifications_count, retired_at, and retirement_reason. Parsing means json decoding those columns row by row and expanding annotations into one row per answered task, which is where workflow versions and metadata schema drift cause trouble.",
+      "evidence": [
+        "portfolio: I built the ingestion pipeline in Python with pandas and the Zooniverse Panoptes API. It parses"
+      ],
+      "sources": [
+        "https://panoptes-python-client.readthedocs.io/en/latest/user_guide.html",
+        "https://help.zooniverse.org/next-steps/data-exports"
+      ],
+      "tags": [
+        "zooniverse",
+        "panoptes",
+        "api",
+        "ingestion"
+      ]
+    },
+    {
+      "id": "gs-09",
+      "type": "number",
+      "level": 1,
+      "q": "How much volunteer data does the pipeline ingest?",
+      "easy": "More than 276,000 volunteer classifications collected over 23 months of observations, covering 25,104 glitch subjects and 8,293 auxiliary channels.",
+      "deep": "276,000+ classifications from 23 months of observations, 25,104 glitch subjects, 8,293 auxiliary channels, after filtering roughly 38 science team accounts out of the volunteer population. Context: this is Gravity Spy 2.0 auxiliary channel data, so a classification is a judgment about a glitch and its channels rather than a class label from the original project. Simple division gives about 11 classifications per subject on average, but the average hides a heavy right tail, since the top ten volunteers produced half of all classifications. The write up gives volume only; it does not give a classification rate or the number of distinct volunteers, so do not improvise either in an interview.",
+      "evidence": [
+        "portfolio: 276,000+ volunteer classifications from 23 months of observations",
+        "portfolio: Classifications parsed 276,000+",
+        "portfolio: covering 25,104 glitch subjects and 8,293 auxiliary detector channels, and filtering roughly 38",
+        "portfolio: science team accounts out of the volunteer population",
+        "portfolio: volunteers account for 50% of all classifications"
+      ],
+      "sources": [],
+      "tags": [
+        "data-volume",
+        "ingestion"
+      ]
+    },
+    {
+      "id": "gs-10",
+      "type": "how",
+      "level": 2,
+      "q": "How did Tanay reconcile five undocumented subject metadata schemas?",
+      "easy": "Different rounds of the project uploaded subject metadata with different field names and formats, and none of it was documented. Tanay mapped all five versions onto one standard layout so every subject reads the same way downstream.",
+      "deep": "The write up states the outcome: five undocumented subject metadata schemas from different project iterations, reconciled across 25,104 glitch subjects. The standard method for this kind of drift, and a good structure for the answer: (1) profile, grouping subjects by subject set or upload period and listing the key set and value types each group uses; (2) cluster those key sets into versions; (3) write an explicit mapping from each version to one canonical schema (subject id, GPS time, detector, channel list, image locations and similar fields), with type coercion in one place; (4) validate after mapping, for example GPS times inside the observation window and channel names that parse as IFO:SUBSYSTEM-DESCRIPTOR; (5) route failures to a side file instead of dropping them, which is the role of the missing GPS file. Two traps typical of this data: GPS times written at different precisions do not join exactly, so time joins need a tolerance; and a key absent in one version is different from a key present with a null value. Have the actual differing fields ready from the repo.",
+      "evidence": [
+        "portfolio: reconciling five undocumented subject metadata schemas from different project iterations",
+        "portfolio: covering 25,104 glitch subjects and 8,293 auxiliary detector channels, and filtering roughly 38",
+        "portfolio: for subjects missing GPS metadata, and a pivot matrix of GPS time by auxiliary channel covering"
+      ],
+      "sources": [],
+      "tags": [
+        "schema-drift",
+        "data-cleaning",
+        "ingestion"
+      ]
+    },
+    {
+      "id": "gs-11",
+      "type": "why",
+      "level": 2,
+      "q": "Why filter roughly 38 science team accounts out of the volunteer population?",
+      "easy": "Scientists on the team classify differently from volunteers: they test the interface, label gold standard examples, and know the answers. Mixing them in would distort every statistic about volunteers and leak expert labels into what is supposed to be volunteer judgment.",
+      "deep": "The training target and the descriptive analysis both claim to be about volunteers, so the population has to be volunteers. Team accounts break that in four ways. They make gold standard and test classifications (the export flags gold_standard and expert rows, but test traffic on a beta workflow is not always flagged). Their labels sit closer to expert truth, which inflates apparent volunteer agreement. A few heavy team accounts would distort an effort distribution that is already right tailed. And if team labels leak into the target, the model is partly trained on experts and then evaluated as if it predicts volunteers. Roughly 38 accounts came out. How they were identified (project role lists, the expert flag, or a list from the science team) and how many classifications they removed are details to state exactly from the repo.",
+      "evidence": [
+        "portfolio: covering 25,104 glitch subjects and 8,293 auxiliary detector channels, and filtering roughly 38",
+        "portfolio: science team accounts out of the volunteer population"
+      ],
+      "sources": [
+        "https://help.zooniverse.org/next-steps/data-exports"
+      ],
+      "tags": [
+        "data-cleaning",
+        "label-leakage",
+        "population"
+      ]
+    },
+    {
+      "id": "gs-12",
+      "type": "how",
+      "level": 2,
+      "q": "What are the pipeline's three outputs, and why does each exist?",
+      "easy": "One clean table with a row per glitch subject and the volunteers' combined answer; one file listing subjects missing their GPS time; and one large grid of glitch time by sensor channel.",
+      "deep": "(1) A subject level flat file with aggregated volunteer labels: modeling and descriptive analysis read this, one row per subject, so classification level noise is already summarized; the aggregation rule (majority, fraction similar, or a weighted vote) is a choice to state precisely. (2) A separate file for subjects missing GPS metadata: without GPS time a subject cannot be aligned with auxiliary data or placed in the time by channel matrix, but dropping it silently would bias the data if missingness clusters in one schema version and would make counts irreproducible; a separate file makes the loss visible and recoverable. (3) A pivot matrix of GPS time by auxiliary channel covering 455 LIGO subsystems: rows are glitch times, columns are channels, cells carry the volunteer signal for that channel at that time; this is the input for the causal step, because it supports aggregation by channel or subsystem and co occurrence analysis. The design goal of the split is that every subject lands in an analysable or a quarantined file so the counts reconcile; verify that they do before quoting it.",
+      "evidence": [
+        "portfolio: writes three outputs: a subject level flat file with aggregated volunteer labels, a separate file",
+        "portfolio: for subjects missing GPS metadata, and a pivot matrix of GPS time by auxiliary channel covering",
+        "portfolio: 455 LIGO subsystems, including PEM, SUS, LSC, ISI, ASC, and CAL"
+      ],
+      "sources": [],
+      "tags": [
+        "pipeline-outputs",
+        "data-quality",
+        "audit"
+      ]
+    },
+    {
+      "id": "gs-13",
+      "type": "concept",
+      "level": 2,
+      "q": "What is GPS time, and how should the GPS time by channel matrix be stored and used?",
+      "easy": "GPS time is the clock LIGO uses: seconds counted since January 6, 1980. The matrix puts each glitch time on a row and each sensor channel in a column, so you can see which channels are judged similar to which glitches.",
+      "deep": "GPS time counts SI seconds from 1980-01-06 00:00:00 UTC without leap seconds, so it runs ahead of UTC by the accumulated leap seconds (18 since 2017). LIGO timestamps are ten digit GPS seconds, and float64 keeps sub microsecond resolution at that size. The matrix is very sparse: a subject shows a handful of channels while there are 8,293 columns. As arithmetic, 25,104 rows by 8,293 columns would be about 208 million cells if every subject had its own time, so a dense table wastes memory; a long table of (gps_time, channel, value) or a scipy sparse matrix is the better storage, with the wide pivot produced only for views. Uses: group columns by subsystem to count how often each is judged similar per glitch class; estimate conditional rates such as $P(\\text{similar in SUS} \\mid \\text{class} = \\text{Blip})$; and compare against a time shifted null to separate real coincidence from base rates. Missing differs from zero here (not shown versus shown and judged dissimilar), so the cell encoding must keep them apart.",
+      "evidence": [
+        "portfolio: for subjects missing GPS metadata, and a pivot matrix of GPS time by auxiliary channel covering",
+        "portfolio: 455 LIGO subsystems, including PEM, SUS, LSC, ISI, ASC, and CAL",
+        "portfolio: covering 25,104 glitch subjects and 8,293 auxiliary detector channels, and filtering roughly 38"
+      ],
+      "sources": [],
+      "tags": [
+        "gps-time",
+        "sparse-matrix",
+        "data-modeling"
+      ]
+    },
+    {
+      "id": "gs-14",
+      "type": "how",
+      "level": 2,
+      "q": "Walk through the OpenCV workflow: 49,000 spectrograms, 1200x1200 mosaics, paired 224x224 heatmaps.",
+      "easy": "Tanay downloaded 49,000 spectrogram images through batched API calls, then cut each large composite image into the pieces the model needs and shrank each piece to 224 by 224 pixels, the input size the pretrained network expects.",
+      "deep": "Stated facts: 49,000 spectrograms pulled through batch API calls; each a 1200x1200 mosaic; converted into paired 224x224 channel heatmaps sized for model input. The steps between those facts are standard and worth being able to defend: fetch image URLs from subject locations with bounded concurrency, retries with backoff, and an on disk cache keyed by subject id so reruns are idempotent; decode with `cv2.imdecode`; locate the panels in the mosaic (fixed pixel offsets are fragile across schema versions, so check each crop's size and content); crop the two panels that form a pair; resize with `cv2.INTER_AREA`, which averages source pixels and avoids aliasing when shrinking; convert BGR to RGB, because OpenCV decodes in BGR order while ImageNet pretrained Keras models expect RGB; then apply MobileNetV2 preprocessing, which scales pixels to [-1, 1]. Why 224: it is the resolution MobileNetV2 was pretrained at on ImageNet, so pretrained filters see structures at a familiar scale. The cost is detail, up to about a 5x linear shrink from 1200 pixels, which can blur thin lines and very short transients. Confirm the exact crop geometry and preprocessing from the repo.",
+      "evidence": [
+        "portfolio: I wrote an OpenCV workflow that pulled 49,000 spectrograms through batch API calls and converted",
+        "portfolio: each 1200x1200 mosaic into paired 224x224 channel heatmaps sized for model input",
+        "portfolio: Spectrograms retrieved 49,000"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1801.04381"
+      ],
+      "tags": [
+        "opencv",
+        "image-processing",
+        "preprocessing"
+      ]
+    },
+    {
+      "id": "gs-15",
+      "type": "concept",
+      "level": 1,
+      "q": "Describe the model: a two input CNN with a shared MobileNetV2 backbone.",
+      "easy": "The model looks at two images at once, the main detector's glitch and one auxiliary channel at the same time, runs both through the same image network, and compares the two summaries to output how likely volunteers are to call them similar.",
+      "deep": "Input A is the strain spectrogram and input B an auxiliary channel spectrogram from the same subject, both 224x224x3. One MobileNetV2 instance (ImageNet weights, no classification top) is applied to both, so the branches share every weight; with global average pooling each branch yields a 1280 dimensional embedding. A comparison head combines the embeddings and ends in one sigmoid unit trained with binary cross entropy against the volunteer similarity label. Common head designs, from least to most expressive: cosine similarity of the two embeddings; concatenation [a, b] into dense layers; and symmetric features [|a - b|, a * b], optionally with a and b, into dense layers. The write up does not name the head, so state the one in the repo, and know whether it is symmetric (swapping inputs gives the same score), because a strain versus auxiliary pair is not symmetric by nature and an asymmetric head can use that. In Keras this is the functional API: build the backbone once, call it on two Input layers, merge, and compile with an AUC metric.",
+      "evidence": [
+        "portfolio: I trained a two input CNN with a shared MobileNetV2 backbone in TensorFlow and Keras to predict",
+        "portfolio: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1801.04381"
+      ],
+      "tags": [
+        "siamese",
+        "architecture",
+        "mobilenetv2",
+        "keras"
+      ]
+    },
+    {
+      "id": "gs-16",
+      "type": "compare",
+      "level": 2,
+      "q": "Why share the backbone between the two inputs instead of using two separate networks or stacking the images?",
+      "easy": "Both inputs are the same kind of picture, so the same feature extractor should describe both. Sharing makes the comparison like for like, halves the number of weights relative to two networks, and suits a dataset of tens of thousands of labeled subjects.",
+      "deep": "Separate backbones: twice the parameters, and the two embedding spaces can drift apart, so the head must learn an alignment from limited labels; justified only if strain and auxiliary images differed systematically in appearance. Early fusion (stack both as a 6 channel image into one network): the first layers can compare pixels at the same time and frequency, attractive because coincidence in time is the signal, but the pretrained first convolution expects 3 channels, so ImageNet weights are lost at the input or must be adapted. Shared weights (siamese): both images map into one embedding space by construction; the parameter count is one backbone's (about 3.4 million for MobileNetV2); gradients from both branches train the same filters; and embeddings can be cached per image, so at scale a glitch's strain embedding is computed once and reused against every channel. The cost: late fusion compares pooled summaries, so precise time alignment within the window must survive global pooling. A sound answer names the ablation that settles it, early fusion against siamese on the same split, reporting AUC and ECE.",
+      "evidence": [
+        "portfolio: I trained a two input CNN with a shared MobileNetV2 backbone in TensorFlow and Keras to predict"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1801.04381"
+      ],
+      "tags": [
+        "siamese",
+        "weight-sharing",
+        "early-fusion",
+        "design-choice"
+      ]
+    },
+    {
+      "id": "gs-17",
+      "type": "define",
+      "level": 1,
+      "q": "What is transfer learning, and why does it work on spectrograms that look nothing like ImageNet photos?",
+      "easy": "Transfer learning means starting from a network already trained on a big dataset and adapting it to a new task instead of training from scratch. Its early layers already detect edges, blobs, and textures, and spectrogram shapes are made of those.",
+      "deep": "A backbone trained on ImageNet (about 1.28 million labeled photos) learns a hierarchy: early filters respond to edges, color blobs, and textures; middle layers to parts and patterns; late layers to object specific features. Early and middle features transfer broadly, and a glitch spectrogram is a set of oriented lines, blobs, and textures on a colormap, so they are reusable. The usual recipe is two stage: freeze the backbone and train only the head at a normal learning rate, then unfreeze the top blocks (or all) and fine tune at a learning rate 10 to 100 times smaller, keeping batch normalization layers in inference mode so small batches do not corrupt their running statistics. Failure modes: domain gap (no natural photo has a frequency axis, so late layers transfer less well), catastrophic forgetting at too high a learning rate, and overfitting when tens of thousands of examples train a large backbone at full rate. Prior work on Gravity Spy data, including a 2018 deep transfer learning study, supports the approach. State which layers Tanay froze and for how long, from the repo.",
+      "evidence": [
+        "portfolio: I trained a two input CNN with a shared MobileNetV2 backbone in TensorFlow and Keras to predict"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2308.15530",
+        "https://arxiv.org/abs/1801.04381"
+      ],
+      "tags": [
+        "transfer-learning",
+        "fine tuning",
+        "imagenet"
+      ]
+    },
+    {
+      "id": "gs-18",
+      "type": "define",
+      "level": 1,
+      "q": "What is MobileNetV2, and why is it cheap?",
+      "easy": "MobileNetV2 is a small, fast image network from Google designed for phones. It gets much of the accuracy of far bigger networks by splitting each convolution into a cheap per channel filter and a cheap channel mixing step.",
+      "deep": "Its block is the inverted residual with a linear bottleneck: a 1x1 convolution expands a narrow input (expansion factor 6), a 3x3 depthwise convolution filters each channel separately, and a 1x1 projection with no activation squeezes back to a narrow output; a residual connection joins narrow input to narrow output when stride is 1 and shapes match. Activations are ReLU6. The authors' insight is to drop nonlinearities in the narrow layers to keep representational power. Cost: a standard $k \\times k$ convolution on an $H \\times W$ map from $M$ to $N$ channels costs $k^2 M N H W$ multiply adds; the depthwise separable version costs $k^2 M H W + M N H W$, a ratio of $\\frac{1}{N} + \\frac{1}{k^2}$, so roughly 8 to 9 times cheaper for $k = 3$. The width 1.0, 224 input model has about 3.4 million parameters and about 300 million multiply adds, and its pooled feature vector is 1280 dimensional. In Keras: `tf.keras.applications.MobileNetV2(include_top=False, weights='imagenet', pooling='avg', input_shape=(224, 224, 3))`.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/1801.04381"
+      ],
+      "tags": [
+        "mobilenetv2",
+        "depthwise-separable",
+        "efficient-cnn"
+      ]
+    },
+    {
+      "id": "gs-19",
+      "type": "compare",
+      "level": 2,
+      "q": "Why MobileNetV2 rather than ResNet-50, EfficientNet, or a vision transformer?",
+      "easy": "The labeled dataset is modest, every example needs two passes through the network, and the work runs on research compute. A small pretrained network trains fast, overfits less, and is cheap to rerun.",
+      "deep": "The write up does not record a backbone comparison, so give reasons true of the setup rather than claiming a benchmark that was not run. Data size: 25,104 subjects and a 2,000 subject validation set favour a small backbone; ResNet-50 has about 25 million parameters, roughly 7 times MobileNetV2, with more capacity to memorize volunteer noise. Compute: the siamese design runs the backbone twice per pair, and the full problem is glitches times channels, so per image cost multiplies. Vision transformers need much more data or heavy pretraining to beat CNNs at this scale, and patch attention does not exploit locality in a 224 pixel spectrogram as cheaply as convolution. EfficientNet-B0 is the honest competitor (similar size, better ImageNet accuracy) and the first swap to try. Gravity Spy's production classifiers have been small custom CNNs, and its own paper names label noise and morphologically similar classes as the limits, which supports the view that capacity is not the bottleneck. The way to settle it is a backbone ablation on the same split, reporting AUC and ECE together.",
+      "evidence": [
+        "portfolio: covering 25,104 glitch subjects and 8,293 auxiliary detector channels, and filtering roughly 38",
+        "portfolio: a held out 2,000 subject set",
+        "portfolio: I trained a two input CNN with a shared MobileNetV2 backbone in TensorFlow and Keras to predict"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1801.04381",
+        "https://arxiv.org/pdf/2308.15530"
+      ],
+      "tags": [
+        "backbone-choice",
+        "mobilenetv2",
+        "resnet",
+        "vit"
+      ]
+    },
+    {
+      "id": "gs-20",
+      "type": "concept",
+      "level": 1,
+      "q": "What exactly is the training target, and how noisy is it?",
+      "easy": "The target is the volunteers' combined answer to whether this auxiliary channel's image looks like the main glitch. Volunteers often disagree: on subjects seen by more than one person, only 52% get a unanimous answer, so the labels are noisy.",
+      "deep": "Each example is a pair (strain spectrogram, auxiliary spectrogram) and the label is the aggregated volunteer similarity judgment from the subject level file. Two findings from the descriptive analysis shape it. Agreement is limited: 52% of multi volunteer subjects reach perfect consensus, so nearly half carry some disagreement, and a hard 0 or 1 from a majority vote discards that. Effort is concentrated: the top ten volunteers produced half of all classifications, so the label is partly the judgment of a few people. Responses that fit: train on soft labels (the fraction of volunteers saying similar) or keep hard labels with label smoothing, as Tanay does; weight volunteers by reliability, as original Gravity Spy does with a per user confusion matrix learned from gold standard subjects; and read evaluation against a ceiling, since a perfect model of the underlying truth still scores below AUC 1 against a noisy label. Know the exact aggregation rule in the flat file.",
+      "evidence": [
+        "portfolio: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on",
+        "portfolio: writes three outputs: a subject level flat file with aggregated volunteer labels, a separate file",
+        "portfolio: volunteer, 52% reach perfect consensus",
+        "portfolio: Volunteer effort is heavily right tailed: the top ten",
+        "portfolio: volunteers account for 50% of all classifications",
+        "portfolio: Calibration matters more than the AUC here, and label smoothing,"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2308.15530"
+      ],
+      "tags": [
+        "labels",
+        "label-noise",
+        "crowdsourcing"
+      ]
+    },
+    {
+      "id": "gs-21",
+      "type": "formula",
+      "level": 1,
+      "q": "Define ROC AUC precisely. What does 0.89 mean as a probability?",
+      "easy": "AUC measures how well a model ranks positives above negatives. An AUC of 0.89 means that if you pick one pair volunteers called similar and one they called dissimilar, the model scores the similar one higher 89% of the time.",
+      "deep": "The ROC curve plots true positive rate $TPR = TP/P$ against false positive rate $FPR = FP/N$ as the threshold sweeps; AUC is the area under it, equal to the Wilcoxon Mann Whitney statistic $$\\text{AUC} = \\frac{1}{|P|\\,|N|}\\sum_{i \\in P}\\sum_{j \\in N}\\left[\\mathbb{1}(s_i > s_j) + \\tfrac{1}{2}\\mathbb{1}(s_i = s_j)\\right]$$ 0.5 is chance, 1.0 is perfect ranking, and Gini $= 2\\,\\text{AUC} - 1$ (0.78 here). Properties: threshold free; invariant to any monotone transform of the scores, which is exactly why it says nothing about calibration; conditional on class, so a high AUC can coexist with poor precision when positives are rare. Implementation note: `tf.keras.metrics.AUC` approximates the area with 200 thresholds by default, while `sklearn.metrics.roc_auc_score` is exact; know which produced the reported 0.89.",
+      "evidence": [
+        "portfolio: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on",
+        "portfolio: Validation AUC 0.89"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Receiver_operating_characteristic"
+      ],
+      "tags": [
+        "auc",
+        "roc",
+        "metrics"
+      ]
+    },
+    {
+      "id": "gs-22",
+      "type": "number",
+      "level": 1,
+      "q": "What is the 0.89 validation AUC measured on, and what are its caveats?",
+      "easy": "0.89 is the model's ranking quality on 2,000 glitch subjects it did not train on, scored against volunteer similarity labels. It says the model agrees with volunteers well; it says nothing yet about true causes.",
+      "deep": "Measured: AUC of the predicted similarity score against the aggregated volunteer label on a held out set of 2,000 subjects. Compared against: chance (0.5) and implicitly the volunteers themselves; no baseline such as cosine similarity of frozen embeddings or a time coincidence heuristic is reported, so 0.89 has no external reference point yet. Caveats, most important first. (1) The label is volunteer perception, so the number measures agreement with volunteers, bounded by their own disagreement (52% perfect consensus). (2) It is a validation number; if the same 2,000 subjects drove AUC based early stopping, it carries a small optimistic selection bias, and a separate test split fixes that. (3) A subject level holdout keeps one glitch's pairs together, but the same channels and nearby times appear on both sides, so it measures generalization to new glitches more than to new channels or later observing periods. (4) No confidence interval is reported; a bootstrap over subjects would supply one.",
+      "evidence": [
+        "portfolio: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on",
+        "portfolio: a held out 2,000 subject set",
+        "portfolio: Validation AUC 0.89",
+        "portfolio: volunteer, 52% reach perfect consensus",
+        "portfolio: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05"
+      ],
+      "sources": [],
+      "tags": [
+        "auc",
+        "validation",
+        "result",
+        "caveats"
+      ]
+    },
+    {
+      "id": "gs-23",
+      "type": "pushback",
+      "level": 2,
+      "q": "Isn't 0.89 AUC low for a binary image task?",
+      "easy": "Not for this label. The target is a crowd judgment that is unanimous only about half the time, so a model cannot score much higher against it without memorizing noise.",
+      "deep": "Concede: on a clean binary vision task 0.89 would be unremarkable, the number has no confidence interval, and no simple baseline sits beside it, so on its own it proves little. Defend: the ceiling is set by the label. With 48% of multi volunteer subjects showing some disagreement, even a perfect predictor of the underlying truth would be marked wrong on many examples, so the achievable AUC against volunteer labels is well below 1. The model also sees a 224x224 rendering cut from a 1200x1200 mosaic, which discards detail volunteers can see. And ranking is not the deliverable: the scores feed aggregation over many pairs, where calibration decides whether totals mean anything, and that is where the reported improvement is (ECE from 0.10 to 0.05). The honest next step is a baseline on the same split, such as cosine similarity of frozen ImageNet embeddings or the Gravity Spy similarity embedding, so 0.89 is read against something.",
+      "say": "Against a clean label it would be ordinary. This label is a crowd judgment that's unanimous on only about half of multi volunteer subjects, so the ceiling is well below one. What I'd add is a baseline: frozen embedding cosine similarity on the same split, sitting next to the 0.89.",
+      "evidence": [
+        "portfolio: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on",
+        "portfolio: volunteer, 52% reach perfect consensus",
+        "portfolio: each 1200x1200 mosaic into paired 224x224 channel heatmaps sized for model input",
+        "portfolio: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05"
+      ],
+      "sources": [
+        "https://arxiv.org/html/2602.23460"
+      ],
+      "tags": [
+        "pushback",
+        "auc",
+        "label-noise"
+      ]
+    },
+    {
+      "id": "gs-24",
+      "type": "define",
+      "level": 1,
+      "q": "What does it mean for a classifier to be calibrated, and what is a reliability diagram?",
+      "easy": "A model is calibrated when its confidence matches reality: of all the pairs it scores 0.8, about 80% really are similar. A reliability diagram plots predicted probability against the observed rate, and a calibrated model sits on the diagonal.",
+      "deep": "Formally, a binary model is calibrated if $P(Y = 1 \\mid \\hat{p} = p) = p$ for all $p$. A reliability diagram bins predictions (commonly 10 or 15 equal width bins on [0, 1]) and, for each bin, plots observed positive rate (or accuracy) against mean predicted probability (or confidence); points below the diagonal mean overconfidence, above it underconfidence. A histogram of bin counts usually sits underneath, since a big gap in a nearly empty bin matters little. Guo et al. (2017) showed modern deep networks are poorly calibrated, typically overconfident, and that depth, width, weight decay, and batch normalization all affect it; a network can grow more overconfident while accuracy still improves, because the loss keeps rewarding larger logits. Calibration and discrimination are separate axes: a model can have high AUC and poor calibration, and a constant predictor equal to the base rate is perfectly calibrated with AUC 0.5.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "calibration",
+        "reliability-diagram"
+      ]
+    },
+    {
+      "id": "gs-25",
+      "type": "formula",
+      "level": 1,
+      "q": "Write the Expected Calibration Error formula and compute it on a small example.",
+      "easy": "ECE splits predictions into confidence buckets, measures the gap between average confidence and actual accuracy in each bucket, and averages those gaps weighted by how many predictions fall in each bucket.",
+      "deep": "With $M$ bins $B_1, \\dots, B_M$ over $n$ predictions: $$\\text{ECE} = \\sum_{m=1}^{M} \\frac{|B_m|}{n}\\,\\bigl|\\text{acc}(B_m) - \\text{conf}(B_m)\\bigr|$$ where $\\text{conf}(B_m)$ is mean predicted confidence and $\\text{acc}(B_m)$ observed accuracy in the bin. Maximum Calibration Error replaces the weighted sum with $\\max_m$. For a binary sigmoid model there are two conventions: bin the positive class probability $\\hat{p}$ and compare with the fraction of positives, or bin the confidence $\\max(\\hat{p}, 1 - \\hat{p})$ and compare with accuracy; they give different values, so state which. Worked example: 1,000 predictions in two bins; 600 with mean confidence 0.90 and accuracy 0.80, and 400 with mean confidence 0.60 and accuracy 0.55. ECE $= 0.6 \\times 0.10 + 0.4 \\times 0.05 = 0.08$. Weaknesses: the value depends on bin count and scheme (equal width versus equal mass), it is biased upward on small samples, and errors of opposite sign inside one bin cancel. Report the bin count with the number.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "ece",
+        "calibration",
+        "formula"
+      ]
+    },
+    {
+      "id": "gs-26",
+      "type": "number",
+      "level": 1,
+      "q": "What does the ECE drop from 0.10 to 0.05 mean, and what are its caveats?",
+      "easy": "Before the changes, the model's confidence was off from reality by about 10 percentage points on average; after label smoothing, AdamW, and early stopping on AUC, by about 5. The average gap halved.",
+      "deep": "Measured: Expected Calibration Error on validation data, from 0.10 to 0.05, after three changes applied together: label smoothing, the AdamW optimizer, and AUC based early stopping. Read: the bin weighted average gap between predicted probability and observed frequency halved. Caveats: (1) the three changes are reported as one result, so their individual contributions are unknown; (2) the bin count and binning convention are not in the write up and they move the value; (3) if early stopping and ECE share the validation set, both the stopping epoch and the score were chosen on it; (4) there is no post hoc baseline, and temperature scaling, the standard fix, often reaches low single digit ECE without retraining, which is the comparison an ML reviewer will ask for. Tanay's own framing, that calibration matters more than the AUC here, is why this number leads.",
+      "evidence": [
+        "portfolio: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05",
+        "portfolio: Calibration error 0.10 to 0.05",
+        "portfolio: Calibration matters more than the AUC here, and label smoothing,"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "ece",
+        "calibration",
+        "result",
+        "caveats"
+      ]
+    },
+    {
+      "id": "gs-27",
+      "type": "why",
+      "level": 1,
+      "q": "Why does Tanay say calibration matters more than AUC for this model?",
+      "easy": "The scores are meant to be added up across thousands of glitch and channel pairs to decide which hardware to investigate. Adding up probabilities only gives a sensible answer if each probability means what it says.",
+      "deep": "AUC answers whether similar pairs score above dissimilar ones. The downstream use asks other questions. Aggregation: the expected count of similar judgments for channel $c$ over a glitch class is $\\sum_i \\hat{p}_{i,c}$, an unbiased estimate only when $\\hat{p}$ is calibrated; an overconfident model inflates totals for channels that appear often. Thresholds: a commissioner or a triage rule acting at 0.9 needs 0.9 to mean about 90%. Routing: Gravity Spy already assigns subjects to volunteer workflows by ML confidence, confident ones to beginners and uncertain ones to advanced volunteers, and a similarity score used that way must be calibrated or the routing is wrong. Comparison across subsystems: channels with different base rates are comparable only on a probability scale. AUC is invariant to monotone transforms, so a model can keep 0.89 while its probabilities drift arbitrarily.",
+      "evidence": [
+        "portfolio: Calibration matters more than the AUC here, and label smoothing,",
+        "portfolio: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05",
+        "portfolio: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2308.15530",
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "calibration",
+        "aggregation",
+        "design-rationale"
+      ]
+    },
+    {
+      "id": "gs-28",
+      "type": "formula",
+      "level": 2,
+      "q": "What is label smoothing, how does it work for a binary sigmoid output, and why does it suit these labels?",
+      "easy": "Label smoothing replaces hard 0 and 1 targets with slightly softer ones, such as 0.025 and 0.975, so the model is never pushed toward certainty. With labels volunteers often disagree on, certainty was never justified.",
+      "deep": "For $K$ classes, $y^{LS} = (1 - \\varepsilon)\\,y + \\varepsilon / K$. For a binary sigmoid target, Keras `BinaryCrossentropy(label_smoothing=eps)` squeezes targets toward 0.5: $y' = y(1 - \\varepsilon) + \\varepsilon/2$, so 1 becomes $1 - \\varepsilon/2$ and 0 becomes $\\varepsilon/2$. The cross entropy minimum then sits at a finite logit, $z^* = \\log\\frac{1 - \\varepsilon/2}{\\varepsilon/2}$ (about 3.7 for $\\varepsilon = 0.05$), so logits stop growing and the overconfidence behind poor calibration is capped. Müller, Kornblith, and Hinton (2019) report that it improves calibration and pulls same class examples into tight penultimate clusters, at the cost of making the network a worse teacher for distillation. Fit here: with only 52% of multi volunteer subjects unanimous, a hard target overstates certainty, and smoothing is a cheap stand in for soft labels (the volunteer fraction), which carry more information. Failure mode: too large an $\\varepsilon$ makes the model underconfident, which ECE also penalizes. State the $\\varepsilon$ used.",
+      "evidence": [
+        "portfolio: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05",
+        "portfolio: volunteer, 52% reach perfect consensus"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1906.02629"
+      ],
+      "tags": [
+        "label-smoothing",
+        "calibration",
+        "regularization"
+      ]
+    },
+    {
+      "id": "gs-29",
+      "type": "formula",
+      "level": 2,
+      "q": "What is AdamW, and how is it different from Adam with L2 regularization?",
+      "easy": "AdamW is the Adam optimizer with weight decay applied directly to the weights rather than mixed into the gradient. It shrinks weights consistently, which helps generalization and tempers overconfidence.",
+      "deep": "Adam keeps running averages of the gradient and squared gradient, $m_t = \\beta_1 m_{t-1} + (1 - \\beta_1) g_t$ and $v_t = \\beta_2 v_{t-1} + (1 - \\beta_2) g_t^2$, bias corrected to $\\hat{m}_t, \\hat{v}_t$. Adam with L2 adds $\\lambda\\theta$ to $g_t$, so the decay term is divided by $\\sqrt{\\hat{v}_t}$ and weights with a large gradient history are decayed less, which is not what weight decay means. AdamW decouples it: $$\\theta_t = \\theta_{t-1} - \\eta\\left(\\frac{\\hat{m}_t}{\\sqrt{\\hat{v}_t} + \\epsilon} + \\lambda\\,\\theta_{t-1}\\right)$$ Loshchilov and Hutter show L2 and weight decay coincide for SGD but not for adaptive methods, that decoupling separates the best decay factor from the learning rate, and that it closes much of Adam's generalization gap to SGD with momentum on image classification. Calibration link: Guo et al. list weight decay among the factors that affect calibration, since smaller weights mean smaller logits and less extreme probabilities. In Keras: `tf.keras.optimizers.AdamW(learning_rate=..., weight_decay=...)`; be ready with the values used and whether batch norm and bias parameters were excluded from decay.",
+      "evidence": [
+        "portfolio: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1711.05101",
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "adamw",
+        "optimizer",
+        "weight-decay"
+      ]
+    },
+    {
+      "id": "gs-30",
+      "type": "why",
+      "level": 2,
+      "q": "Why stop on validation AUC rather than validation loss, and how does that interact with calibration?",
+      "easy": "Training stops when ranking quality on held out data stops improving, and the best version is kept. Training past that point mostly makes the model more confident without making it better, which is what damages calibration.",
+      "deep": "Mechanics in Keras: compile with `tf.keras.metrics.AUC(name='auc')`, then `EarlyStopping(monitor='val_auc', mode='max', patience=k, restore_best_weights=True)`. Why AUC: it is the discrimination metric the model is judged on, it is threshold free, and with label smoothing in the loss, validation loss is computed against smoothed targets and is a less direct readout. Why it can help calibration: Guo et al. describe networks whose negative log likelihood overfits while accuracy still improves, because larger logits keep lowering training loss; stopping at peak validation AUC removes those epochs, a plausible mechanism for part of the ECE gain. The counterargument: AUC ignores calibration entirely, so it can pick an epoch that ranks well but is miscalibrated; monitoring validation log loss (a proper scoring rule) or ECE targets calibration directly. Hygiene: the epoch is selected on validation data, so the reported validation AUC is slightly optimistic; a third split removes that.",
+      "evidence": [
+        "portfolio: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "early-stopping",
+        "calibration",
+        "training"
+      ]
+    },
+    {
+      "id": "gs-31",
+      "type": "pushback",
+      "level": 3,
+      "q": "Which of label smoothing, AdamW, and early stopping actually fixed the calibration?",
+      "easy": "The write up reports the three changes as one result, so it does not say. The honest answer is that it needs an ablation, and that temperature scaling is the baseline all three should be compared with.",
+      "deep": "Concede: the reported result is a combined before and after, ECE 0.10 to 0.05, so attributing it to any single change would be invented. Defend the bundle: each change attacks overconfidence by a different mechanism (smoothing caps the target logit, decoupled weight decay shrinks weights and logits, early stopping removes epochs where only confidence grows), and each is cheap. What to run: a 2x2x2 factorial, or at least leave one out runs, on the same split with several seeds, reporting AUC and ECE with bootstrap intervals, plus temperature scaling applied to the original model. If temperature scaling alone reaches 0.05, the honest conclusion is that the training changes are not needed for calibration, and the cheap post hoc fix is the one to keep. Also confirm the bin count and convention were identical before and after.",
+      "say": "I can't attribute it from the number I report, because it's the combined effect of all three. Each one attacks overconfidence a different way, so it was a reasonable bundle, but the clean answer needs leave one out runs across several seeds. The comparison I most want is plain temperature scaling on the original model, because if that alone gets to 0.05, that's the fix I'd keep.",
+      "evidence": [
+        "portfolio: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "pushback",
+        "ablation",
+        "calibration"
+      ]
+    },
+    {
+      "id": "gs-32",
+      "type": "compare",
+      "level": 2,
+      "q": "Compare temperature scaling with the training time calibration fixes Tanay used.",
+      "easy": "Temperature scaling is a fix applied after training: one number divides the model's raw scores to soften or sharpen them, chosen on held out data. It cannot change which pairs rank higher, so AUC stays the same, while training time changes can move both.",
+      "deep": "For a sigmoid model, $\\hat{p} = \\sigma(z / T)$ with one scalar $T > 0$ fit by minimizing validation negative log likelihood; $T > 1$ softens an overconfident model. Guo et al. found this single parameter variant of Platt scaling worked well on most datasets they tested. Properties: monotone in $z$, so AUC is unchanged; needs a held out set to fit $T$, which then cannot double as the reporting set; cannot fix miscalibration that differs across regions of score space (histogram binning or isotonic regression can, with more parameters and more data). Training time fixes (label smoothing, weight decay, early stopping) change the learned function, so they can move AUC either way and they interact. They are complementary: train sensibly, fit $T$ on a calibration split, report ECE on a test split. For this data, calibrating per subsystem or per glitch class is worth checking, since a single global $T$ can hide opposite errors in different groups.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/1706.04599"
+      ],
+      "tags": [
+        "temperature-scaling",
+        "calibration",
+        "post-hoc"
+      ]
+    },
+    {
+      "id": "gs-33",
+      "type": "number",
+      "level": 1,
+      "q": "What did the descriptive analysis find about volunteer effort, and why does it matter for the model?",
+      "easy": "Effort is very uneven: the ten most active volunteers produced half of all classifications. A handful of people's judgment shapes much of the label the model learns.",
+      "deep": "Classifications per volunteer are heavily right tailed, the usual citizen science pattern, and here the top ten volunteers account for 50% of 276,000+ classifications. Implications: (1) the effective number of independent raters is far smaller than the head count, so agreement statistics and label quality reflect a few people's habits; (2) the model partly learns those volunteers' criteria, which helps if they are skilled (heavy contributors in Gravity Spy tend to be the most trained, having progressed through leveled workflows) and biases it if they share a systematic mistake; (3) per volunteer weighting is the established remedy, as original Gravity Spy combines each user's confusion matrix with ML scores before retiring a subject; (4) robustness checks should recompute AUC on subjects labelled without the top ten, or stratify by labeller. A Lorenz curve or Gini coefficient over volunteers describes the distribution better than one share; know the number of distinct volunteers from the repo.",
+      "evidence": [
+        "portfolio: Volunteer effort is heavily right tailed: the top ten",
+        "portfolio: volunteers account for 50% of all classifications",
+        "portfolio: 276,000+ volunteer classifications from 23 months of observations"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2308.15530"
+      ],
+      "tags": [
+        "descriptive-analysis",
+        "crowdsourcing",
+        "effort-skew"
+      ]
+    },
+    {
+      "id": "gs-34",
+      "type": "number",
+      "level": 2,
+      "q": "What is the 52% perfect consensus figure, and how should it be read?",
+      "easy": "Among glitch subjects that more than one volunteer looked at, 52% got the same answer from everyone. The other 48% had at least one disagreement.",
+      "deep": "Definition: restricted to subjects with two or more classifications, the share where all classifications agree. Read it with care. Unanimity is harder with more raters, so the figure depends on the distribution of votes per subject: a subject with two votes reaches perfect consensus far more easily than one with ten, and a change in retirement rules would move the number with no change in volunteer skill. It is also not chance corrected; if most pairs are dissimilar, raters agree often by default. Chance corrected statistics are the standard complement: Fleiss' kappa for a fixed number of raters, Krippendorff's alpha for varying raters and missing data. Agreement broken out by glitch class and by subsystem would show where the task is ambiguous. For modeling, it is the strongest argument for soft labels or label smoothing and the reason the AUC ceiling sits below 1.",
+      "evidence": [
+        "portfolio: volunteer, 52% reach perfect consensus"
+      ],
+      "sources": [],
+      "tags": [
+        "inter-rater-agreement",
+        "consensus",
+        "label-noise"
+      ]
+    },
+    {
+      "id": "gs-35",
+      "type": "pushback",
+      "level": 2,
+      "q": "A volunteer saying two spectrograms look alike is correlation at best. How does this get you to causes?",
+      "easy": "On its own it does not. Similarity is a lead that narrows thousands of sensors to a few worth testing; causal proof comes from experiments on the hardware and from fixes that make a glitch class disappear.",
+      "deep": "Concede: shape similarity at a shared GPS time is evidence of association, and common causes (ground motion driving PEM, ISI, SUS, and strain together) produce similarity without any of those channels being the coupling path; volunteer judgments add perception noise on top. Defend the role: the search space is huge (more than 200,000 channels per detector), and the expensive step in causal work is choosing which channel to test; a calibrated similarity score aggregated over many glitches of one class ranks candidates, and Gravity Spy 2.0's own design moves from Stage 1 similarity to Stage 2 collections with hypothesized common causality and Stage 3 root cause analysis over the channel network. Ways to get closer to cause with this data: temporal precedence (does the auxiliary transient lead the strain glitch), time shifted nulls to remove base rate coincidence, conditioning on known common drivers such as seismic band power, and handing ranked candidates to commissioners for injections. The defensible claim is a shorter, better ordered candidate list.",
+      "say": "It doesn't get me to causes by itself, and I don't claim it does. With more than two hundred thousand channels per detector, the expensive part of causal work is choosing what to test. A calibrated similarity score summed over many glitches of one class gives commissioners a short, ordered list to run injections against.",
+      "evidence": [
+        "portfolio: inference on detector noise: finding which auxiliary subsystems produce the transient glitches"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2308.15530"
+      ],
+      "tags": [
+        "pushback",
+        "causal-inference",
+        "correlation"
+      ]
+    },
+    {
+      "id": "gs-36",
+      "type": "pushback",
+      "level": 2,
+      "q": "LIGO already has tools that find witness channels statistically. Why train a CNN on volunteer labels?",
+      "easy": "The existing tools look for statistical coincidence between bursts in different channels. This model learns what volunteers mean by two images looking alike, which can catch matches a coincidence count misses and lets volunteer effort cover far more pairs.",
+      "deep": "Concede: hveto (Smith et al. 2011) ranks auxiliary channels by the statistical significance of coincidences between their triggers and strain triggers, then vetoes hierarchically, choosing a new best channel on the remaining triggers each round; Omega scans give per glitch views across channels; and OmegaNeuron (2026) uses Gravity Spy's pretrained embedding with cosine similarity to rank witness channels, reporting strong agreement with existing correlation tools. Any new method has to be compared with these. Defend: coincidence methods need triggers in the auxiliary channel and treat a trigger as a trigger; they do not judge whether the morphology matches, which is the cue volunteers use and the one that separates a related transient from an unrelated one at the same time. A model trained on volunteer judgments scales that cue to pairs no volunteer will see, and calibrated scores can route ambiguous pairs back to people. The fair next step is a head to head on the same glitches: channel rankings from hveto significance, OmegaNeuron cosine, and this model, checked against volunteer and commissioner judgments.",
+      "say": "Those tools exist and I'd benchmark against them before claiming anything. Hveto counts coincidences, and OmegaNeuron ranks channels by cosine similarity of a pretrained embedding. My model learns the volunteers' judgment of shape similarity directly, which is the signal Gravity Spy 2.0 collects. The right test is all three ranking the same channels on the same glitches.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/1107.2948",
+        "https://arxiv.org/html/2602.23460"
+      ],
+      "tags": [
+        "pushback",
+        "hveto",
+        "omeganeuron",
+        "baselines"
+      ]
+    },
+    {
+      "id": "gs-37",
+      "type": "pushback",
+      "level": 3,
+      "q": "How do you know the held out 2,000 subjects are really independent of training?",
+      "easy": "Holding out whole subjects keeps all of a glitch's pairs on one side. It does not stop the same channels and nearby time periods from appearing on both sides, so the score mostly measures how the model handles new glitches, less so new channels or new months.",
+      "deep": "Concede the risks a subject level holdout leaves. Temporal correlation: glitches cluster in time (a noisy day produces many similar subjects), so a random subject split puts near duplicates on both sides. Channel identity: a channel that is usually similar for one glitch class can be recognized from its panel's look, which a random split rewards. Volunteer identity: with the top ten volunteers producing half the classifications, their habits sit on both sides. Defend: holding out by subject rather than by pair avoids the worst leak (pairs from one glitch in both sets) and matches the question of which channels look similar for a new glitch. Stronger designs, in order: split by contiguous GPS time blocks, hold out whole channels or subsystems, evaluate on a later observing period. Tanay should state how the 2,000 subjects were drawn and whether early stopping used them.",
+      "say": "Subject level holdout keeps a glitch's pairs together, which is the minimum. It doesn't protect against nearby times or the same channels showing up on both sides, so I read 0.89 as generalization to new glitches. The stronger test I want is a split by GPS time blocks, then a held out set of channels.",
+      "evidence": [
+        "portfolio: a held out 2,000 subject set",
+        "portfolio: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on",
+        "portfolio: volunteers account for 50% of all classifications"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "data-leakage",
+        "validation-design"
+      ]
+    },
+    {
+      "id": "gs-38",
+      "type": "pushback",
+      "level": 2,
+      "q": "Volunteers are not physicists. Why use their judgments as the training target?",
+      "easy": "Spotting that two pictures share a shape is something trained people do well at scale, and Gravity Spy has years of evidence that volunteers find real things, including new glitch classes. The model learns that skill so it can cover far more pairs than people can view.",
+      "deep": "Concede: volunteers do not know coupling physics, their labels disagree (52% perfect consensus), and effort is concentrated in a few people. Defend: the Stage 1 task is perceptual (does this auxiliary transient share morphology with the strain glitch), and Gravity Spy trains volunteers through leveled workflows with promotion based on gold standard performance. The project's record includes volunteer discovered classes, such as 1080 Line and 1400 Ripple found during O2, and the Low Frequency Blip class came out of investigations of Gravity Spy classifications, so crowd labels track real detector behavior. Expert labels are scarce; at this scale the alternative to volunteer labels is no labels. Mitigations: filter science team accounts so the target is coherent, aggregate votes, smooth targets, and validate rankings against commissioner judgment before anyone acts on them.",
+      "say": "The Stage 1 task is perceptual, matching shapes, and trained volunteers are good at it. Gravity Spy volunteers have found real glitch classes before. Expert labels don't exist at this scale, so the honest design is to clean, aggregate, and smooth the crowd label and have detector scientists check the final rankings.",
+      "evidence": [
+        "portfolio: volunteer, 52% reach perfect consensus",
+        "portfolio: science team accounts out of the volunteer population"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2308.15530"
+      ],
+      "tags": [
+        "pushback",
+        "crowdsourcing",
+        "labels"
+      ]
+    },
+    {
+      "id": "gs-39",
+      "type": "case",
+      "level": 2,
+      "q": "What breaks at 10x and 100x, and what would production need?",
+      "easy": "More glitches and more channels multiply the number of image pairs to score, the image downloads, and the storage. Production would need cached image embeddings, a cheap filter choosing which channels to score, and automatic checks that the model still agrees with volunteers.",
+      "deep": "Today: 49,000 spectrograms, 8,293 channels, 25,104 subjects, one research codebase. At 10x channels (about 83,000, still under half of the more than 200,000 per detector), pairs per glitch grow 10x; the shared backbone lets each image be embedded once, but auxiliary spectrograms are distinct per time and channel, so backbone passes still scale with glitches times channels. Remedies: prefilter channels with cheap statistics (an auxiliary trigger or band power excess in the window) before rendering any image; store embeddings (1280 floats each) rather than images; batch inference on GPU. At 100x glitches (Gravity Spy already sees about one per minute of observing), exports become a stream: incremental pulls keyed by created_at, idempotent upserts by classification_id, schema validation at ingest so a sixth schema fails loudly instead of being reconciled by hand. The pivot matrix stays long or sparse in a columnar store. Model operations: watch for drift as detector changes create new glitch shapes, monitor ECE on fresh volunteer labels, and recalibrate on a schedule, since calibration can drift while AUC holds steady.",
+      "evidence": [
+        "portfolio: I wrote an OpenCV workflow that pulled 49,000 spectrograms through batch API calls and converted",
+        "portfolio: covering 25,104 glitch subjects and 8,293 auxiliary detector channels, and filtering roughly 38",
+        "portfolio: Auxiliary channels 8,293"
+      ],
+      "sources": [
+        "https://arxiv.org/pdf/2308.15530"
+      ],
+      "tags": [
+        "scale",
+        "production",
+        "mlops"
+      ]
+    },
+    {
+      "id": "gs-40",
+      "type": "case",
+      "level": 2,
+      "q": "What would Tanay do next on this project?",
+      "easy": "Add simple baselines and a clean test split, find out which calibration change mattered, then roll the model's scores up to the subsystem level and check the rankings against LIGO's existing tools and detector scientists.",
+      "deep": "These are plans, not results. (1) Evaluation hygiene: a test split by GPS time blocks that early stopping never touches, bootstrap intervals on AUC and ECE, a stated ECE binning convention. (2) Baselines on the same split: cosine similarity of frozen ImageNet embeddings and of the Gravity Spy similarity embedding. (3) Ablation of label smoothing, AdamW, and early stopping, plus temperature scaling on the original model. (4) Labels: soft targets (volunteer fraction) or a skill weighted vote using per user confusion matrices in the style of original Gravity Spy, with a robustness check that drops the top ten volunteers. (5) The causal step: aggregate calibrated scores through the GPS time by channel matrix to subsystem by glitch class, compare with time shifted nulls, and benchmark the ranking against hveto and OmegaNeuron. (6) A short list of candidate couplings for commissioners to test. (7) Engineering: tests on the schema mapping and an ingest validator so a new project iteration fails loudly.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/1107.2948",
+        "https://arxiv.org/html/2602.23460",
+        "https://arxiv.org/pdf/2308.15530"
+      ],
+      "tags": [
+        "next-steps",
+        "roadmap"
+      ]
+    },
+    {
+      "id": "gs-41",
+      "type": "case",
+      "level": 3,
+      "q": "Which details does the write up leave out that an interviewer will ask for, so Tanay must pull them from the repo first?",
+      "easy": "The write up gives the results but not several settings behind them. Tanay should have each of these ready from the code: how labels were combined, how the data was split, the head and loss, the training settings, and how ECE was binned.",
+      "deep": "Label: the aggregation rule in the subject level file (majority, fraction, weighted) and whether training used hard or soft labels. Split: random or grouped; by subject, time, or channel; whether the 2,000 subject set also drove early stopping; class balance in it. Model: the comparison head (concatenation, absolute difference, cosine), frozen versus fine tuned layers and for how long, input preprocessing, any augmentation. Training: loss, label smoothing $\\varepsilon$, AdamW learning rate and weight decay, batch size, epochs, early stopping patience, seeds. Metrics: Keras approximate AUC or exact sklearn AUC; ECE bin count, equal width or equal mass, positive class or confidence convention. Data: the fields that differed across the five schemas, how the roughly 38 team accounts were identified, how many subjects lack GPS, the number of distinct volunteers, and what defines one of the 455 subsystems. Having these cold is the difference between a strong technical round and a vague one.",
+      "evidence": [
+        "portfolio: a held out 2,000 subject set",
+        "portfolio: science team accounts out of the volunteer population",
+        "portfolio: 455 LIGO subsystems, including PEM, SUS, LSC, ISI, ASC, and CAL",
+        "portfolio: reconciling five undocumented subject metadata schemas from different project iterations"
+      ],
+      "sources": [],
+      "tags": [
+        "interview-prep",
+        "gaps"
+      ]
+    },
+    {
+      "id": "gs-42",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this role to a hiring manager in under a minute.",
+      "easy": "Lead with ownership and the two results, then the judgment call about calibration, then what is still open.",
+      "deep": "Hiring managers screen for ownership, shipped work, and judgment. Structure: the problem in one sentence (find the hardware behind LIGO glitches), what Tanay owns (ingestion through model), two numbers (0.89 AUC, ECE halved), and the judgment call (calibration first, because the scores get aggregated). Mentioning an open item signals honesty.",
+      "say": "On Gravity Spy 2.0 I own the path from raw Zooniverse classifications to a trained model. The pipeline handles 276,000+ volunteer classifications across five undocumented schemas. The model predicts whether volunteers will call an auxiliary channel similar to a glitch, at 0.89 validation AUC. The call I'd defend is putting calibration first, because these scores get added up to rank hardware, and I brought calibration error down to 0.05.",
+      "evidence": [
+        "portfolio: 276,000+ volunteer classifications from 23 months of observations",
+        "portfolio: reconciling five undocumented subject metadata schemas from different project iterations",
+        "portfolio: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on",
+        "portfolio: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "gs-43",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the modeling choices to a staff ML engineer.",
+      "easy": "Be precise about architecture, target, and metrics, and name the weaknesses before being asked.",
+      "deep": "A staff engineer probes the weak joints: label quality, split design, metric choice, attribution. Name them first: noisy crowd labels (52% unanimous), a subject level holdout that does not control for time or channel, combined calibration changes with no ablation, no temperature scaling baseline. Then the architecture rationale: shared weights for one embedding space and cacheable embeddings.",
+      "say": "It's a siamese MobileNetV2. Both 224 pixel spectrograms go through one ImageNet backbone, and a small head on the pooled embeddings outputs a sigmoid similarity. The target is an aggregated crowd label that's unanimous only about half the time, so I treat it as noisy and smooth it. Validation AUC is 0.89 on 2,000 held out subjects. My open items are a time blocked test split, an ablation of the three calibration changes, and a temperature scaling baseline.",
+      "evidence": [
+        "portfolio: volunteer, 52% reach perfect consensus",
+        "portfolio: volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on",
+        "portfolio: a held out 2,000 subject set",
+        "portfolio: each 1200x1200 mosaic into paired 224x224 channel heatmaps sized for model input",
+        "portfolio: AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer"
+      ]
+    },
+    {
+      "id": "gs-44",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain to a product manager what the model is for and how you would know it is working.",
+      "easy": "Frame it as a triage tool for scarce expert attention, with a success measure tied to decisions.",
+      "deep": "PMs want the user, the decision, and the success measure. Users: detector scientists deciding what to investigate, and the Gravity Spy team deciding where volunteer effort goes. Decision: which channels and subsystems to test. Success: the ranked list agrees with what scientists later confirm, and volunteer hours go to the pairs where people add the most. Calibration is the product requirement because scores are summed and thresholded.",
+      "say": "The users are detector scientists with limited time and thousands of sensors to check. The model predicts what volunteers would say about a sensor and a glitch, so their judgment covers far more pairs than people can look at. I'd call it working when its top candidates match what the scientists later confirm, and when its confidence is trustworthy enough to send only the unclear cases to volunteers.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "product-manager"
+      ]
+    },
+    {
+      "id": "gs-45",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this job to a recruiter with no physics background.",
+      "easy": "Plain words, one number, and what it shows about Tanay's skills.",
+      "deep": "Recruiters need a story they can repeat: NSF funded research, real scientific data, Python data engineering plus deep learning, and a measurable result. Avoid strain, AUC, and ECE unless asked; translate the result instead.",
+      "say": "I work on an NSF funded research project at Syracuse that helps the LIGO gravitational wave observatories track down noise in their detectors. Thousands of volunteers label images online, and I built the pipeline that cleans more than 276,000 of their labels. I also trained a neural network that predicts their answers, and I made its confidence scores much more trustworthy, which matters because scientists use those scores to decide what to fix.",
+      "evidence": [
+        "portfolio: 276,000+ volunteer classifications from 23 months of observations",
+        "portfolio: Syracuse University , NSF funded"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "Gravity Spy: Integrating Advanced LIGO Detector Characterization, Machine Learning, and Citizen Science (Zevin et al. 2017)",
+      "url": "https://arxiv.org/abs/1611.04596",
+      "why": "The original Gravity Spy paper: volunteers plus a CNN classifying glitch spectrograms."
+    },
+    {
+      "title": "Gravity Spy: Lessons Learned and a Path Forward (2023)",
+      "url": "https://arxiv.org/pdf/2308.15530",
+      "why": "Glitch counts, Q-scan durations, volunteer confusion matrices, and the three stage Gravity Spy 2.0 design with auxiliary channels."
+    },
+    {
+      "title": "Gravity Spy 2.0 gears up for the next observing run (CIERA, 2023)",
+      "url": "https://ciera.northwestern.edu/2023/05/18/gravity-spy-2-0-gears-up-for-the-next-gravitational-wave-observing-run/",
+      "why": "Plain language description of what volunteers do with auxiliary channels in 2.0."
+    },
+    {
+      "title": "OmegaNeuron: Applying GravitySpy Similarity Methods to the Search for LIGO Glitch Witnesses",
+      "url": "https://arxiv.org/html/2602.23460",
+      "why": "LIGO subsystem acronym table and the closest prior method: cosine similarity on Gravity Spy embeddings to rank witness channels."
+    },
+    {
+      "title": "A hierarchical method for vetoing noise transients in gravitational wave detectors (Smith et al. 2011)",
+      "url": "https://arxiv.org/abs/1107.2948",
+      "why": "hveto, the coincidence based witness ranking any similarity model should be benchmarked against."
+    },
+    {
+      "title": "MobileNetV2: Inverted Residuals and Linear Bottlenecks",
+      "url": "https://arxiv.org/abs/1801.04381",
+      "why": "The backbone: inverted residuals, linear bottlenecks, depthwise convolutions."
+    },
+    {
+      "title": "On Calibration of Modern Neural Networks (Guo et al. 2017)",
+      "url": "https://arxiv.org/abs/1706.04599",
+      "why": "Why deep nets are overconfident, which factors matter, and temperature scaling."
+    },
+    {
+      "title": "When Does Label Smoothing Help? (Muller, Kornblith, Hinton 2019)",
+      "url": "https://arxiv.org/abs/1906.02629",
+      "why": "Label smoothing improves calibration and hurts distillation."
+    },
+    {
+      "title": "Decoupled Weight Decay Regularization (Loshchilov and Hutter)",
+      "url": "https://arxiv.org/abs/1711.05101",
+      "why": "AdamW and why L2 is not weight decay under Adam."
+    },
+    {
+      "title": "Panoptes Python client user guide",
+      "url": "https://panoptes-python-client.readthedocs.io/en/latest/user_guide.html",
+      "why": "How to connect and pull classification and subject exports."
+    },
+    {
+      "title": "Zooniverse data exports help page",
+      "url": "https://help.zooniverse.org/next-steps/data-exports",
+      "why": "Column list of classification and subject exports, including the JSON columns."
+    },
+    {
+      "title": "Receiver operating characteristic (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Receiver_operating_characteristic",
+      "why": "ROC, AUC, the Mann Whitney interpretation, and criticisms of AUC."
+    }
+  ]
+}
