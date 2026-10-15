@@ -1,0 +1,623 @@
+{
+  "deck_id": "x-cybersecurity-ta",
+  "title": "Cybersecurity Teaching Assistant",
+  "group": "Experience",
+  "repo": "",
+  "summary_easy": "Tanay was the graduate teaching assistant for Syracuse's cybersecurity course in Summer 2025, building and teaching 15+ hands on labs in cryptography, network security, penetration testing, and forensics, and running the lab machines the course used. It is the security grounding behind their AI evals and red teaming work.",
+  "summary_deep": "Graduate TA, Syracuse iSchool cybersecurity course, Summer 2025. Built and taught 15+ labs across four domains; each walked the attacker workflow (OSINT, scanning, exploitation, post compromise enumeration) and then the defensive reading of the same evidence. Built and maintained a multi VM lab (Kali against Windows 10, Windows Server, CentOS, Metasploitable) with pinned images, network configuration, and tooling. Debugged students' chains in office hours and graded labs and incident reports on methodology as well as answers. Scope, authorization, and responsible tool handling ran through the whole course, which maps directly onto prompt injection defense and AI red teaming.",
+  "sheet": {
+    "easy": "## The role\nGraduate teaching assistant for Syracuse's cybersecurity course, Summer 2025. Built and taught 15+ hands on labs in four areas: cryptography, network security, penetration testing, and digital forensics.\n\n## What Tanay ran\n- A lab of virtual machines: Kali Linux as the attacker, with Windows 10, Windows Server, CentOS, and Metasploitable as targets.\n- Kept the images, network, and tools identical so a whole section could follow the same steps.\n\n## What the labs taught\n- The stages of an attack (finding information, scanning, getting in, looking around), then how a defender spots each one in the evidence.\n- Encryption, hashing, reading network traffic, and handling forensic evidence properly.\n\n## How students were graded\nOn their method and evidence trail as well as the answer.\n\n## Why it matters for AI work\nPrompt injection is the old injection problem in a new place. The same defenses apply: treat outside text as data, give components only the access they need, and test inside a defined scope.\n",
+    "deep": "## Facts (all from the portfolio)\n| Item | Value |\n|---|---|\n| Role | Graduate teaching assistant, cybersecurity course, Syracuse iSchool |\n| When | Summer 2025 |\n| Labs | 15+ hands on |\n| Domains | cryptography, network security, penetration testing, digital forensics |\n| Toolchain | Wireshark, Kali, Nmap, OpenSSL, Metasploit |\n| VM stack | Kali against Windows 10, Windows Server, CentOS, Metasploitable |\n\n## Lab environment\n- Topology: one attacker VM and several targets.\n- Pinned: images, network configuration, tooling. Failure mode: drift (updates, changed addresses, expired certificates).\n- Containment (standard practice; confirm your exact setup): vulnerable targets on an isolated internal network, reverted from snapshots after each lab.\n\n## Concepts\n- Symmetric (AES, one shared key, fast) vs asymmetric (RSA or elliptic curve key pairs, slow); TLS is hybrid.\n- Hash properties: preimage, second preimage, collision resistance; SHA 256 gives 256 bits, SHA 512 gives 512. Passwords need salted slow functions (bcrypt, scrypt, Argon2).\n- Encoding vs encryption vs hashing; HMAC adds a key to a hash.\n- TCP handshake SYN, SYN ACK, ACK; Wireshark display filters; scan signature = many SYNs, few completed handshakes.\n- Port states: open, closed, filtered; scanning is attack surface inventory, legal only within authorization.\n- Forensics: image the source, hash original and copy, analyze the copy, log custody, rehash at the end; MAC times, file signatures, metadata.\n\n## Teaching and assessment\n- Each lab: attacker workflow (OSINT, scanning, exploitation, post compromise enumeration), then the defensive reading of the same evidence.\n- Office hours: rerun the chain stage by stage, check environment assumptions first.\n- Grading: methodology and chain of evidence weighted with the final answer.\n\n## Bridge to AI security\n- Prompt injection: untrusted data crossing into the instruction channel (direct or indirect).\n- Defenses: data not instructions, least privilege, tool allowlists, human approval for irreversible actions, detection and logging.\n- Evidence in Tanay's work: Groundwork injection recall 0.884 on an unseen attack corpus; handoff workers get read only tools.\n- AI red teaming vs pen testing: same scope and method; results are rates over trials, fixes are mitigations.\n\n## Limits of the claim\nTeaching and lab engineering, not professional SOC or penetration testing work. No certifications are listed.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: tell me about your teaching assistant role.",
+      "script": "I was the graduate TA for Syracuse's cybersecurity course in Summer 2025. I built and taught more than fifteen hands on labs across cryptography, networking, penetration testing, and forensics, and I ran the virtual machine lab the whole course used, keeping it identical for every student. I graded on method as well as answers. It is where the security thinking in my AI work comes from.",
+      "keypoints": [
+        "Graduate TA, cybersecurity, Summer 2025",
+        "15+ labs across four domains",
+        "Built and kept the VM lab reproducible",
+        "Graded method as well as answers",
+        "Bridge to AI security work"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through what you did in that role.",
+      "script": "There were three parts. First, teaching. I built and taught more than fifteen hands on labs in four areas: cryptography, network security, penetration testing, and digital forensics. Every lab walked through the stages of an attack, from gathering public information and scanning to getting in and looking around, and then flipped to how a defender reads the same evidence. If you have watched a scan in a packet capture, you recognize one in your own logs.\n\nSecond, infrastructure. The course ran on a multi VM lab: Kali as the attacker platform against Windows 10, Windows Server, CentOS, and Metasploitable. I kept the images, the network configuration, and the tool versions pinned, so a full section could do the same exercise without environment drift eating the lesson.\n\nThird, assessment. I held office hours where students brought attack chains that broke halfway, and I had them rerun one step at a time and explain each output. Often the problem was the environment, which pushed me to keep it even tighter. I graded labs and incident reports on methodology as well as the final answer, because a conclusion you cannot back with evidence is not usable.\n\nAnd I kept bringing everything back to scope and authorization. That is the piece I carried into AI work. Prompt injection is injection again, untrusted data crossing into the instruction channel, so least privilege and treating outside text as data are the first defenses.",
+      "keypoints": [
+        "Three parts: teaching, infrastructure, assessment",
+        "15+ labs, four domains, attack then defense reading",
+        "Pinned images, network, tools",
+        "Office hours debugging step by step",
+        "Graded methodology and evidence",
+        "Scope and authorization, bridge to prompt injection"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Go deep: how would this background shape the way you red team an LLM agent?",
+      "script": "I would start where the labs started: scope and a threat model. Which agent, which tools can it call, what data does it read, and what counts as a harmful outcome. In the course nothing was tested outside its scope, and the same applies to a model: I test what I am authorized to test, and I report rather than exploit.\n\nThen the environment. In the lab the vulnerable targets were contained and reset, so nothing a student did persisted. For an agent, that means sandboxed tools, fake credentials, and a reset between trials, so a successful attack does no real damage and every trial starts from the same state. Reproducibility mattered in the lab because a whole section had to hit the same machine the same way; it matters here because I will run each attack many times. I would also log every tool call the agent makes during a trial, because the defensive reading is the real deliverable: which call carried the injected instruction, which component trusted it, and where a control would have stopped it.\n\nThat is the first big difference from a network test. A network vulnerability usually reproduces every time. A model failure is probabilistic. So I would report attack success rates over many trials with confidence intervals, and I would keep a held out set of attacks the defenses never saw, the way Groundwork's injection rail was measured: 0.884 recall on an unseen attack corpus. Attack success is only half the measurement. A defense that blocks every injection by refusing everything is useless, so I would also measure the cost side: how often benign inputs get blocked or tasks fail, on a benign set the threshold was never tuned on.\n\nThe structure of the attack is familiar. Prompt injection, direct or indirect through retrieved pages and tool outputs, is untrusted data crossing into the instruction channel, the same shape as SQL injection. The defenses I taught carry over in order. Treat retrieved content as data. Give each component the least privilege it needs: in handoff, workers only get read only tools, so a hijacked worker cannot reach a mutating one by name. Put high risk actions behind human approval with a declared behavior when nobody answers. Log everything so the defensive reading is possible afterwards.\n\nFinally, the write up. I graded students on methodology because a finding someone else must act on needs its evidence trail. For red teaming that means each finding with the exact input, the trial count, the success rate, and the minimal reproduction, so an engineer can verify the mitigation moved the rate.\n\nThe boundary of my claim: this is teaching and lab engineering, not years as a professional pen tester. What it gives me is the instinct to scope, contain, measure, and document, which is most of what evaluation work is. If I joined a team, my first week would go to that test setup: the sandbox, an attack set split into a tuning half and a held out half, and a report template that forces the evidence trail.",
+      "keypoints": [
+        "Scope and threat model first",
+        "Contained, reset environment like the lab",
+        "Probabilistic failures, report rates with intervals",
+        "Held out attacks, Groundwork 0.884 on unseen corpus",
+        "Least privilege, handoff read only workers",
+        "Evidence trail in the write up",
+        "Honest boundary of the claim"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Recruiter: what was the teaching assistant job?",
+      "script": "I was the teaching assistant for a cybersecurity course at Syracuse. I ran more than fifteen hands on labs where students learned how attacks work and, more importantly, how to spot and stop them. I also set up and maintained the computer lab everyone worked in, making sure every student had the exact same setup so the lessons ran smoothly. When I graded, I looked at how carefully students reasoned, not just whether they got the answer. That job is where my security background comes from, and I use it now in my work on making AI systems safe and reliable.",
+      "keypoints": [
+        "Teaching assistant, cybersecurity course",
+        "15+ labs: how attacks work and how to stop them",
+        "Ran the shared computer lab",
+        "Graded careful reasoning",
+        "Security background for AI safety work"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the lab setup and explain it.",
+      "script": "First I draw a box for the lab network and label it contained. That boundary is the most important line on the board, because the targets are built to be broken.\n\nInside it, on the left, I draw the attacker machine, Kali Linux, with its toolchain listed under it: Nmap, Wireshark, OpenSSL, Metasploit.\n\nOn the right I draw the targets as a column: Windows 10, Windows Server, CentOS, and Metasploitable. I note that each starts from a known image, so every student begins from the same state.\n\nThen I draw arrows for the attack workflow from left to right: reconnaissance, scanning, exploitation, post compromise enumeration. Under each arrow I write the evidence it leaves, like SYN bursts in a capture or new entries in an authentication log, because the second half of every lab read the same evidence as a defender.\n\nLast, outside the box, I list what I pinned: images, network configuration, tool versions, and a note that drift is what breaks a lab for a whole section. If there is room, I add the bridge on the side: an LLM agent is another component that reads untrusted input, so the same containment, least privilege, and logging apply to it.",
+      "keypoints": [
+        "Contained network boundary drawn first",
+        "Attacker VM with toolchain",
+        "Targets from known images",
+        "Workflow arrows with evidence under each",
+        "Pinned images, network, tools",
+        "Bridge to agents"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why keep the environment so tightly reproducible? Students could fix their own VMs.",
+      "script": "Because the lesson was security, not system administration. When a whole section follows the same steps, one drifted machine means a student stuck for an hour on something unrelated, and a TA pulled away from teaching. Pinning the image, the network, and the tool versions removed that whole class of problem. Office hours showed me how often failures were environment rather than understanding, which is what pushed me to tighten it further.",
+      "keypoints": [
+        "Lesson is security, not sysadmin",
+        "One drifted VM costs a student an hour",
+        "Pinned image, network, tools",
+        "Office hours showed failures were often environment"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you grade incident reports?",
+      "script": "On methodology as well as the final answer. I looked at whether each conclusion was tied to a specific artifact, whether the steps could be reproduced from the notes, and whether the student separated what they observed from what they inferred. A right root cause with no trail got less credit than a documented process with a partly wrong conclusion, because in practice someone else has to act on the report.",
+      "keypoints": [
+        "Method weighted with the answer",
+        "Conclusions tied to artifacts",
+        "Reproducible from notes",
+        "Observation separated from inference"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What does forensics evidence handling have to do with machine learning?",
+      "script": "More than it sounds. Forensics says: never touch the original, hash it, work on a verified copy, log every step, and write findings someone else can reproduce. That is data provenance. In my ML projects the raw data stays immutable, every quoted number traces back to a run artifact, and replications pin configs so someone else can rerun them. The habit came from the same place.",
+      "keypoints": [
+        "Never touch the original, hash it",
+        "Work on verified copies, log steps",
+        "Maps to data provenance",
+        "Immutable raw data, traceable numbers"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you test an AI agent for prompt injection?",
+      "script": "Start with scope and a threat model: which tools the agent can call and what a harmful outcome is. Run it in a sandbox with fake credentials and reset between trials. Build a set of injection attempts, direct and hidden in retrieved content, and hold some out from whoever tunes the defenses. Measure attack success as a rate over many trials, because failures are probabilistic, and report each finding with its minimal reproduction.",
+      "keypoints": [
+        "Scope and threat model",
+        "Sandbox, fake credentials, reset",
+        "Direct and indirect attacks, held out set",
+        "Success as a rate over trials",
+        "Minimal reproduction per finding"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "This sounds like teaching, not engineering.",
+      "script": "Partly fair. Most of the role was teaching, and I would not call it a security engineering job. But the lab was real infrastructure that a whole course depended on: multiple operating systems, contained targets, and images I kept reproducible so nothing drifted mid lesson. And teaching forced me to understand each attack and its evidence well enough to debug other people's attempts live, which is a harder test than doing it once myself.",
+      "keypoints": [
+        "Concede: mostly teaching",
+        "Lab was real infrastructure",
+        "Contained, reproducible, multi OS",
+        "Debugging others live is a hard test"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Isn't teaching offensive tools irresponsible?",
+      "script": "It would be without controls, and the course had them. The targets were built to be vulnerable and kept in their own lab. I kept bringing everything back to scope, authorization, and responsible use, and every attack stage was paired with how a defender detects it. Defenders who have never seen the attack side do not know what to look for, so the goal was recognizing and stopping attacks.",
+      "keypoints": [
+        "Concede the risk without controls",
+        "Intentionally vulnerable targets kept in the lab",
+        "Scope and authorization throughout",
+        "Paired with the defensive reading"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "ta-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What was the role, in two sentences?",
+      "easy": "Tanay was the graduate teaching assistant for Syracuse's cybersecurity course in Summer 2025. They built and taught hands on labs in cryptography, network security, penetration testing, and digital forensics, and ran the lab machines the whole course used.",
+      "deep": "Three jobs in one role. Teaching: 15+ hands on labs across four domains, each walking the attacker workflow and then the defensive reading of the same evidence. Infrastructure: a multi VM lab (Kali as the attacker platform; Windows 10, Windows Server, CentOS, and Metasploitable as targets) kept reproducible so a full section ran identical exercises. Assessment: office hours debugging students' attack chains, and grading labs and incident reports on methodology as well as the final answer.",
+      "say": "I was the graduate TA for the cybersecurity course. I built and taught more than fifteen hands on labs across crypto, networking, pen testing, and forensics, and I kept the lab machines reproducible so a whole section could run the same exercise without the environment breaking.",
+      "evidence": [
+        "portfolio: I was the graduate teaching assistant for the cybersecurity course, and I built and taught hands",
+        "portfolio: on labs in four areas: cryptography, network security, penetration testing, and digital",
+        "portfolio: Labs delivered 15+ hands on",
+        "portfolio: Summer 2025"
+      ],
+      "sources": [],
+      "tags": [
+        "role"
+      ]
+    },
+    {
+      "id": "ta-02",
+      "type": "number",
+      "level": 1,
+      "q": "What are the numbers to remember for this role?",
+      "easy": "15+ labs, four domains, one term (Summer 2025), and a lab of one attacker platform against four kinds of target machine.",
+      "deep": "15+ hands on labs; four domains (cryptography, network security, penetration testing, digital forensics); toolchain Wireshark, Kali, Nmap, OpenSSL, Metasploit; VM stack Kali against Windows 10, Windows Server, CentOS, and Metasploitable; Summer 2025. Nothing else is quantified in the source, so do not add class sizes or pass rates you cannot back up.",
+      "evidence": [
+        "portfolio: Labs delivered 15+ hands on",
+        "portfolio: Toolchain Wireshark, Kali, Nmap, OpenSSL, Metasploit",
+        "portfolio: VM stack Kali, Win 10/Server, CentOS, Metasploitable",
+        "portfolio: Summer 2025"
+      ],
+      "sources": [],
+      "tags": [
+        "numbers"
+      ]
+    },
+    {
+      "id": "ta-03",
+      "type": "how",
+      "level": 1,
+      "q": "What did the lab environment look like, and why did reproducibility matter so much?",
+      "easy": "Each student worked against the same set of virtual machines: one attacker machine and several targets. Tanay kept the images, network settings, and tools identical so a whole section could follow the same steps without something breaking halfway through.",
+      "deep": "The topology is an attacker VM (Kali Linux) and targets spanning Windows 10, Windows Server, CentOS, and Metasploitable. Reproducibility means three things are pinned: the image (same OS build and installed packages), the network configuration (same addresses and segments, so instructions that name a host still work), and the tooling versions. Drift is the enemy: an auto update, a changed address, or an expired certificate turns a lab into an hour of troubleshooting for a whole section. The usual practice, which Tanay should describe in their own specifics, is golden images with snapshots that students revert to before each lab, and an isolated internal network so intentionally vulnerable machines can never reach the campus network or the internet.",
+      "say": "The lab was one attacker box, Kali, against Windows 10, Windows Server, CentOS, and Metasploitable. My job was making it boring: same images, same network, same tool versions, so a whole section could follow the same steps and the lesson was about security, not about fixing someone's VM.",
+      "evidence": [
+        "portfolio: I built and maintained the multi VM lab environments the course runs on, with Kali Linux as the",
+        "portfolio: attacker platform against Windows 10, Windows Server, CentOS, and Metasploitable targets. I kept",
+        "portfolio: images, network configuration, and tooling reproducible so a full section could work through the",
+        "portfolio: same exercises without environment drift derailing the lesson."
+      ],
+      "sources": [],
+      "tags": [
+        "infrastructure",
+        "reproducibility"
+      ]
+    },
+    {
+      "id": "ta-04",
+      "type": "why",
+      "level": 1,
+      "q": "Why does keeping intentionally vulnerable machines isolated matter?",
+      "easy": "Metasploitable and similar targets are built to be broken into. If one could reach a real network, anyone could use it as a foothold. Isolation keeps the practice safe and legal.",
+      "deep": "Intentionally vulnerable images run old, unpatched services by design. On a shared or routed network they become real attack surface for anyone, not just the class. Standard controls: a host only or internal virtual network with no route out, no bridged adapters on target VMs, and resetting targets from snapshots after each lab so nothing a student changed persists. The same principle (contain what you are testing) carries straight to AI red teaming, where an agent under test should run with sandboxed tools and no real credentials.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "safety",
+        "isolation"
+      ]
+    },
+    {
+      "id": "ta-05",
+      "type": "concept",
+      "level": 2,
+      "q": "What is the attacker workflow the labs walked through, at a high level, and why teach it to future defenders?",
+      "easy": "The labs followed the stages an attacker goes through: gathering public information, finding what services a machine exposes, getting in, and looking around afterwards. Then the class reread the same evidence as a defender would.",
+      "deep": "The stages named in the course are OSINT reconnaissance, port scanning, exploitation, and post compromise enumeration, followed by a flip to the defensive reading of the same evidence. The teaching point is that every stage leaves artifacts: scans show up as bursts of connection attempts in packet captures and firewall logs, exploitation leaves crashed or restarted services and odd process trees, and enumeration leaves authentication and command history. A defender who has run each stage in a lab knows which artifact to look for. That is the purpose: understanding, inside an authorized and isolated lab, not technique for its own sake.",
+      "say": "Every lab ran the attack chain and then turned around and read the same evidence as a defender. If you have watched a scan happen in a capture, you recognize one in your own logs.",
+      "evidence": [
+        "portfolio: and port scanning to exploitation and post compromise enumeration, then flips to the defensive",
+        "portfolio: reading of the same evidence."
+      ],
+      "sources": [],
+      "tags": [
+        "pedagogy",
+        "defense"
+      ]
+    },
+    {
+      "id": "ta-06",
+      "type": "define",
+      "level": 1,
+      "q": "Symmetric versus asymmetric cryptography: what is the difference and where does each get used?",
+      "easy": "Symmetric encryption uses one shared secret key to encrypt and decrypt. Asymmetric encryption uses a pair: a public key anyone can use to encrypt, and a private key only the owner can use to decrypt. Symmetric is fast; asymmetric solves sharing the key in the first place.",
+      "deep": "Symmetric ciphers (AES) use one key for both directions; they are fast and used for bulk data, but both sides must already share the key. Asymmetric schemes (RSA, elliptic curve) use a key pair: the public key encrypts or verifies, the private key decrypts or signs. They are much slower, so real protocols are hybrid: TLS uses asymmetric key exchange and certificates to authenticate the server and agree on a session key, then switches to a symmetric cipher for the traffic. Signatures use the private key to sign a hash of a message so anyone with the public key can verify origin and integrity.",
+      "evidence": [
+        "portfolio: The labs cover symmetric and asymmetric cryptography and hashing with OpenSSL (SHA 256,"
+      ],
+      "sources": [],
+      "tags": [
+        "cryptography"
+      ]
+    },
+    {
+      "id": "ta-07",
+      "type": "define",
+      "level": 1,
+      "q": "What is a cryptographic hash, and what properties make SHA 256 useful?",
+      "easy": "A hash turns any input into a fixed length fingerprint. Change one bit of the input and the fingerprint changes completely, and you cannot run it backwards to recover the input.",
+      "deep": "A cryptographic hash maps arbitrary input to a fixed size digest (256 bits for SHA 256, 512 for SHA 512) and should be preimage resistant (given a digest, you cannot find an input), second preimage resistant (given an input, you cannot find another with the same digest), and collision resistant (you cannot find any two inputs that collide). A one bit change flips about half the output bits (the avalanche effect). Uses in the labs: verifying file integrity and fixing evidence in forensics. Hashing is not encryption: there is no key and nothing to decrypt. For passwords, a plain fast hash is the wrong tool; use a salted, deliberately slow function such as bcrypt, scrypt, or Argon2.",
+      "evidence": [
+        "portfolio: The labs cover symmetric and asymmetric cryptography and hashing with OpenSSL (SHA 256,"
+      ],
+      "sources": [],
+      "tags": [
+        "cryptography",
+        "hashing"
+      ]
+    },
+    {
+      "id": "ta-08",
+      "type": "compare",
+      "level": 2,
+      "q": "Hashing, encryption, and encoding: how do they differ?",
+      "easy": "Encoding changes the format so data can travel (anyone can reverse it). Encryption hides data so only key holders can read it (reversible with the key). Hashing makes a one way fingerprint (not reversible at all).",
+      "deep": "| | Reversible | Needs a key | Purpose |\n|---|---|---|---|\n| Encoding (Base64, URL encoding) | yes, by anyone | no | safe transport or storage of bytes |\n| Encryption (AES, RSA) | yes, with the key | yes | confidentiality |\n| Hashing (SHA 256) | no | no (HMAC adds one) | integrity, fingerprints, commitments |\n\nA common student mistake the labs surface: treating Base64 as protection. An HMAC combines a hash with a secret key so a recipient can check both integrity and that the sender held the key.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "cryptography"
+      ]
+    },
+    {
+      "id": "ta-09",
+      "type": "concept",
+      "level": 2,
+      "q": "What does a packet capture in Wireshark show you, and what is the TCP three way handshake?",
+      "easy": "A packet capture records every message crossing the network so you can read who talked to whom, when, and how. Every TCP connection starts with three messages: a request, an acknowledgment of the request, and a confirmation.",
+      "deep": "Wireshark decodes captured frames layer by layer: Ethernet, IP (source and destination addresses), TCP or UDP (ports, flags, sequence numbers), and the application protocol. A TCP connection opens with SYN, then SYN ACK, then ACK; it closes with FIN or RST. Protocol analysis means following a stream, spotting plaintext credentials in old protocols (HTTP, FTP, Telnet) against unreadable payloads under TLS, and using display filters such as `tcp.flags.syn == 1 && tcp.flags.ack == 0` to isolate connection attempts. Defensively, a single host sending many SYNs to many ports with few completed handshakes is the classic signature of a scan.",
+      "evidence": [
+        "portfolio: Toolchain Wireshark, Kali, Nmap, OpenSSL, Metasploit",
+        "portfolio: VM stack Kali, Win 10/Server, CentOS, Metasploitable"
+      ],
+      "sources": [],
+      "tags": [
+        "network",
+        "wireshark"
+      ]
+    },
+    {
+      "id": "ta-10",
+      "type": "concept",
+      "level": 2,
+      "q": "What does a port scan tell a defender, and why do organizations scan their own networks?",
+      "easy": "A port scan lists which network services a machine is offering. For a defender that is an inventory of the doors into the machine, so scanning your own systems, with permission, shows you what an attacker would see.",
+      "deep": "Scanners such as Nmap report each port as open (a service answered), closed (the host answered but nothing listens), or filtered (no answer, usually a firewall), and can identify service versions. Defensively this is attack surface management: an unexpected open port is either an unneeded service to shut down or a misconfiguration. Scanning systems you do not own or are not authorized to test is illegal in many jurisdictions and against acceptable use policies, which is why scope came up in every lab.",
+      "evidence": [
+        "portfolio: Toolchain Wireshark, Kali, Nmap, OpenSSL, Metasploit",
+        "portfolio: VM stack Kali, Win 10/Server, CentOS, Metasploitable",
+        "portfolio: scope, authorization, and responsible handling of the tools."
+      ],
+      "sources": [],
+      "tags": [
+        "network",
+        "scope"
+      ]
+    },
+    {
+      "id": "ta-11",
+      "type": "define",
+      "level": 2,
+      "q": "What are Kali Linux, Nmap, Metasploit, and Metasploitable?",
+      "easy": "Kali is a Linux system packaged with security testing tools. Nmap scans networks for services. Metasploit is a framework of known attack modules used in authorized testing. Metasploitable is a practice machine built to be vulnerable on purpose.",
+      "deep": "Kali Linux: a Debian based distribution with hundreds of security tools preinstalled, used as the attacker platform. Nmap: network discovery and port scanning with service and OS detection. Metasploit: a framework that packages known exploits and payloads behind a common interface, used by penetration testers to confirm that a known vulnerability is exploitable in an authorized test. Metasploitable: a deliberately vulnerable Linux image that exists only to be practiced on in an isolated lab. Wireshark and OpenSSL round out the toolchain for traffic analysis and cryptography.",
+      "evidence": [
+        "portfolio: Toolchain Wireshark, Kali, Nmap, OpenSSL, Metasploit",
+        "portfolio: VM stack Kali, Win 10/Server, CentOS, Metasploitable"
+      ],
+      "sources": [],
+      "tags": [
+        "tools"
+      ]
+    },
+    {
+      "id": "ta-12",
+      "type": "define",
+      "level": 1,
+      "q": "What is chain of custody, and how do you handle digital evidence so it holds up?",
+      "easy": "Chain of custody is the written record of who had the evidence, when, and what they did with it. You work on copies, never the original, and you record a hash of the original so anyone can later prove nothing changed.",
+      "deep": "Core practice: acquire a bit for bit image of the source (through a write blocker for physical media), compute and record a hash of the original and of the image (SHA 256), and do all analysis on a verified working copy. Every transfer and action goes in the custody log with time, person, and purpose. At the end you rehash; matching digests show the evidence is unchanged. Findings go into a report that someone else could reproduce from the notes alone. This is the part of the course that maps most directly onto good ML practice: provenance, immutable raw data, and analyses others can rerun.",
+      "evidence": [
+        "portfolio: forensics labs, students practice evidence handling, file and metadata analysis, and writing"
+      ],
+      "sources": [],
+      "tags": [
+        "forensics",
+        "evidence"
+      ]
+    },
+    {
+      "id": "ta-13",
+      "type": "concept",
+      "level": 2,
+      "q": "What do file and metadata analysis look for in a forensics lab?",
+      "easy": "Files carry hidden information: when they were created and changed, what program made them, and what they really are regardless of their name. Analysts read that to build a timeline.",
+      "deep": "Typical checks: timestamps (modified, accessed, changed or created, often called MAC times) to build a timeline; file signatures (the magic bytes at the start of a file) compared against the extension to catch a renamed executable; embedded metadata such as EXIF in images or author fields in documents; and deleted file remnants. The output is a timeline and a set of findings, each tied to the artifact that supports it, written up as a report.",
+      "evidence": [
+        "portfolio: forensics labs, students practice evidence handling, file and metadata analysis, and writing"
+      ],
+      "sources": [],
+      "tags": [
+        "forensics"
+      ]
+    },
+    {
+      "id": "ta-14",
+      "type": "how",
+      "level": 1,
+      "q": "How did Tanay grade labs and incident reports, and why grade the method and not only the answer?",
+      "easy": "Tanay graded how students got to an answer as well as the answer itself, because in security a correct conclusion with no supporting evidence trail is not usable.",
+      "deep": "Labs and incident analysis reports were graded on methodology as well as the final answer. The reasoning: an incident finding must be defensible to someone else, so the chain from artifact to conclusion matters as much as the conclusion. A student who reached the right root cause by guessing gets little credit; one who documented each step and reached a partly wrong conclusion shows the skill the job needs. This is the same stance as Tanay's evaluation work: score the process and the evidence, not just the headline number.",
+      "say": "I graded the method as much as the answer, because in security a right answer you cannot back with evidence is worthless. It is the same reason I check every number in my own projects against its source.",
+      "evidence": [
+        "portfolio: I held office hours to debug students' own attack chains, and graded labs and incident analysis",
+        "portfolio: reports on methodology as well as the final answer, because in security the reasoning and the",
+        "portfolio: chain of evidence matter as much as the result. Throughout the course I kept coming back to"
+      ],
+      "sources": [],
+      "tags": [
+        "assessment",
+        "pedagogy"
+      ]
+    },
+    {
+      "id": "ta-15",
+      "type": "behavioral",
+      "level": 2,
+      "q": "Tell me about a time you helped someone debug a problem you could not see directly.",
+      "easy": "Office hours debugging students' own attack chains: reproduce, isolate the failing step, check environment assumptions first, then the student's reasoning.",
+      "deep": "Situation: students arrived at office hours with a lab chain that failed somewhere in the middle, each on their own VM state. Task: find the failure quickly without doing the lab for them. Action: Tanay had them rerun the chain one stage at a time, checked environment assumptions first (was the target reverted, did the address match, was the right network attached), then had them explain what each step's output meant before moving on. Result: many failures traced to the environment or a misread output rather than a misunderstanding, which fed back into keeping the images reproducible. The source gives no count of students or sessions, so do not invent one.",
+      "say": "Students would bring me an attack chain that broke somewhere in the middle. I made them rerun it one step at a time and tell me what each output meant. Often the problem was the environment, a target not reverted or the wrong network, and that is why I got strict about keeping the images identical.",
+      "evidence": [
+        "portfolio: I held office hours to debug students' own attack chains, and graded labs and incident analysis",
+        "portfolio: images, network configuration, and tooling reproducible so a full section could work through the",
+        "portfolio: same exercises without environment drift derailing the lesson."
+      ],
+      "sources": [],
+      "tags": [
+        "behavioral",
+        "debugging"
+      ]
+    },
+    {
+      "id": "ta-16",
+      "type": "why",
+      "level": 1,
+      "q": "Why did scope and authorization keep coming up in the course?",
+      "easy": "Because the same tool is a test or a crime depending on whether you have permission. Professionals work inside written rules of engagement, and the course treated that as part of the skill.",
+      "deep": "Security testing tools do not know whether you are allowed to use them. What makes a scan or exploit legitimate is authorization: a written scope (which systems, which techniques, which time window), a named contact, and rules for what to do if you find something serious. Unauthorized access is a crime under laws such as the US Computer Fraud and Abuse Act. The course returned to scope, authorization, and responsible tool handling throughout, and the same idea governs AI red teaming: you test the model or agent you are authorized to test, inside a defined scope, and you report rather than exploit.",
+      "say": "The tools do not know if you have permission. I kept bringing the labs back to scope and authorization, because that line is what separates testing from attacking.",
+      "evidence": [
+        "portfolio: scope, authorization, and responsible handling of the tools."
+      ],
+      "sources": [],
+      "tags": [
+        "ethics",
+        "scope"
+      ]
+    },
+    {
+      "id": "ta-17",
+      "type": "concept",
+      "level": 2,
+      "q": "What is prompt injection, and why does a security background help with it?",
+      "easy": "Prompt injection is when text an AI system reads (a web page, an email, a document) contains instructions the system then follows. It is the old injection problem in a new place: data being treated as commands.",
+      "deep": "Direct injection comes from the user turn; indirect injection hides in content the model retrieves or a tool returns. Structurally it matches SQL injection and cross site scripting: untrusted data crosses into an instruction channel. Classic defenses translate: treat all retrieved content as data; separate privileges so the component that reads untrusted text cannot take high risk actions; allowlist tools; require human approval for irreversible actions; detect and log. Tanay built pieces of this: Groundwork's injection rail scored 0.884 recall on an unseen attack corpus, and handoff's workers get read only tools so a hijacked worker cannot reach a mutating one by name.",
+      "say": "Prompt injection is injection again: data crossing into the instruction channel. The defenses I taught in the security course carry over, least privilege first. In handoff the workers only get read only tools, so even a hijacked worker cannot change anything.",
+      "evidence": [
+        "portfolio: injection recall 0.884 on an unseen attack corpus",
+        "portfolio: are handed a registry filtered to read only tools, so they cannot reach a mutating one by name"
+      ],
+      "sources": [],
+      "tags": [
+        "ai security",
+        "prompt injection"
+      ]
+    },
+    {
+      "id": "ta-18",
+      "type": "compare",
+      "level": 3,
+      "q": "How is red teaming an AI system like a network penetration test, and how is it different?",
+      "easy": "Both start from a written scope, a threat model, and a safe test environment, and both end in a report with evidence. They differ because an AI system is not deterministic: the same attack can work once in ten tries, so success has to be measured as a rate.",
+      "deep": "Same: authorization and scope, a threat model (who is the attacker, what do they want, what can they touch), an isolated environment, methodical documentation, and a report a defender can act on. Different: a network vulnerability usually reproduces every time and can be patched; a model failure is probabilistic, so you report attack success rates over many trials with confidence intervals, and fixes are mitigations that shift a rate rather than patches that close a hole. There is no catalogue of known model vulnerabilities to scan for, so test sets have to be built and held out, which is how Groundwork evaluated its injection rail on an unseen corpus.",
+      "evidence": [
+        "portfolio: injection recall 0.884 on an unseen attack corpus"
+      ],
+      "sources": [],
+      "tags": [
+        "ai security",
+        "red teaming"
+      ]
+    },
+    {
+      "id": "ta-19",
+      "type": "pushback",
+      "level": 2,
+      "q": "Pushback: a TA job is not real security experience.",
+      "easy": "Agree that it is not a SOC or pen testing job. The real evidence is building and running the lab infrastructure, teaching 15+ labs, and grading methodology.",
+      "deep": "Concede: Tanay has not worked as a security analyst or penetration tester, and should not imply it. Defend: they built and maintained a multi VM environment a whole course depended on, taught 15+ labs across four domains, debugged other people's attack chains live, and graded incident reports on methodology. Boundary: the claim is security fluency and teaching, which is what an AI safety, evals, or red teaming role needs alongside ML depth.",
+      "say": "You are right that I have not been a pen tester. What I did was build the lab a whole course ran on, teach fifteen plus labs, and grade incident reports on method. I would not sell that as an analyst job. I would sell it as the security grounding I bring to evals and red teaming.",
+      "evidence": [
+        "portfolio: Labs delivered 15+ hands on",
+        "portfolio: I built and maintained the multi VM lab environments the course runs on, with Kali Linux as the",
+        "portfolio: I held office hours to debug students' own attack chains, and graded labs and incident analysis",
+        "portfolio: reports on methodology as well as the final answer, because in security the reasoning and the"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback"
+      ]
+    },
+    {
+      "id": "ta-20",
+      "type": "pushback",
+      "level": 2,
+      "q": "Pushback: teaching students offensive tools is risky.",
+      "easy": "Fair concern. The answer is containment and norms: isolated targets built to be broken, written scope, and a constant emphasis on authorization and responsible handling.",
+      "deep": "Concede: the tools are dual use, and teaching them carries risk. Defend: the labs ran against intentionally vulnerable targets in a dedicated lab, scope and authorization were a constant theme, and each attack stage was paired with its defensive reading, so the learning goal was recognizing and stopping attacks. Defenders who have never seen the attack side miss its traces.",
+      "say": "It is dual use, so the controls matter. Targets built to be broken, kept in their own lab, and every attack paired with how a defender spots it.",
+      "evidence": [
+        "portfolio: scope, authorization, and responsible handling of the tools.",
+        "portfolio: and port scanning to exploitation and post compromise enumeration, then flips to the defensive",
+        "portfolio: reading of the same evidence."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "ethics"
+      ]
+    },
+    {
+      "id": "ta-21",
+      "type": "pushback",
+      "level": 3,
+      "q": "Pushback: Metasploit is point and click. What did students really learn?",
+      "easy": "Running a module is easy; knowing what it did and what evidence it left is the skill. The labs were graded on that reasoning.",
+      "deep": "Concede: frameworks make running a known exploit simple. Defend: each lab paired the attack stage with the defensive reading of its evidence, and grading weighted methodology and the chain of evidence as much as the result. The useful outcome is a student who can read a capture or a log and say which stage of an attack it shows.",
+      "say": "Clicking run is easy. My labs paired every step with where its evidence shows up, and I graded that reasoning, not just the end result.",
+      "evidence": [
+        "portfolio: reports on methodology as well as the final answer, because in security the reasoning and the",
+        "portfolio: chain of evidence matter as much as the result. Throughout the course I kept coming back to",
+        "portfolio: and port scanning to exploitation and post compromise enumeration, then flips to the defensive",
+        "portfolio: reading of the same evidence."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback"
+      ]
+    },
+    {
+      "id": "ta-22",
+      "type": "pushback",
+      "level": 2,
+      "q": "Pushback: do you have any security certifications?",
+      "easy": "Answer truthfully with whatever is true for you. The portfolio lists no certifications, so the defensible answer points to the teaching and the lab work.",
+      "deep": "The source lists none, so do not imply one. If you hold none, say so plainly, then point to the concrete work (built and maintained the lab environment, taught 15+ labs, graded methodology) and to the security pieces of your ML projects (Groundwork's injection rail, handoff's least privilege workers). If you are studying for one, name it and the date.",
+      "say": "No certification. What I can show is the course lab I built and ran, and the security work inside my ML projects, like the injection rail in Groundwork and the read only workers in handoff.",
+      "evidence": [
+        "portfolio: Labs delivered 15+ hands on",
+        "portfolio: injection recall 0.884 on an unseen attack corpus"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback"
+      ]
+    },
+    {
+      "id": "ta-23",
+      "type": "case",
+      "level": 3,
+      "q": "What would break if the course doubled in size, and how would you fix the lab setup?",
+      "easy": "More students means more machines, more chances for setups to drift apart, and more office hours spent on broken environments. The fix is building the lab from a script so every machine is created identically and checked automatically.",
+      "deep": "Likely failures: host resources (each student needs an attacker and several targets running at once), image drift between copies, address collisions on shared segments, and support load. What Tanay would do next, not what was done: define the lab as code (Vagrant or Terraform plus a provisioning script) so environments are rebuilt rather than repaired; add a validation script students run before a lab that checks reachability and versions; and use per student isolated networks. It is the same reproducibility idea as pinning configs and seeds in an ML replication.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "scale",
+        "next"
+      ]
+    },
+    {
+      "id": "ta-24",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do differently if you ran the labs again?",
+      "easy": "Script the environment from scratch, add an automatic preflight check, and publish a rubric up front so students know the method is graded.",
+      "deep": "Three changes, all forward looking: infrastructure as code for the VMs so a broken environment is rebuilt in minutes; a preflight check that confirms the environment before the lab starts; and a published rubric that weights methodology and evidence explicitly, matching how the reports were already graded.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next"
+      ]
+    },
+    {
+      "id": "ta-25",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this role to a hiring manager for an AI safety or evals team.",
+      "easy": "Lead with the bridge: security fundamentals plus reproducible environments plus grading method, applied now to model and agent safety.",
+      "deep": "Structure: one line on the role, one on the lab infrastructure, one on grading methodology, then the bridge to prompt injection with the two project pieces as proof. Keep the claims inside the source: teaching and labs, not professional security work.",
+      "say": "I was the TA for the cybersecurity course: I built the lab environment, taught fifteen plus labs, and graded incident reports on method. That is why prompt injection read to me as plain injection when I got to LLMs. In Groundwork I built an injection rail and measured it on a held out attack set, and in handoff the workers only get read only tools.",
+      "evidence": [
+        "portfolio: Labs delivered 15+ hands on",
+        "portfolio: injection recall 0.884 on an unseen attack corpus",
+        "portfolio: are handed a registry filtered to read only tools, so they cannot reach a mutating one by name"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate"
+      ]
+    },
+    {
+      "id": "ta-26",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the lab environment work to a staff engineer.",
+      "easy": "Frame it as reproducibility engineering under real users: pinned images, pinned network, pinned tools, and the cost of drift.",
+      "deep": "Talk about the invariants (same image, same addresses, same tool versions), the failure mode (drift turning a lab into troubleshooting), and the containment requirement for vulnerable targets. Then tie it to how Tanay runs ML work: pinned configs and checked numbers.",
+      "say": "The lab was a small fleet of VMs that a whole section had to hit identically. I treated it like any reproducibility problem: pin the image, pin the network, pin the tools, and keep the vulnerable targets contained. It is the same habit as pinning configs in my replications.",
+      "evidence": [
+        "portfolio: I built and maintained the multi VM lab environments the course runs on, with Kali Linux as the",
+        "portfolio: attacker platform against Windows 10, Windows Server, CentOS, and Metasploitable targets. I kept",
+        "portfolio: images, network configuration, and tooling reproducible so a full section could work through the",
+        "portfolio: same exercises without environment drift derailing the lesson."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate"
+      ]
+    },
+    {
+      "id": "ta-27",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain why you graded method over answers, to a PM.",
+      "easy": "Translate: a right answer without the trail behind it cannot be trusted or reused.",
+      "deep": "Keep it concrete and short: what was graded, why, and the parallel to evaluating AI systems on process and evidence.",
+      "say": "In security a correct conclusion is useless if you cannot show how you got there, because someone else has to act on it. So I graded the reasoning and the evidence trail, not only the final answer. I evaluate AI systems the same way.",
+      "evidence": [
+        "portfolio: reports on methodology as well as the final answer, because in security the reasoning and the",
+        "portfolio: chain of evidence matter as much as the result. Throughout the course I kept coming back to"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate"
+      ]
+    },
+    {
+      "id": "ta-28",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the role to a recruiter in plain words.",
+      "easy": "One sentence of what, one of how big, one of why it matters for the job.",
+      "deep": "Avoid tool names; say what students learned and what Tanay ran.",
+      "say": "I was the teaching assistant for a cybersecurity course. I ran more than fifteen hands on labs and the computer setup they ran on, and I graded students on how carefully they reasoned. It is the security background I bring to making AI systems safe.",
+      "evidence": [
+        "portfolio: Labs delivered 15+ hands on"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate"
+      ]
+    }
+  ],
+  "sources": []
+}
