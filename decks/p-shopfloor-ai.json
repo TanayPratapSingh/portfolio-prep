@@ -1,0 +1,1187 @@
+{
+  "deck_id": "p-shopfloor-ai",
+  "title": "ShopFloor AI",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/shopfloor-ai",
+  "summary_easy": "ShopFloor AI predicts milling machine failures from five sensor readings, streams sensor KPIs and alerts through Kafka, and answers maintenance questions with a RAG assistant, all as one Docker Compose stack with MLflow and Airflow. On the synthetic AI4I 2020 dataset its gradient boosting model reached 0.85 F1 and 0.96 AUC. Reading the code back shows several connections between the parts that do not yet work as described, which Tanay owns as the main lesson.",
+  "summary_deep": "The AI4I 2020 dataset (10,000 synthetic runs, 3.39% failures, five rule generated failure modes) feeds 16 model inputs: five raw sensors, an encoded product grade, and ten derived features such as power (torque times angular speed), temperature gap, and wear times torque, which mirror the dataset's own failure rules. Three scikit-learn pipelines are trained on a stratified 80/20 split and logged to MLflow; gradient boosting (200 trees, depth 6, subsample 0.8) reached 0.8548 F1 and 0.9591 AUC, random forest 0.8387 and 0.9823, logistic regression 0.3054 and 0.9455, and the best by F1 is registered. FastAPI loads the latest registered version and a LangChain RetrievalQA chain (800 character chunks, text-embedding-3-small, ChromaDB, MMR top 4 of 8, gpt-4o-mini). A Kafka producer replays rows and a consumer keeps a 100 record window with threshold alerts and cooldowns. Airflow retrains nightly behind a 0.80 F1 branch. Caveats Tanay states plainly: the data is synthetic, the threshold is the untuned 0.5, training registers before the gate so the gate does not protect serving, the serving path encodes every grade the same, the stream never calls the model, and RAG refreshes duplicate chunks.",
+  "sheet": {
+    "easy": "## ShopFloor AI in one line\nPredict machine failures from sensor readings, stream KPIs and alerts through Kafka, and answer maintenance questions with RAG, as one Docker Compose stack.\n\n## The data\nAI4I 2020 (UCI, CC BY 4.0): 10,000 synthetic milling runs, 3.39% failures, five failure modes (tool wear, heat dissipation, power, overstrain, random), product grades L 50%, M 30%, H 20%.\n\n## Results (one stratified 80/20 split, synthetic data)\n| Model | F1 | AUC-ROC |\n|---|---|---|\n| Gradient Boosting (selected) | 0.8548 | 0.9591 |\n| Random Forest | 0.8387 | 0.9823 |\n| Logistic Regression | 0.3054 | 0.9455 |\n\n## The pieces\n- 16 model inputs: 5 raw sensors plus 11 engineered (power, temperature gap, wear times torque, flags).\n- MLflow tracks 3 models per run and registers the best by F1.\n- FastAPI /predict, /ask, /health; Streamlit with 4 pages.\n- Kafka producer replays rows; consumer keeps a 100 row window and alerts.\n- RAG: 6 SOPs, 800 character chunks, OpenAI embeddings, ChromaDB, MMR top 4, gpt-4o-mini.\n- Airflow nightly at 2 AM: check data, train, gate at 0.80 F1, refresh RAG.\n\n## Say this out loud\n- The data is synthetic and the features mirror the rules that generated the labels.\n- Random Forest had the better AUC; I chose on F1 at the default threshold.\n- The 0.80 gate does not block registration as written; the API serves the latest version.\n\n## Gaps worth owning\nGate registers before checking, serving encodes every grade the same, stream never calls the model, Airflow containers miss config, RAG refresh duplicates chunks, CI file not in the repo, drift page is a rolling mean.\n",
+    "deep": "## Architecture\n```\nStreamlit (8501) --HTTP--> FastAPI (8001): /predict /ask /rag/ingest /health\n  lifespan: mlflow.sklearn.load_model(\"models:/failure-predictor/latest\"); RAG chain\n  MLflow 2.16.0 (5000): sqlite backend, artifacts ./data/models\n  ChromaDB 0.5.0 (8000): collection milling_sops\nKafka 7.6.0 + Zookeeper: shopfloor.sensor.raw -> consumer (window 100) -> shopfloor.alerts\n  listeners: kafka:29092 (containers), localhost:9092 (host)\nAirflow 2.9.3 shopfloor_retrain, 0 2 * * *: check_data >> train >> should_register >> [register | skip] >> refresh_rag\n```\nCompose entries: zookeeper, kafka, mlflow, chromadb, airflow-init, airflow-webserver, airflow-scheduler, api, dashboard (9; 7 with Airflow counted once). Producer and consumer run on the host.\n\n## Data (UCI AI4I 2020)\n10,000 rows; Type L 50%, M 30%, H 20%; air T random walk std 2 K around 300 K; process T = air + 10 K with std 1 K; rpm from 2860 W with noise; torque N(40, 10) Nm; wear +5/+3/+2 min for H/M/L.\n| Mode | Rule | Count (hard coded in download.py) |\n|---|---|---|\n| TWF | wear time drawn in 200 to 240 min | 46 |\n| HDF | $\\Delta T < 8.6$ K and rpm < 1380 | 115 |\n| PWF | P < 3500 W or P > 9000 W | 95 |\n| OSF | wear x torque > 11,000 / 12,000 / 13,000 minNm (L/M/H) | 98 |\n| RNF | 0.1% random | 5 |\nMachine failure = any mode; 339 total (3.39%).\n\n## Features (16 inputs)\nRaw 5; type_encoded; $\\Delta T$; $P = \\tau \\cdot 2\\pi n/60$; wear x torque; wear/240; torque/(rpm+1); P<3500; P>9000; hdf_risk ($\\Delta T$<10 and rpm<1500); (air-300)/2; (process-310)/1.\n\n## Models (train.py)\nSplit 80/20, stratified, random_state 42 (test about 2,000 rows, about 68 failures by arithmetic).\n| Model | Config | F1 | AUC |\n|---|---|---|---|\n| GradientBoosting | 200 trees, depth 6, lr 0.1, subsample 0.8 | 0.8548 | 0.9591 |\n| RandomForest | 200 trees, depth 12, min split 5, balanced | 0.8387 | 0.9823 |\n| LogisticRegression | scaler, max_iter 1000, balanced | 0.3054 | 0.9455 |\nLogged: accuracy, precision, recall, f1, roc_auc, cv_f1_mean, cv_f1_std (5 fold), params, model with input example, importances, report. Selection: max F1; register via search_runs ordered by F1.\n\n## Formulas\n$$F_1 = \\frac{2PR}{P+R},\\quad \\mathrm{AUC} = \\Pr(s(x^+) > s(x^-))$$\n$$F_M(x) = F_0(x) + \\sum_m \\nu h_m(x),\\ \\ r_i = y_i - p_i$$\n$$w_c = \\frac{n}{k\\,n_c}\\ \\ (\\text{failure} \\approx 14.7,\\ \\text{pass} \\approx 0.52)$$\n$$t^* = \\frac{c_{FP}}{c_{FP}+c_{FN}}$$\n$$\\mathrm{MMR} = \\arg\\max_{d \\in C\\setminus S}\\left[\\lambda\\,\\mathrm{sim}(d,q) - (1-\\lambda)\\max_{d' \\in S}\\mathrm{sim}(d,d')\\right]$$\n\n## Serving\n/predict: engineer_features on one row, predict_proba, threshold 0.5, risk factors (wear > 200, P outside 3500 to 9000, $\\Delta T$ < 8.6 and rpm < 1380, torque > 55). Bug: LabelEncoder refit on one row maps every Type to 0 (H at training).\n\n## Registry and gate\nregister_model creates a new version; API loads latest at startup; no alias or stage. DAG: train registers (register_best=True) before should_register; register task only prints. Stages are deprecated in MLflow in favor of aliases.\n\n## Streaming\nProducer: JSON, key = Type, acks all, flush every 50, 0.5 s interval (10,000 rows about 83 min by arithmetic). Consumer: group shopfloor-consumer, offset reset latest, deque(100), rolling failure rate from ground truth labels, torque average, temp gap average; alerts > 5% failure (CRITICAL), torque > 60 (WARNING), wear > 200 (WARNING), 60 s cooldown per type. No model call.\n\n## RAG\n6 hand written SOPs; RecursiveCharacterTextSplitter 800 / 100; text-embedding-3-small; Chroma HttpClient; MMR k 4, fetch_k 8; RetrievalQA stuff; gpt-4o-mini, temperature 0.1, max_tokens 1024; prompt asks for citations and refusal when absent. Re ingest appends duplicates. No evaluation.\n\n## Tests (15)\nData 5, features 4, streaming 4, SOPs 2. Untested: train, gate, API, registry, RAG answers, DAG.\n\n## Mismatches found\nMLflow 5000 in compose vs 5001 in docs; CI workflow and .env.example referenced but absent; README value range check absent in DAG; Airflow containers lack configs, MLflow URI, shared DB.\n\n## Numbers and sources\n| Number | Source |\n|---|---|\n| F1 0.8548, AUC 0.9591 (GB); 0.8387 / 0.9823 (RF); 0.3054 / 0.9455 (LR) | README |\n| 10,000 rows, 3.39% failures | portfolio, UCI |\n| 16 features, 3 models, 7 services, 6 SOPs, 15 tests | portfolio, README |\n| 0.80 F1 gate | portfolio, retrain_dag.py |\n| window 100, alert 5% / 60 Nm / 200 min, cooldown 60 s | consumer.py |\n| chunk 800 / 100, k 4, fetch_k 8 | rag/engine.py |\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "ShopFloor AI is a manufacturing platform with three parts. A failure predictor on sensor data, a Kafka stream that computes KPIs and raises alerts, and a RAG assistant over maintenance procedures, all running as one Docker Compose stack with MLflow and Airflow. My gradient boosting model reached 0.85 F1 on the AI4I benchmark, which is synthetic, so I treat it as a pipeline check. The real lesson was in the seams between the services.",
+      "keypoints": [
+        "Three parts: prediction, streaming, RAG",
+        "MLflow, Airflow, Docker Compose",
+        "0.85 F1 on synthetic AI4I, framed as a pipeline check",
+        "Lesson was the seams between services"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "The problem is unplanned machine failures on a milling line. I used the AI4I 2020 dataset: 10,000 synthetic runs, 3.39% failures, five failure modes. From five sensor readings I built 16 model inputs, including power from torque and speed, the temperature gap, and wear times torque, because those are the physics behind the failure modes. I trained logistic regression, random forest, and gradient boosting on a stratified split and tracked everything in MLflow. Gradient boosting won on F1 with 0.85, AUC 0.96, and was registered. Random forest actually had the higher AUC, 0.98, so the choice depends on the threshold. Around the model, FastAPI serves predictions and questions. A Kafka producer replays rows as a sensor stream, and a consumer keeps a 100 record window and raises alerts on failure rate, torque, and tool wear. The RAG side chunks six maintenance procedures, embeds them into ChromaDB, retrieves four chunks with MMR, and answers with gpt-4o-mini, citing the document. Airflow retrains nightly behind a 0.80 F1 gate. Now the honest part. The data is synthetic, and my features mirror the rules that generated the labels, so the score mostly shows the pipeline works. Reading the code back, the gate doesn't gate, because training registers the model before the branch and the API serves the latest version. The serving path also encodes every product grade the same way, and the stream never calls the model. Next I'd fix those seams with integration tests, which is exactly what my follow up project focused on.",
+      "keypoints": [
+        "AI4I: 10,000 synthetic runs, 3.39% failures, five modes",
+        "16 inputs with physics features",
+        "Three models in MLflow; GB 0.85 F1, RF better AUC",
+        "API, Kafka window alerts, RAG with MMR",
+        "Synthetic data and rule mirroring features",
+        "Gate registers before branch; encoding and stream gaps",
+        "Next: integration tests, follow up project"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "Start with the data, because it explains the numbers. AI4I is synthetic. Four of its five failure modes are deterministic rules. Heat dissipation fails when the temperature gap is under 8.6 kelvin and speed is under 1380 rpm. Power fails outside 3500 to 9000 watts. Overstrain fails when wear times torque passes a limit that depends on the product grade. I engineered exactly those quantities: power as torque times two pi times rpm over sixty, the temperature gap, wear times torque, and power band flags. With five raw readings, the grade, and ten derived features, that's 16 inputs. So a tree ensemble can recover the generator almost directly, which is why the scores are high and why they don't transfer. Training uses one stratified 80 20 split. That leaves about 68 failures in the test set, so a couple of predictions move F1 by a point. Logistic regression with balanced weights got 0.31 F1 but 0.95 AUC. Balancing shifts its probabilities up, so at 0.5 it flags too many runs. Random forest got the best AUC, 0.98, and 0.84 F1. Gradient boosting, with 200 trees at depth 6 and subsampling, got 0.85 F1 and was selected on F1 at the default threshold. I logged five fold cross validated F1 for every model and never reported it, which I'd fix. In maintenance, F1 is the wrong objective anyway. The threshold should come from what a missed failure costs against a false alarm. MLflow logs params, metrics, the model with an input example, and importances. The best run gets registered as failure predictor, and the API loads the latest version at startup. Here is the first seam. The Airflow DAG has a 0.80 F1 branch, but the train task registers the model before that branch runs, and the register task only prints. Since serving reads latest, the gate never protects production. The fix is to register inside the gated task and serve by a champion alias. Second seam: serving calls the same feature function as training, which is good. But it refits a label encoder on a single row, so every grade becomes zero, which meant H in training. That understates overstrain risk for L and M parts. Third: the Kafka consumer computes a rolling failure rate from the ground truth label in each replayed record and never calls the model. On a real line that label arrives later. The RAG side is cleaner. It uses 800 character chunks with 100 overlap, small OpenAI embeddings in ChromaDB, MMR for four chunks out of eight, and a stuff chain with a prompt that requires citations. But nightly re ingestion appends duplicates, and nothing evaluates answers. The Compose file has nine entries, which is seven services if Airflow counts once. The Airflow containers lack the config mount, the MLflow address, and a shared metadata database. The common cause is integration claims without integration tests. My next project, the ZTF pipeline, was designed around closing exactly these gaps, with real data, a tested warehouse, and claims sized to the evidence.",
+      "keypoints": [
+        "Synthetic rules and features that mirror them",
+        "One split, about 68 test failures, CV logged but unreported",
+        "LR, RF, GB results and why they differ; threshold from costs",
+        "Gate seam: registration before branch, serving latest",
+        "Encoder refit per request maps every grade to H",
+        "Stream uses ground truth labels, no model call",
+        "RAG details, duplicate ingestion, Compose and Airflow gaps"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone who is not an engineer.",
+      "script": "Factories lose money when machines break without warning. I built a system that looks at a machine's sensor readings, like temperature, speed, and how worn the cutting tool is, and estimates whether it's about to fail. It also watches a live feed of readings and raises an alert when things look off, and it has a chat assistant that answers questions from the maintenance manuals. I tested it on a public practice dataset of 10,000 simulated machine runs, where it caught failures well. Because the data is simulated, the real proof would come from a factory's own machines. Looking back, I also found places where the parts didn't connect the way I'd described, and fixing that shaped my next project.",
+      "keypoints": [
+        "Machines breaking without warning costs money",
+        "Predicts failure from sensor readings",
+        "Live alerts and a manual answering assistant",
+        "Tested on 10,000 simulated runs",
+        "Found and owned connection gaps"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the architecture on the whiteboard.",
+      "script": "First I draw the dashboard box on the left and an arrow to a FastAPI box in the middle, with three endpoints written inside: predict, ask, health. Second, under the API I draw three boxes it depends on. MLflow on the left, labeled registry with versions, and an arrow labeled latest going up into the API. ChromaDB in the middle, with an arrow to a small box saying OpenAI, gpt-4o-mini. Kafka on the right. While drawing I say the API loads the model and the RAG chain once at startup. Third, I draw the training path on the far left: CSV, then features, with power, temperature gap, and wear times torque written next to it, then three model boxes, then an arrow into MLflow. I write 0.85 F1 next to gradient boosting and add synthetic next to it. Fourth, the streaming path on the right: a producer box replaying rows into a topic, a consumer box with a 100 record window, and an arrow to an alerts topic. I note that the consumer doesn't call the model. Fifth, Airflow across the top: check data, train, a diamond for F1 at least 0.80, register or skip, then refresh RAG. Last, I circle two places in red. The arrow from train into MLflow, which happens before the diamond, so the gate doesn't protect anything. And the arrow from the registry into the API labeled latest, which should be a champion alias.",
+      "keypoints": [
+        "Dashboard to FastAPI with three endpoints",
+        "MLflow, ChromaDB plus OpenAI, Kafka under the API",
+        "Training path with physics features and synthetic label",
+        "Streaming path with window and alerts, no model call",
+        "Airflow chain with the F1 diamond",
+        "Red circles: registration before gate, latest instead of alias"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why does logistic regression have such a low F1 with a high AUC?",
+      "script": "AUC measures ranking over every threshold, and F1 is one threshold, 0.5. I trained logistic regression with balanced class weights, which tells the loss to treat failures as if they were half the data. That pushes failure probabilities up, so at 0.5 it flags lots of normal runs. Recall is high, precision collapses, and F1 follows the weaker one. The ranking is still good, so AUC stays at 0.95. A linear model also can't represent the failure rules without interaction terms, like the heat rule needing both a small temperature gap and low speed. Tuning the threshold on validation data would raise its F1 a lot.",
+      "keypoints": [
+        "AUC is ranking, F1 is one threshold",
+        "Balanced weights push probabilities up",
+        "High recall, low precision drags F1",
+        "Linear model misses conjunctions and bands",
+        "Threshold tuning would help"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you pick the alert threshold for a real plant?",
+      "script": "From costs, not from F1. If a missed failure costs a lot more than an inspection, the threshold should sit well below 0.5. For calibrated probabilities, the cost optimal threshold is the false alarm cost divided by the sum of both costs. So I'd first calibrate the model on held out data, since boosted trees aren't calibrated by default. Then I'd get rough costs from maintenance, plot expected cost against the threshold on validation data, and pick the minimum. If the crew can only inspect so many machines a shift, I'd flag the top few by risk instead. And I'd track precision and recall in production once real failure labels come back.",
+      "keypoints": [
+        "Threshold from costs, not F1",
+        "t star equals false alarm cost over total",
+        "Calibrate first",
+        "Cost curve on validation data",
+        "Top k when inspection capacity is fixed"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you make the promotion gate real?",
+      "script": "Right now training registers the model before the gate, and the API serves whatever version is newest. I'd change three things. Train with registration off and pass the run id through XCom. In the gated task, register the model and move a champion alias, and only if it clears the threshold and beats the current champion on the same data. Then the API loads the model by that alias, so a registered but unapproved version never serves. I'd add a test that runs the DAG logic with a model under 0.80 and asserts the alias didn't move. Stages are deprecated in MLflow, so aliases are the right tool.",
+      "keypoints": [
+        "Today: register before gate, serve latest",
+        "Register and move alias only in gated task",
+        "Compare against current champion",
+        "API loads by alias",
+        "Test that a weak model leaves the alias alone"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What would you change in the streaming layer?",
+      "script": "Two things. First, the consumer computes a rolling failure rate from the failure label in each replayed record, and on a real line that label arrives after the fact. So I'd score each record with the registered model inside the consumer and alert on predicted risk instead. Second, keys. The producer keys by product grade, which gives three keys with half the traffic on one. I'd key by machine, so each machine's readings stay in order on one partition and consumers can scale out. I'd also keep the window state somewhere that survives a restart, and commit offsets after an alert is published rather than on a timer.",
+      "keypoints": [
+        "Rolling failure rate uses ground truth labels",
+        "Score each record with the model",
+        "Key by machine, not grade",
+        "Durable window state",
+        "Commit after publishing alerts"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "0.85 F1 on synthetic data with published rules tells me nothing.",
+      "script": "About real machines, agreed, and I say the data is synthetic in the first line of my limitations. My features compute the same quantities the label rules use, power, temperature gap, wear times torque, so the model is largely rediscovering the generator. What the number does show is that the pipeline works end to end, from features through MLflow to a served model. If I wanted a claim about prediction, I'd need real plant data, a time based split, and labels from maintenance logs. That's the reason my next project moved to a real public data stream.",
+      "keypoints": [
+        "Concede: says nothing about real machines",
+        "Features mirror the label rules",
+        "Shows the pipeline works end to end",
+        "Needs real data, time split, real labels",
+        "Next project moved to real data"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your write up says a bad batch never reaches production. Your code says otherwise.",
+      "script": "You're right, and I'd rather say it first. The train task registers the best model before the branch that checks 0.80 F1, the register task only prints, and the API loads the latest version. So a weak model would still become the newest version and get served after a restart. The DAG has the right shape: quality check, train, branch on a metric, conditional promotion, and a downstream refresh with the right trigger rule. The wiring is wrong. The fix is to register and move a champion alias only in the gated task, serve by alias, and test that a weak model can't move it.",
+      "keypoints": [
+        "Concede: gate does not block registration",
+        "API serves latest",
+        "DAG shape is right, wiring is wrong",
+        "Register and alias only in gated task",
+        "Test it"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "sf-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What problem does ShopFloor AI solve, in one sentence and then technically?",
+      "easy": "It predicts which machining runs are about to fail from five sensor readings, watches a live stream of readings for warning signs, and lets an operator ask questions about maintenance procedures in plain English.",
+      "deep": "Three subsystems behind one API. (1) Failure prediction: a binary classifier over the AI4I 2020 milling dataset (10,000 synthetic records, 3.39% failures across five failure modes), with 16 model inputs (5 raw sensors plus 11 engineered), three scikit-learn models compared and tracked in MLflow, and the best by F1 registered. (2) Streaming: a Kafka producer replays the dataset as a sensor stream and a consumer keeps a 100 record rolling window, computes KPIs, and publishes threshold alerts to an alerts topic. (3) RAG: six hand written maintenance SOPs chunked, embedded with OpenAI embeddings into ChromaDB, retrieved with MMR, and answered by gpt-4o-mini through a LangChain RetrievalQA chain. FastAPI serves /predict, /ask, /health; Streamlit is the front end; Airflow schedules a nightly retrain; Docker Compose runs it. The write up frames the engineering around the model as the point, and lists the synthetic data and replayed stream as limitations.",
+      "say": "It's a manufacturing platform with three parts: a failure predictor on sensor data, a Kafka stream that raises alerts, and a chat assistant over maintenance procedures. My best model scored 0.85 F1 on a synthetic benchmark dataset. The interesting part for me was everything around the model.",
+      "evidence": [
+        "portfolio: 10,000 records at a 3.39% failure rate, across five independent failure modes",
+        "portfolio: Gradient Boosting F1 = 0.85",
+        "portfolio: Synthetic dataset. AI4I is 10,000 synthetic records"
+      ],
+      "sources": [],
+      "tags": [
+        "problem",
+        "overview"
+      ]
+    },
+    {
+      "id": "sf-02",
+      "type": "concept",
+      "level": 1,
+      "q": "Walk me through the architecture end to end.",
+      "easy": "A dashboard calls an API. The API loads the latest registered model from MLflow to score sensor readings, and asks a vector database plus OpenAI to answer document questions. Separately, a Kafka producer and consumer stream readings and raise alerts, and Airflow retrains every night.",
+      "deep": "Streamlit (4 pages) posts to FastAPI at :8001. FastAPI's lifespan loads models:/failure-predictor/latest from the MLflow server and builds the RAG chain against ChromaDB (HttpClient on :8000, collection milling_sops). /predict rebuilds the 16 features with the same engineer_features function used in training and returns a probability, a 0.5 threshold decision, and rule based risk factors. /ask runs RetrievalQA over MMR retrieval. /rag/ingest re embeds the SOPs. Kafka (cp-kafka 7.6.0 with Zookeeper) carries shopfloor.sensor.raw and shopfloor.alerts; producer and consumer run from the host with make stream and make consume. MLflow 2.16.0 uses a SQLite backend store and a local artifact root mounted from ./data/models. Airflow 2.9.3 runs shopfloor_retrain at 02:00: check_data, train, should_register branch, register or skip, refresh_rag.",
+      "say": "Streamlit talks to FastAPI. FastAPI loads the latest registered model from MLflow and a RAG chain over ChromaDB. Kafka runs a replayed sensor stream with a consumer that raises alerts, and Airflow retrains nightly. Everything is in one Docker Compose file.",
+      "evidence": [
+        "repo:shopfloor-ai/src/api/main.py: state.model = mlflow.sklearn.load_model(f\"models:/{state.config['mlflow']['model_name']}/latest\")",
+        "repo:shopfloor-ai/configs/config.yaml: collection_name: \"milling_sops\"",
+        "repo:shopfloor-ai/docker-compose.yml: image: ghcr.io/mlflow/mlflow:v2.16.0",
+        "repo:shopfloor-ai/src/airflow/dags/retrain_dag.py: schedule=\"0 2 * * *\", start_date=datetime(2026, 7, 1), catchup=False, tags=[\"ml\", \"shopfloor\"])"
+      ],
+      "sources": [],
+      "tags": [
+        "architecture"
+      ]
+    },
+    {
+      "id": "sf-03",
+      "type": "number",
+      "level": 1,
+      "q": "What were the model results?",
+      "easy": "Gradient Boosting reached 0.8548 F1 and 0.9591 AUC-ROC on a held out 20% test split. Random Forest had 0.8387 F1 and 0.9823 AUC, and Logistic Regression 0.3054 F1 and 0.9455 AUC. These are on a synthetic dataset.",
+      "deep": "All three come from one stratified 80/20 split with random_state 42 of the 10,000 row AI4I dataset, so the test set is 2,000 rows with roughly 68 failures at the 3.39% base rate (arithmetic, not a logged count). F1 is at the default 0.5 probability threshold; AUC is threshold free. Gradient Boosting was chosen because selection is by F1 (max over results by 'f1'). Caveats that travel with the numbers: AI4I is synthetic with failure labels generated by simple published rules that several engineered features mirror; it is one split, and the 5 fold cross validated F1 that train.py logs to MLflow is not reported anywhere; Random Forest ranks better by AUC, so threshold tuning could reverse the choice; and no number here measures a real machine.",
+      "say": "Gradient Boosting got 0.85 F1 and 0.96 AUC on a held out split, and I picked it on F1. Random Forest actually had the higher AUC, 0.98. All of it is on a synthetic dataset whose failure rules my features partly mirror, so I treat the numbers as a pipeline check, not a claim about real machines.",
+      "evidence": [
+        "repo:shopfloor-ai/README.md: | **Gradient Boosting** | **0.8548** | **0.9591** |",
+        "repo:shopfloor-ai/README.md: | Random Forest | 0.8387 | 0.9823 |",
+        "repo:shopfloor-ai/README.md: | Logistic Regression | 0.3054 | 0.9455 |",
+        "portfolio: Gradient Boosting F1 = 0.85",
+        "portfolio: AUC-ROC = 0.96",
+        "repo:shopfloor-ai/src/ml/train.py: X, y, test_size=0.2, random_state=42, stratify=y,",
+        "repo:shopfloor-ai/src/ml/train.py: best_name = max(results, key=lambda k: results[k][\"f1\"])",
+        "portfolio: Synthetic dataset. AI4I is 10,000 synthetic records"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "metrics"
+      ]
+    },
+    {
+      "id": "sf-04",
+      "type": "define",
+      "level": 1,
+      "q": "What is the AI4I 2020 dataset?",
+      "easy": "A public, synthetic dataset of 10,000 milling machine runs with five sensor readings, a product quality grade, and whether the machine failed. About 3.4% of runs fail, through five different failure types.",
+      "deep": "From the UCI page: 10,000 rows, synthetic but modeled on real predictive maintenance data, CC BY 4.0. Columns: UDI, Product ID, Type (L 50%, M 30%, H 20%), air temperature (random walk, std 2 K around 300 K), process temperature (random walk, std 1 K, plus air temperature plus 10 K), rotational speed (from a 2860 W power with noise), torque (normal around 40 Nm, std 10, no negatives), tool wear (H, M, L add 5, 3, 2 minutes per process), Machine failure, and five mode flags TWF, HDF, PWF, OSF, RNF. Machine failure is 1 if any mode is true, so a model cannot tell which mode caused a failure. The repo hard codes mode counts TWF 46, HDF 115, PWF 95, OSF 98, RNF 5 and total failures 339; the modes overlap, which is why they sum past 339. download.py tries the UCI URL and falls back to a GitHub mirror.",
+      "evidence": [
+        "portfolio: 10,000 records at a 3.39% failure rate, across five independent failure modes",
+        "repo:shopfloor-ai/src/data/download.py: \"TWF\": 46, \"HDF\": 115, \"PWF\": 95, \"OSF\": 98, \"RNF\": 5,",
+        "repo:shopfloor-ai/src/data/download.py: \"total_failures\": 339,"
+      ],
+      "sources": [
+        "https://archive.ics.uci.edu/dataset/601/ai4i+2020+predictive+maintenance+dataset"
+      ],
+      "tags": [
+        "dataset",
+        "ai4i"
+      ]
+    },
+    {
+      "id": "sf-05",
+      "type": "how",
+      "level": 2,
+      "q": "How are the five failure modes generated in AI4I, and why does that matter for your model?",
+      "easy": "Each failure type comes from a simple written rule: tools fail between 200 and 240 minutes of wear, heat failures need a small temperature gap and low speed, power failures need power outside a band, overstrain needs wear times torque past a limit, and a tiny share fail at random.",
+      "deep": "Rules per the UCI description: TWF at a tool wear time chosen between 200 and 240 minutes; HDF when process minus air temperature is below 8.6 K and speed below 1380 rpm; PWF when power (torque times angular speed) is below 3500 W or above 9000 W; OSF when tool wear times torque exceeds 11,000 minNm for L, 12,000 for M, 13,000 for H; RNF with 0.1% probability regardless of inputs. Why it matters: four of five modes are deterministic thresholds on simple functions of the inputs, and the engineered features compute exactly those functions (temp_diff, power_W, power_low below 3500, power_high above 9000, wear_torque_product). A tree ensemble can then learn the generating rules almost directly, which explains high scores and also means the score is a measure of rule recovery on a synthetic process rather than of predictive skill on a real machine. RNF is irreducible by construction, and the TWF window is randomized, which together bound how good any model can be.",
+      "evidence": [
+        "repo:shopfloor-ai/src/ml/features.py: df[\"power_low\"] = (df[\"power_W\"] < 3500).astype(int)",
+        "repo:shopfloor-ai/src/data/sop_documents.py: threshold (11000 for L, 12000 for M, 13000 for H variants)."
+      ],
+      "sources": [
+        "https://archive.ics.uci.edu/dataset/601/ai4i+2020+predictive+maintenance+dataset"
+      ],
+      "tags": [
+        "dataset",
+        "failure modes",
+        "label generation"
+      ]
+    },
+    {
+      "id": "sf-06",
+      "type": "how",
+      "level": 1,
+      "q": "What are the 16 features?",
+      "easy": "Five raw sensor readings, the product grade as a number, and ten derived features: temperature gap, power, wear times torque, wear as a share of tool life, torque per rpm, two power band flags, a heat risk flag, and two rescaled temperatures.",
+      "deep": "From src/ml/features.py: raw air temperature, process temperature, rotational speed, torque, tool wear (5); type_encoded via LabelEncoder (1); temp_diff = process minus air; power_W = torque x (2 pi x rpm / 60); wear_torque_product = tool wear x torque; tool_wear_ratio = wear / 240; torque_per_rpm = torque / (rpm + 1); power_low = power_W < 3500; power_high = power_W > 9000; hdf_risk = temp_diff < 10 and rpm < 1500; air_temp_norm = (air minus 300) / 2; process_temp_norm = (process minus 310) / 1 (10). So '16 features derived from 5 raw readings' means 16 model inputs, 11 of them derived. Three are exact linear rescalings of raw columns (tool_wear_ratio, air_temp_norm, process_temp_norm), which add nothing for trees and add collinearity for logistic regression. hdf_risk uses looser cutoffs (10 K, 1500 rpm) than the dataset's HDF rule (8.6 K, 1380 rpm), while the API's risk factor text uses the exact ones. fillna(0) guards missing values.",
+      "evidence": [
+        "portfolio: 16 features are derived from the 5 raw sensor readings so the physics of failure is explicit rather than latent.",
+        "repo:shopfloor-ai/src/ml/features.py: df[\"power_W\"] = df[\"Torque [Nm]\"] * (2 * np.pi * df[\"Rotational speed [rpm]\"] / 60)",
+        "repo:shopfloor-ai/src/ml/features.py: df[\"tool_wear_ratio\"] = df[\"Tool wear [min]\"] / 240.0",
+        "repo:shopfloor-ai/src/ml/features.py: df[\"hdf_risk\"] = ((df[\"temp_diff\"] < 10) & (df[\"Rotational speed [rpm]\"] < 1500)).astype(int)",
+        "repo:shopfloor-ai/src/api/main.py: if temp_diff < 8.6 and sensor.rpm < 1380:"
+      ],
+      "sources": [],
+      "tags": [
+        "feature engineering"
+      ]
+    },
+    {
+      "id": "sf-07",
+      "type": "formula",
+      "level": 2,
+      "q": "Derive the power feature and say why the physics features help.",
+      "easy": "Power is torque times rotational speed in radians per second. Speed in rpm is turned into radians per second by multiplying by 2 pi and dividing by 60.",
+      "deep": "$P = \\tau\\,\\omega$, $\\omega = 2\\pi n/60$, so $P[\\mathrm{W}] = \\tau[\\mathrm{Nm}] \\cdot 2\\pi n[\\mathrm{rpm}]/60$. At the dataset's typical 40 Nm and about 1500 rpm, $P \\approx 40 \\cdot 157 \\approx 6283$ W, inside the 3500 to 9000 W band. Heat: $\\Delta T = T_{process} - T_{air}$, and HDF needs $\\Delta T < 8.6$ K with $n < 1380$. Overstrain: $w \\cdot \\tau$ against 11,000, 12,000, 13,000 minNm by grade. Why they help: a tree splitting on raw torque and rpm needs many axis aligned splits to approximate a product or a curve like $P = c$, while one split on power_W captures the PWF boundary exactly; a linear model cannot represent $\\tau \\cdot n$ at all without the product term. The cost is that the features encode the label generating rules of a synthetic process, which inflates scores relative to what the same features would earn on real machines with noisy, unknown failure physics.",
+      "evidence": [
+        "repo:shopfloor-ai/src/ml/features.py: df[\"power_W\"] = df[\"Torque [Nm]\"] * (2 * np.pi * df[\"Rotational speed [rpm]\"] / 60)"
+      ],
+      "sources": [
+        "https://archive.ics.uci.edu/dataset/601/ai4i+2020+predictive+maintenance+dataset"
+      ],
+      "tags": [
+        "physics",
+        "features",
+        "formula"
+      ]
+    },
+    {
+      "id": "sf-08",
+      "type": "how",
+      "level": 2,
+      "q": "How is training set up?",
+      "easy": "One script loads the data, builds features, splits 80/20 keeping the failure ratio, trains three models, scores each on the test split and with 5 fold cross validation, logs everything to MLflow, and registers the best by F1.",
+      "deep": "train_and_evaluate(): MLFLOW_TRACKING_URI from env or config (localhost:5000), experiment shopfloor-failure-prediction. train_test_split(test_size 0.2, random_state 42, stratify y). Pipelines: LogisticRegression (StandardScaler, max_iter 1000, class_weight balanced); RandomForest (200 trees, max_depth 12, min_samples_split 5, class_weight balanced, n_jobs -1); GradientBoosting (200 estimators, max_depth 6, learning_rate 0.1, subsample 0.8). Per model run: fit; predict and predict_proba on test; accuracy, precision, recall, F1, ROC AUC; cross_val_score with cv 5 and F1 on the training split, logged as cv_f1_mean and cv_f1_std; params (model_type, n_features, n_train, dataset, feature list as JSON); the sklearn model with an input example; feature importances CSV for tree models; a classification report. Then best = max F1, search_runs for that model_type ordered by F1, register as failure-predictor.",
+      "evidence": [
+        "repo:shopfloor-ai/src/ml/train.py: X, y, test_size=0.2, random_state=42, stratify=y,",
+        "repo:shopfloor-ai/src/ml/train.py: (\"clf\", LogisticRegression(max_iter=1000, class_weight=\"balanced\", random_state=42)),",
+        "repo:shopfloor-ai/src/ml/train.py: n_estimators=200, max_depth=12, min_samples_split=5,",
+        "repo:shopfloor-ai/src/ml/train.py: n_estimators=200, max_depth=6, learning_rate=0.1,",
+        "repo:shopfloor-ai/src/ml/train.py: subsample=0.8, random_state=42,",
+        "repo:shopfloor-ai/src/ml/train.py: cv = cross_val_score(pipeline, X_train, y_train, cv=5, scoring=\"f1\")",
+        "repo:shopfloor-ai/src/ml/train.py: best_name = max(results, key=lambda k: results[k][\"f1\"])"
+      ],
+      "sources": [],
+      "tags": [
+        "training",
+        "scikit-learn",
+        "mlflow"
+      ]
+    },
+    {
+      "id": "sf-09",
+      "type": "concept",
+      "level": 1,
+      "q": "Explain gradient boosting at textbook depth.",
+      "easy": "Gradient boosting builds many small decision trees one after another, each trained to fix the mistakes the earlier trees still make, and adds them up with a small weight.",
+      "deep": "Model $F_M(x) = F_0(x) + \\sum_{m=1}^{M} \\nu\\, h_m(x)$. For binary log loss $L = -[y\\log p + (1-y)\\log(1-p)]$ with $p = \\sigma(F)$, the negative gradient at step $m$ is the residual $r_i = y_i - p_i$; a regression tree $h_m$ is fit to the $r_i$, leaf values are set by a Newton step, and the update is scaled by the learning rate $\\nu$. Here $M = 200$, $\\nu = 0.1$, max_depth 6 (so trees can model interactions up to depth 6), and subsample 0.8, which fits each tree on a random 80% of rows (stochastic gradient boosting), reducing variance and acting as regularization. Strengths: handles mixed scales without scaling, captures thresholds and interactions such as wear times torque. Failure modes: overfits with deep trees and many rounds without early stopping (none is used here), probabilities are not calibrated by default, and there is no class weighting in this configuration, so the minority class is learned only through the loss.",
+      "evidence": [
+        "repo:shopfloor-ai/src/ml/train.py: n_estimators=200, max_depth=6, learning_rate=0.1,",
+        "repo:shopfloor-ai/src/ml/train.py: subsample=0.8, random_state=42,"
+      ],
+      "sources": [],
+      "tags": [
+        "gradient boosting",
+        "ensembles"
+      ]
+    },
+    {
+      "id": "sf-10",
+      "type": "concept",
+      "level": 2,
+      "q": "Explain random forest and class_weight balanced.",
+      "easy": "A random forest trains many deep trees on random samples of the data and random subsets of features, then averages their votes. Balanced class weights make each failure count more during training so the rare class is not ignored.",
+      "deep": "Each tree is grown on a bootstrap sample with a random feature subset considered at each split, which decorrelates trees so averaging reduces variance: for $B$ trees with pairwise correlation $\\rho$ and variance $\\sigma^2$, the average's variance is $\\rho\\sigma^2 + \\frac{1-\\rho}{B}\\sigma^2$. Here 200 trees, max_depth 12, min_samples_split 5, n_jobs -1. class_weight balanced sets $w_c = \\frac{n}{k\\, n_c}$; with 3.39% failures and $k = 2$, a failure weighs about $1/(2 \\times 0.0339) \\approx 14.7$ and a pass about $0.52$, so failures carry roughly 28 times the weight of passes. Probabilities are mean leaf class fractions, which tend to be pulled toward the middle. Result here: the best AUC (0.9823) but slightly lower F1 (0.8387) than gradient boosting at the 0.5 threshold, which suggests its ranking is better and its 0.5 cutoff is not the best operating point.",
+      "evidence": [
+        "repo:shopfloor-ai/src/ml/train.py: n_estimators=200, max_depth=12, min_samples_split=5,",
+        "repo:shopfloor-ai/README.md: | Random Forest | 0.8387 | 0.9823 |"
+      ],
+      "sources": [],
+      "tags": [
+        "random forest",
+        "class imbalance"
+      ]
+    },
+    {
+      "id": "sf-11",
+      "type": "concept",
+      "level": 2,
+      "q": "Why did logistic regression get 0.31 F1 but 0.95 AUC?",
+      "easy": "It ranks failures above normal runs well, but the default cutoff makes it flag far too many normal runs as failures. Ranking quality and the quality of one yes or no cutoff are different things.",
+      "deep": "AUC measures ranking across all thresholds; F1 is computed at one threshold, 0.5. With class_weight balanced, the loss treats the two classes as equally frequent, which shifts predicted probabilities upward for the minority class, so at 0.5 the model predicts many positives: recall is high, precision collapses, and F1, the harmonic mean, is dragged toward the low precision. That is Tanay's reading of the pattern; the per model precision and recall were logged to MLflow but are not in the repo's reported table. The linear model also cannot represent the generating rules without help: the HDF rule is a conjunction, the PWF rule is a band (two sided), and the OSF limit depends on grade. Fixes: tune the threshold on validation data, use class weights without the threshold shift, or add interaction terms.",
+      "evidence": [
+        "repo:shopfloor-ai/README.md: | Logistic Regression | 0.3054 | 0.9455 |",
+        "repo:shopfloor-ai/src/ml/train.py: (\"clf\", LogisticRegression(max_iter=1000, class_weight=\"balanced\", random_state=42)),"
+      ],
+      "sources": [],
+      "tags": [
+        "logistic regression",
+        "thresholds",
+        "metrics"
+      ]
+    },
+    {
+      "id": "sf-12",
+      "type": "formula",
+      "level": 1,
+      "q": "Define precision, recall, F1, and AUC-ROC, and say what 0.85 and 0.96 mean here.",
+      "easy": "Precision is how many flagged failures were real. Recall is how many real failures were caught. F1 balances the two. AUC is the chance the model scores a random real failure above a random normal run.",
+      "deep": "$P = \\frac{TP}{TP+FP}$, $R = \\frac{TP}{TP+FN}$, $F_1 = \\frac{2PR}{P+R}$, the harmonic mean, so it is dominated by the weaker of the two. $\\mathrm{AUC} = \\Pr(s(x^+) > s(x^-))$, the area under TPR against FPR over all thresholds. F1 0.8548 at threshold 0.5 on roughly 68 test failures means precision and recall are both around the mid 0.8s or one is higher and the other lower; the split was not reported, which matters because a missed failure and a false alarm cost different amounts. AUC 0.9591 means about 96% of failure and non failure pairs are ordered correctly. At 3.39% prevalence ROC AUC can look strong while precision is weak, since false positive rate is divided by about 1,932 negatives; PR-AUC (average precision) is the better summary for a rare positive class, and it was not computed.",
+      "evidence": [
+        "repo:shopfloor-ai/README.md: | **Gradient Boosting** | **0.8548** | **0.9591** |",
+        "repo:shopfloor-ai/src/api/main.py: return {\"failure_prediction\": bool(proba >= 0.5),"
+      ],
+      "sources": [],
+      "tags": [
+        "metrics",
+        "f1",
+        "auc"
+      ]
+    },
+    {
+      "id": "sf-13",
+      "type": "concept",
+      "level": 1,
+      "q": "What threshold does the system use, and how should it be chosen?",
+      "easy": "It uses 0.5, the default. In maintenance the threshold should come from costs: if missing a failure costs much more than an extra inspection, you should flag at a much lower probability.",
+      "deep": "/predict returns failure_prediction = proba >= 0.5 and model selection used F1 at 0.5, so the operating point was never tuned. Decision theory: flag when $p\\,c_{FN} > (1-p)\\,c_{FP}$, so the cost optimal threshold for calibrated probabilities is $t^* = \\frac{c_{FP}}{c_{FP} + c_{FN}}$. As an illustration, not a project number: if an unplanned breakdown costs ten times an inspection, $t^* = 1/11 \\approx 0.09$. Two prerequisites: probabilities must be calibrated (gradient boosting and random forest are not by default, so fit Platt or isotonic calibration on held out data), and the threshold must be picked on validation data, not the test set. A capacity constrained alternative is to flag the top k riskiest runs per shift, which is where AUC and precision at k matter more than F1.",
+      "evidence": [
+        "repo:shopfloor-ai/src/api/main.py: return {\"failure_prediction\": bool(proba >= 0.5),"
+      ],
+      "sources": [],
+      "tags": [
+        "thresholds",
+        "decision theory",
+        "cost"
+      ]
+    },
+    {
+      "id": "sf-14",
+      "type": "case",
+      "level": 2,
+      "q": "What do F1 0.85 and AUC 0.96 mean for maintenance cost?",
+      "easy": "On their own, not much in money. Cost depends on how many real failures are missed and how many false alarms send someone to inspect a healthy machine, and on what each of those costs on a given shop floor.",
+      "deep": "Expected cost per run at threshold $t$: $C(t) = c_{FN}\\cdot FN(t) + c_{FP}\\cdot FP(t)$ (plus the cost of acting on true positives, often a planned tool change). F1 weighs FN and FP equally, which is rarely true in maintenance, where a missed failure means unplanned downtime, scrap, or damage while a false alarm is an inspection. So the right reporting is a confusion matrix at the chosen threshold, translated with plant specific costs, plus a curve of cost against threshold. A high AUC says a good threshold exists; it does not say the 0.5 threshold is it. And on AI4I, part of the score comes from features that mirror the generating rules, so any cost estimate here would be an exercise, not a forecast. The SOP bundled with the project sets a failure rate target under 3.5%, which is a process KPI, not a model metric.",
+      "evidence": [
+        "repo:shopfloor-ai/src/data/sop_documents.py: Target: < 3.5% overall",
+        "portfolio: Gradient Boosting F1 = 0.85",
+        "portfolio: AUC-ROC = 0.96"
+      ],
+      "sources": [],
+      "tags": [
+        "business impact",
+        "cost",
+        "metrics"
+      ]
+    },
+    {
+      "id": "sf-15",
+      "type": "pushback",
+      "level": 1,
+      "q": "Random Forest had the higher AUC. Why did you pick Gradient Boosting?",
+      "easy": "Because the selection rule was F1 at the default threshold, where gradient boosting led 0.8548 to 0.8387. That rule is defensible but not the only one, and with tuned thresholds random forest could win.",
+      "deep": "Concede: RF's AUC 0.9823 beats GB's 0.9591, meaning RF ranks failures better overall; F1 at 0.5 reflects one operating point, and the gap (0.016 F1) is small relative to the noise on about 68 test positives. Defend: a deployed classifier has to commit to a decision rule, and at the shipped rule GB made the better yes or no calls on the test set. The better procedure: tune each model's threshold on validation data (or by cross validation), compare at cost optimal or fixed recall operating points, report PR-AUC and the CV F1 already logged, and then choose. Tanay would run that before calling either the production model.",
+      "say": "Fair question. I selected on F1 at the default threshold, where Gradient Boosting edged it out. Random Forest ranked better, so after threshold tuning it might win, and the gap is small for about 68 test failures. Next time I'd tune thresholds on validation data and compare at the operating point I'd actually deploy.",
+      "evidence": [
+        "repo:shopfloor-ai/README.md: | **Gradient Boosting** | **0.8548** | **0.9591** |",
+        "repo:shopfloor-ai/README.md: | Random Forest | 0.8387 | 0.9823 |",
+        "repo:shopfloor-ai/src/ml/train.py: best_name = max(results, key=lambda k: results[k][\"f1\"])"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "model selection"
+      ]
+    },
+    {
+      "id": "sf-16",
+      "type": "pushback",
+      "level": 1,
+      "q": "0.85 F1 on a synthetic dataset where the failure rules are published. Isn't that meaningless?",
+      "easy": "As a claim about real machines, yes, and I say the dataset is synthetic. As evidence that the pipeline, features, and registry work end to end, it does its job.",
+      "deep": "Concede: AI4I's labels come from simple thresholds on temperature gap, speed, power, and wear times torque, and the engineered features compute those exact quantities, so the model partly rediscovers the generator. The SOP bundled in the repo even states the thresholds. No number transfers to a real plant. Defend: the write up lists the synthetic data as the first limitation, and the project's purpose was the platform: features shared by training and serving, MLflow tracking, a registry, a streaming layer, and RAG. What would make it meaningful: real MES or SCADA data, a time based split so the model predicts the future rather than interpolating, and failure labels that come from maintenance logs. That is the gap the follow up ZTF project set out to close by switching to a real public data stream.",
+      "say": "As a claim about real machines, it is meaningless, and I say the data is synthetic up front. My features mirror the rules that generated the labels, so the model is partly rediscovering them. I built it to get the platform right. My next project moved to real public data specifically because of this.",
+      "evidence": [
+        "portfolio: Synthetic dataset. AI4I is 10,000 synthetic records",
+        "portfolio: I designed this project to close the three gaps I listed as limitations in ShopFloor AI",
+        "repo:shopfloor-ai/src/data/sop_documents.py: threshold (11000 for L, 12000 for M, 13000 for H variants)."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "synthetic data"
+      ]
+    },
+    {
+      "id": "sf-17",
+      "type": "concept",
+      "level": 2,
+      "q": "How is the class imbalance handled?",
+      "easy": "Failures are only about 3.4% of rows. The split keeps that ratio in both halves, two of the three models weight failures more heavily, and F1 on the failure class is the selection metric instead of accuracy.",
+      "deep": "stratify=y keeps 3.39% in train and test. class_weight balanced on LogisticRegression and RandomForest; none on GradientBoosting, which learns the minority class only through the loss and depth. Accuracy is logged but meaningless: predicting no failure everywhere scores about 96.6%. Selection by F1 on the positive class is a reasonable default. Not done: threshold tuning, PR-AUC, resampling (SMOTE or undersampling), focal loss, or calibration. The consumer's streaming alert fires when the rolling failure rate exceeds 5%, while the bundled SOP targets under 3.5%, so the alert line sits above the documented target.",
+      "evidence": [
+        "repo:shopfloor-ai/src/ml/train.py: X, y, test_size=0.2, random_state=42, stratify=y,",
+        "repo:shopfloor-ai/src/ml/train.py: (\"clf\", LogisticRegression(max_iter=1000, class_weight=\"balanced\", random_state=42)),",
+        "repo:shopfloor-ai/src/ml/train.py: n_estimators=200, max_depth=12, min_samples_split=5,",
+        "portfolio: 10,000 records at a 3.39% failure rate, across five independent failure modes",
+        "repo:shopfloor-ai/src/streaming/consumer.py: if r.get(\"rolling_failure_rate\", 0) > 0.05 and can_alert(\"failure_high\"):",
+        "repo:shopfloor-ai/src/data/sop_documents.py: Target: < 3.5% overall"
+      ],
+      "sources": [],
+      "tags": [
+        "class imbalance"
+      ]
+    },
+    {
+      "id": "sf-18",
+      "type": "why",
+      "level": 2,
+      "q": "How confident should anyone be in the third decimal of these scores?",
+      "easy": "Not very. The test split has only about 68 failures, so a few changed predictions move F1 by a couple of points. The cross validation that would show the spread was run and logged but never reported.",
+      "deep": "With roughly 68 positives (3.39% of 2,000, stratified; arithmetic), one extra true positive or one fewer false positive shifts precision or recall by more than one percentage point, so F1 differences of 0.01 to 0.02 between models are within split noise. train.py computes 5 fold cross validated F1 on the training split for every model and logs cv_f1_mean and cv_f1_std to MLflow; those are the right numbers to compare models with, and reporting them with the holdout score would show the uncertainty. A bootstrap over the test set would give a confidence interval for each metric. The README's four decimal values are exact outputs of one split with random_state 42, which is reproducible but not the same as precise.",
+      "evidence": [
+        "repo:shopfloor-ai/src/ml/train.py: cv = cross_val_score(pipeline, X_train, y_train, cv=5, scoring=\"f1\")",
+        "repo:shopfloor-ai/src/ml/train.py: X, y, test_size=0.2, random_state=42, stratify=y,",
+        "repo:shopfloor-ai/README.md: | **Gradient Boosting** | **0.8548** | **0.9591** |"
+      ],
+      "sources": [],
+      "tags": [
+        "uncertainty",
+        "evaluation"
+      ]
+    },
+    {
+      "id": "sf-19",
+      "type": "how",
+      "level": 2,
+      "q": "What gets tracked in MLflow?",
+      "easy": "Every model run records its settings, scores, the trained model file, feature importances, and a classification report, so runs can be compared side by side and the winner registered.",
+      "deep": "Server: ghcr.io/mlflow/mlflow v2.16.0 with --backend-store-uri sqlite:///mlflow/db/mlflow.db (named volume) and --default-artifact-root /mlflow/artifacts (bind mounted from ./data/models). Per run: params model_type, n_features (16), n_train (8,000), dataset AI4I_2020, features (JSON list); metrics accuracy, precision, recall, f1, roc_auc, cv_f1_mean, cv_f1_std; artifacts: the sklearn pipeline via mlflow.sklearn.log_model with an input example of three test rows (which infers a signature), feature_importance.csv for tree models, classification_report.txt. Registered model name failure-predictor. The write up's '3 models tracked in MLflow' means three model types per training run, each its own MLflow run.",
+      "evidence": [
+        "repo:shopfloor-ai/docker-compose.yml: image: ghcr.io/mlflow/mlflow:v2.16.0",
+        "repo:shopfloor-ai/src/ml/train.py: mlflow.register_model(f\"runs:/{run_id}/model\", config[\"mlflow\"][\"model_name\"])"
+      ],
+      "sources": [
+        "https://mlflow.org/docs/latest/ml/model-registry/"
+      ],
+      "tags": [
+        "mlflow",
+        "experiment tracking"
+      ]
+    },
+    {
+      "id": "sf-20",
+      "type": "how",
+      "level": 1,
+      "q": "How does a model get promoted to serving?",
+      "easy": "After training, the script registers the best model as a new version in MLflow's registry. The API loads whichever version is newest when it starts. There is no separate approval step or production label.",
+      "deep": "train_and_evaluate(register_best=True): best_name by F1, then mlflow.search_runs filtered on params.model_type = best_name, ordered by metrics.f1 DESC, max 1, and mlflow.register_model('runs:/<run_id>/model', 'failure-predictor'), which creates a new version (version numbers increment). Serving: FastAPI's lifespan calls mlflow.sklearn.load_model('models:/failure-predictor/latest'), the newest version, once at startup; a newly registered version is only served after an API restart. Two subtleties: search_runs scans every run in the experiment, so it can register an older run of the same model type with a higher F1 than tonight's; and nothing sets a stage or alias. MLflow now deprecates stages in favor of aliases, and the standard pattern is to load models:/failure-predictor@champion and move the alias only after a gate passes, which separates 'registered' from 'deployed'.",
+      "evidence": [
+        "repo:shopfloor-ai/src/ml/train.py: order_by=[\"metrics.f1 DESC\"], max_results=1,",
+        "repo:shopfloor-ai/src/ml/train.py: mlflow.register_model(f\"runs:/{run_id}/model\", config[\"mlflow\"][\"model_name\"])",
+        "repo:shopfloor-ai/src/api/main.py: state.model = mlflow.sklearn.load_model(f\"models:/{state.config['mlflow']['model_name']}/latest\")"
+      ],
+      "sources": [
+        "https://mlflow.org/docs/latest/ml/model-registry/workflow/",
+        "https://mlflow.org/docs/latest/ml/model-registry/"
+      ],
+      "tags": [
+        "mlflow",
+        "model registry",
+        "deployment"
+      ]
+    },
+    {
+      "id": "sf-21",
+      "type": "why",
+      "level": 1,
+      "q": "Does the 0.80 F1 gate actually stop a bad model from being promoted?",
+      "easy": "Not as the code is written. The training step registers the new model before the gate is checked, and the API serves the newest registered version, so the gate's 'register' step only prints a message.",
+      "deep": "In retrain_dag.py, the train task calls train_and_evaluate(register_best=True), which already calls mlflow.register_model. should_register then returns 'register' if best F1 >= 0.80 else 'skip', and the register task only prints 'Registered ...'. The API loads models:/failure-predictor/latest, so after a restart it would serve whatever was registered, gate or no gate. The write up says a newly trained model must clear 0.80 F1 before it can be promoted so a bad batch never reaches production; that is the intended design, and the code needs two changes to deliver it: train with register_best=False and register (or move a champion alias) inside the register task, and have the API load by alias. A stronger gate also compares against the current champion on the same data, not just a fixed 0.80.",
+      "say": "Honestly, no. I found this reading my own code back. Training registers the model before the gate runs, and the API serves the latest version, so the gate's register step just prints. The fix is to register only inside the gated task and serve by an alias that moves only when the gate passes.",
+      "evidence": [
+        "repo:shopfloor-ai/src/airflow/dags/retrain_dag.py: results = train_and_evaluate(register_best=True)",
+        "repo:shopfloor-ai/src/airflow/dags/retrain_dag.py: return \"register\" if f1 and f1 >= 0.80 else \"skip\"",
+        "repo:shopfloor-ai/src/airflow/dags/retrain_dag.py: print(f\"Registered {model} (F1={f1:.4f})\")",
+        "repo:shopfloor-ai/src/api/main.py: state.model = mlflow.sklearn.load_model(f\"models:/{state.config['mlflow']['model_name']}/latest\")",
+        "portfolio: A newly trained model must clear a 0.80 F1 threshold in the nightly pipeline before it can be promoted, so a bad batch never reaches production."
+      ],
+      "sources": [
+        "https://mlflow.org/docs/latest/ml/model-registry/workflow/"
+      ],
+      "tags": [
+        "mlflow",
+        "airflow",
+        "bugs",
+        "quality gate"
+      ]
+    },
+    {
+      "id": "sf-22",
+      "type": "define",
+      "level": 2,
+      "q": "Define registered model, model version, stage, and alias in MLflow.",
+      "easy": "A registered model is a named slot. Each time you register into it, you get a new numbered version. Stages were fixed labels like Staging and Production. Aliases are movable named pointers to one version, such as champion.",
+      "deep": "register_model creates the registered model with version 1 if the name is new, otherwise a new version. Stages (None, Staging, Production, Archived) allowed one stage per version; MLflow's docs now say stages are deprecated and will be removed, replaced by version tags and aliases, and more than one alias can point at one version. Loading by URI: models:/name/<version>, models:/name@alias, and the stage form, now deprecated. This repo uses the 'latest' form, which always follows the newest version, so it cannot express 'trained but not yet approved'.",
+      "evidence": [],
+      "sources": [
+        "https://mlflow.org/docs/latest/ml/model-registry/workflow/",
+        "https://mlflow.org/docs/latest/ml/model-registry/"
+      ],
+      "tags": [
+        "mlflow",
+        "definitions"
+      ]
+    },
+    {
+      "id": "sf-23",
+      "type": "how",
+      "level": 2,
+      "q": "Walk me through the Airflow DAG.",
+      "easy": "Every night at 2 AM it checks the data, retrains all three models, decides whether the best one is good enough, and refreshes the document index for the chat assistant.",
+      "deep": "dag_id shopfloor_retrain, schedule '0 2 * * *', start_date 2026-07-01, catchup False, default_args retries 1 with a 5 minute delay. Tasks: check_data (PythonOperator) asserts at least 1,000 rows, no null targets, and more than one class, and pushes n_rows and failure_rate to XCom; train calls train_and_evaluate(register_best=True) and pushes best_model and best_f1; should_register (BranchPythonOperator) returns 'register' if best_f1 >= 0.80 else 'skip'; register prints; skip is an EmptyOperator; refresh_rag re ingests the SOPs with trigger_rule none_failed_min_one_success so it runs after whichever branch was taken (the default all_success would leave it skipped after a branch). The README says the quality gate also validates value ranges; the code checks row count, null targets, and class count only. Retraining nightly on a static CSV produces the same model each night, which makes the DAG a demonstration of the pattern rather than of new data arriving.",
+      "evidence": [
+        "repo:shopfloor-ai/src/airflow/dags/retrain_dag.py: schedule=\"0 2 * * *\", start_date=datetime(2026, 7, 1), catchup=False, tags=[\"ml\", \"shopfloor\"])",
+        "repo:shopfloor-ai/src/airflow/dags/retrain_dag.py: assert len(df) >= 1000, \"Not enough data\"",
+        "repo:shopfloor-ai/src/airflow/dags/retrain_dag.py: return \"register\" if f1 and f1 >= 0.80 else \"skip\"",
+        "repo:shopfloor-ai/src/airflow/dags/retrain_dag.py: trigger_rule=\"none_failed_min_one_success\"",
+        "repo:shopfloor-ai/README.md: **Data quality gate**: Validates row count, null targets, value ranges, and class distribution",
+        "portfolio: data-quality gate --> train --> evaluate --> promote --> RAG refresh"
+      ],
+      "sources": [
+        "https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dag-run.html"
+      ],
+      "tags": [
+        "airflow",
+        "orchestration"
+      ]
+    },
+    {
+      "id": "sf-24",
+      "type": "why",
+      "level": 3,
+      "q": "Would the Airflow services in docker-compose actually run the DAG as written?",
+      "easy": "There are configuration gaps that would likely stop it: the Airflow containers do not get the config file the training code reads, are not told where MLflow lives, and each keeps its own separate SQLite metadata file.",
+      "deep": "From docker-compose.yml: airflow-webserver and airflow-scheduler mount dags, data, and src, but not configs, while train.py, the RAG engine, and the producer all open configs/config.yaml by relative path. No MLFLOW_TRACKING_URI is set for the Airflow services, so training would default to localhost:5000, which inside the scheduler container is not the MLflow server. All three Airflow services point at sqlite:////opt/airflow/airflow.db inside their own container filesystem with no shared volume, so the init container's migration and admin user would not be visible to the webserver or scheduler. Airflow's docs say SQLite is for development only and should never be used in production; Tanay would also check whether this Airflow version accepts SQLite with LocalExecutor at all. refresh_rag would need OPENAI_API_KEY in the Airflow environment. These are worth verifying by bringing the stack up; the fixes are a shared Postgres for Airflow, mounted configs, and env vars for MLflow and OpenAI.",
+      "evidence": [
+        "repo:shopfloor-ai/docker-compose.yml: volumes: [\"./src/airflow/dags:/opt/airflow/dags\", \"./data:/opt/airflow/data\", \"./src:/opt/airflow/src\"]",
+        "repo:shopfloor-ai/docker-compose.yml: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: sqlite:////opt/airflow/airflow.db"
+      ],
+      "sources": [
+        "https://airflow.apache.org/docs/apache-airflow/stable/howto/set-up-database.html"
+      ],
+      "tags": [
+        "airflow",
+        "docker compose",
+        "bugs"
+      ]
+    },
+    {
+      "id": "sf-25",
+      "type": "how",
+      "level": 2,
+      "q": "How does the Kafka producer work?",
+      "easy": "It reads the dataset row by row, turns each row into JSON, and sends it to a sensor topic every half second, as if a machine were reporting readings live.",
+      "deep": "producer.py: kafka-python-ng KafkaProducer with JSON value serializer, string key serializer, acks all (wait for all in sync replicas; with one broker that is the leader). For each row: add _stream_index, send to shopfloor.sensor.raw keyed by product Type, flush every 50 records, sleep interval_sec (0.5 when run as a module). Arithmetic, not a measured run: replaying all 10,000 rows at 0.5 s takes about 5,000 s, roughly 83 minutes. Keying by Type means only three keys (L, M, H), so with several partitions the load would be skewed (L is 50% of rows) and per machine ordering would not be modeled; a machine or Product ID key would be the realistic choice. The record carries the Machine failure label and the failure mode flags, which a real sensor stream would not have.",
+      "evidence": [
+        "repo:shopfloor-ai/src/streaming/producer.py: producer.send(topic, key=str(record.get(\"Type\", \"L\")), value=record)",
+        "repo:shopfloor-ai/src/streaming/producer.py: acks=\"all\",",
+        "repo:shopfloor-ai/src/streaming/producer.py: stream(interval_sec=0.5)"
+      ],
+      "sources": [],
+      "tags": [
+        "kafka",
+        "producer",
+        "streaming"
+      ]
+    },
+    {
+      "id": "sf-26",
+      "type": "how",
+      "level": 2,
+      "q": "How does the consumer compute KPIs and alerts?",
+      "easy": "It keeps the last 100 readings, computes the rolling failure rate, average torque, and average temperature gap, and raises alerts when the failure rate passes 5%, torque passes 60 Nm, or tool wear passes 200 minutes, at most once a minute per alert type.",
+      "deep": "consumer.py: KafkaConsumer on shopfloor.sensor.raw, group shopfloor-consumer, auto_offset_reset latest (with no committed offset it starts at the end, so start it before the producer), JSON deserializer, kafka-python's default auto commit. StreamProcessor(window=100) uses a deque(maxlen=100): rolling_failure_rate, rolling_torque_avg, rolling_temp_diff_avg, window_size, processed_at. check_alerts: FAILURE_RATE_HIGH (CRITICAL) above 0.05, TORQUE_SPIKE (WARNING) above 60 Nm, TOOL_WEAR_HIGH (WARNING) above 200 min, each gated by a 60 second cooldown per alert type kept in a dict of timestamps. Alerts are JSON published to shopfloor.alerts by a second producer and logged. Computing the window over the full list each message is O(window) per record, fine at 100; at scale a running sum is O(1). The window lives in memory, so a restart loses it.",
+      "evidence": [
+        "repo:shopfloor-ai/src/streaming/consumer.py: proc = StreamProcessor(window=100)",
+        "repo:shopfloor-ai/src/streaming/consumer.py: if r.get(\"rolling_failure_rate\", 0) > 0.05 and can_alert(\"failure_high\"):",
+        "repo:shopfloor-ai/src/streaming/consumer.py: if t in self.cooldown and now - self.cooldown[t] < 60:",
+        "repo:shopfloor-ai/src/streaming/consumer.py: auto_offset_reset=\"latest\","
+      ],
+      "sources": [
+        "https://docs.confluent.io/kafka/design/delivery-semantics.html"
+      ],
+      "tags": [
+        "kafka",
+        "consumer",
+        "alerts"
+      ]
+    },
+    {
+      "id": "sf-27",
+      "type": "why",
+      "level": 2,
+      "q": "Does the streaming layer use the model, and is the rolling failure rate realistic?",
+      "easy": "No to both. The consumer never calls the model, and its failure rate is computed from the dataset's own failure labels, which a real sensor stream would not include at the time of reading.",
+      "deep": "StreamProcessor averages r['Machine failure'] over the window, the ground truth outcome carried in each replayed record. On a real line the failure label arrives after the fact (from maintenance logs or a stoppage), so a live KPI built from it is a lagging metric, not a predictive one. The write up says the streaming layer keeps predictions current; in the code, predictions only happen through /predict, and the consumer applies fixed thresholds on raw torque and tool wear. The realistic version scores each record with the registered model inside the consumer (or calls /predict), alerts on predicted risk, and joins actual failures later to monitor precision and recall over time.",
+      "evidence": [
+        "repo:shopfloor-ai/src/streaming/consumer.py: failures = [r.get(\"Machine failure\", 0) for r in w]",
+        "portfolio: a streaming layer keeps predictions current, and a RAG assistant answers from real SOPs."
+      ],
+      "sources": [],
+      "tags": [
+        "streaming",
+        "label leakage",
+        "design gap"
+      ]
+    },
+    {
+      "id": "sf-28",
+      "type": "define",
+      "level": 2,
+      "q": "Explain the Kafka settings this project uses: listeners, consumer groups, offset reset, keys, and acks.",
+      "easy": "Listeners are the addresses the broker tells clients to use. A consumer group shares the work of reading a topic and remembers its place. Offset reset says where to start when there is no saved place. Keys decide which partition a message goes to. acks says how many copies must confirm a write.",
+      "deep": "The broker advertises two listeners: PLAINTEXT://kafka:29092 for containers on the Compose network (the API uses KAFKA_BOOTSTRAP_SERVERS kafka:29092) and PLAINTEXT_HOST://localhost:9092 for the host, where make stream and make consume run; the inter broker listener is PLAINTEXT. Consumer group shopfloor-consumer: within a group each partition goes to one consumer, and committed offsets record progress. auto_offset_reset latest starts at the end when no offset is committed. Keys hash to partitions, so ordering holds per key. acks all waits for all in sync replicas; with replication factor 1 that is just the leader, so it adds no durability here. Delivery is at least once by default: a crash after processing but before the auto commit replays messages, which for a rolling window double counts them.",
+      "evidence": [
+        "repo:shopfloor-ai/docker-compose.yml: KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092",
+        "repo:shopfloor-ai/src/streaming/consumer.py: auto_offset_reset=\"latest\",",
+        "repo:shopfloor-ai/src/streaming/producer.py: acks=\"all\","
+      ],
+      "sources": [
+        "https://docs.confluent.io/kafka/design/delivery-semantics.html"
+      ],
+      "tags": [
+        "kafka",
+        "definitions"
+      ]
+    },
+    {
+      "id": "sf-29",
+      "type": "how",
+      "level": 1,
+      "q": "How does the RAG assistant work?",
+      "easy": "Six maintenance procedure documents are split into chunks, turned into vectors, and stored in ChromaDB. A question is turned into a vector, the four most relevant and varied chunks are fetched, and gpt-4o-mini answers from them, citing the document.",
+      "deep": "Ingest: get_sop_documents() returns six dicts (title, category, content) written in src/data/sop_documents.py; LangChain Documents carry title and category metadata; RecursiveCharacterTextSplitter(chunk_size 800, chunk_overlap 100) splits on paragraph, line, then word boundaries; OpenAIEmbeddings text-embedding-3-small; Chroma.from_documents into collection milling_sops on the Chroma server (HttpClient, with a PersistentClient fallback). Query: as_retriever(search_type mmr, k 4, fetch_k 8); RetrievalQA with chain_type 'stuff' (all four chunks concatenated into one prompt), return_source_documents True; ChatOpenAI gpt-4o-mini, temperature 0.1, max_tokens 1024. The prompt casts the model as a CNC milling assistant, tells it to use the context, to say so if the answer is not there and never invent specs, and to cite the source document. /ask returns the answer plus each source's title and a 200 character excerpt.",
+      "evidence": [
+        "repo:shopfloor-ai/src/rag/engine.py: splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)",
+        "repo:shopfloor-ai/src/rag/engine.py: self.embeddings = OpenAIEmbeddings(model=\"text-embedding-3-small\")",
+        "repo:shopfloor-ai/src/rag/engine.py: retriever = self.vectorstore.as_retriever(search_type=\"mmr\", search_kwargs={\"k\": 4, \"fetch_k\": 8})",
+        "repo:shopfloor-ai/src/rag/engine.py: llm=llm, chain_type=\"stuff\", retriever=retriever,",
+        "repo:shopfloor-ai/configs/config.yaml: model: \"gpt-4o-mini\"",
+        "repo:shopfloor-ai/configs/config.yaml: temperature: 0.1",
+        "portfolio: Bundled SOPs. RAG answers depend on the 6 shipped documents"
+      ],
+      "sources": [],
+      "tags": [
+        "rag",
+        "langchain",
+        "chromadb"
+      ]
+    },
+    {
+      "id": "sf-30",
+      "type": "define",
+      "level": 2,
+      "q": "Define RAG, embeddings, a vector store, chunking, and a stuff chain.",
+      "easy": "RAG means looking up relevant text first and giving it to the language model so it answers from that text. An embedding is a list of numbers that captures meaning. A vector store finds the stored chunks closest in meaning to a question. Chunking cuts documents into pieces small enough to retrieve. A stuff chain pastes all retrieved pieces into one prompt.",
+      "deep": "Retrieval augmented generation grounds a generator in retrieved evidence, which reduces hallucination on domain facts and lets content change without retraining. text-embedding-3-small maps text to a dense vector; similarity is usually cosine, $\\cos(u,v) = \\frac{u\\cdot v}{\\|u\\|\\|v\\|}$. ChromaDB stores vectors with metadata and runs approximate nearest neighbor search. Chunk size trades context per hit against precision: 800 characters with 100 overlap keeps a numbered SOP subsection mostly intact and avoids cutting a threshold sentence in half. The stuff chain is the simplest combine step; map reduce or refine chains exist for when retrieved text exceeds the context window, which four 800 character chunks never do.",
+      "evidence": [
+        "repo:shopfloor-ai/src/rag/engine.py: splitter = RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=100)",
+        "repo:shopfloor-ai/src/rag/engine.py: self.embeddings = OpenAIEmbeddings(model=\"text-embedding-3-small\")"
+      ],
+      "sources": [],
+      "tags": [
+        "rag",
+        "definitions"
+      ]
+    },
+    {
+      "id": "sf-31",
+      "type": "formula",
+      "level": 2,
+      "q": "What is MMR retrieval, and why use it here?",
+      "easy": "Maximal marginal relevance picks chunks that are relevant to the question but not too similar to chunks already picked, so the four results cover more ground instead of repeating one passage.",
+      "deep": "Greedy selection from the fetch_k = 8 nearest candidates: $\\mathrm{MMR} = \\arg\\max_{d_i \\in C \\setminus S}\\left[\\lambda\\, \\mathrm{sim}(d_i, q) - (1-\\lambda)\\max_{d_j \\in S} \\mathrm{sim}(d_i, d_j)\\right]$, repeated until $|S| = k = 4$; LangChain's default $\\lambda$ is 0.5 (lambda_mult), which the repo does not override. Why here: the six SOPs overlap heavily (the predictive maintenance protocol, temperature, and power documents all restate the failure thresholds), so plain top k would often return near duplicates of the same threshold list. MMR also partly masks a real bug: re ingesting appends duplicate chunks, and MMR's redundancy penalty keeps exact duplicates from filling all four slots. Tradeoff: with only 8 candidates and a 0.5 weight, a highly relevant second chunk from the same document can be dropped in favor of a less relevant one from another document.",
+      "evidence": [
+        "repo:shopfloor-ai/src/rag/engine.py: retriever = self.vectorstore.as_retriever(search_type=\"mmr\", search_kwargs={\"k\": 4, \"fetch_k\": 8})"
+      ],
+      "sources": [],
+      "tags": [
+        "mmr",
+        "retrieval",
+        "formula"
+      ]
+    },
+    {
+      "id": "sf-32",
+      "type": "why",
+      "level": 2,
+      "q": "What happens to the vector store when the nightly DAG re ingests the SOPs?",
+      "easy": "It adds a second copy of every chunk each time, because the ingest step never clears the collection or gives chunks fixed ids. After a week of nightly runs the store holds many copies of the same text.",
+      "deep": "RAGEngine.ingest calls Chroma.from_documents into the existing milling_sops collection with no ids and no delete, so each call appends new vectors with fresh ids. The Airflow refresh_rag task and the /rag/ingest endpoint both call it. Effects: storage and embedding cost grow linearly with runs; top k retrieval would return duplicates, which MMR partly hides; and a changed SOP's old chunks would stay retrievable alongside the new ones, so a superseded threshold could still be quoted. Fix: deterministic ids from a hash of (title, chunk index, content) with upsert, or delete the collection before re ingesting, and record a document version in metadata so answers can cite which revision they used.",
+      "evidence": [
+        "repo:shopfloor-ai/src/rag/engine.py: self.vectorstore = Chroma.from_documents(",
+        "repo:shopfloor-ai/configs/config.yaml: collection_name: \"milling_sops\""
+      ],
+      "sources": [],
+      "tags": [
+        "rag",
+        "bugs",
+        "idempotency"
+      ]
+    },
+    {
+      "id": "sf-33",
+      "type": "case",
+      "level": 2,
+      "q": "How would you evaluate the RAG assistant? What exists today?",
+      "easy": "Nothing measures it today; the tests only check that six documents exist with a title, a category, and enough text. I would write questions with known answers and known source documents, and score both the retrieval and the answers.",
+      "deep": "Retrieval: a set of question, gold document, gold passage triples (for example 'What power range triggers PWF?' with the Power and Torque SOP), scored by recall at 4 and MRR, comparing similarity search against MMR and chunk sizes. Generation: exact match or a rubric for numeric facts (3500 W, 9000 W, 8.6 K, 1380 rpm), faithfulness (every claim supported by a retrieved chunk), citation accuracy (the cited title is the gold one), and refusal on out of scope questions, which the prompt asks for. Regression: run it in CI on every prompt or chunking change. The SOPs were authored for this project, so a good score shows the plumbing; the write up's own limitation says organization specific documents would improve relevance.",
+      "evidence": [
+        "portfolio: Bundled SOPs. RAG answers depend on the 6 shipped documents",
+        "repo:shopfloor-ai/README.md: Runs 15 unit tests covering data loading, feature engineering, streaming logic, and SOP document structure."
+      ],
+      "sources": [],
+      "tags": [
+        "rag",
+        "evaluation"
+      ]
+    },
+    {
+      "id": "sf-34",
+      "type": "pushback",
+      "level": 2,
+      "q": "Six documents. Why ChromaDB, LangChain, and an embedding model at all?",
+      "easy": "For six documents you could paste everything into the prompt. The vector store is there to learn and show the pattern that matters once there are thousands of documents, and I'd say that directly.",
+      "deep": "Concede: the six SOPs together are a few thousand words, which fits in gpt-4o-mini's context window; full context stuffing would be simpler, cheaper to operate, and could answer more accurately because nothing is missed by retrieval. Defend: the pattern (chunking, embeddings, metadata for citation, MMR, a retrieval chain behind an API) is what an organization's real document set needs, the write up names the six bundled documents as a limitation, and the retrieval step gives citations per chunk. What Tanay would add before arguing retrieval beats stuffing: the evaluation above, run against a full context baseline.",
+      "say": "Fair. Six documents fit in the prompt, and stuffing them all in would probably answer just as well. I built the retrieval pattern because that's what a real document set needs, and my write up names the six bundled documents as a limitation. Before claiming retrieval helps, I'd evaluate it against a full context baseline.",
+      "evidence": [
+        "portfolio: Bundled SOPs. RAG answers depend on the 6 shipped documents"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "rag"
+      ]
+    },
+    {
+      "id": "sf-35",
+      "type": "how",
+      "level": 2,
+      "q": "Describe the FastAPI service.",
+      "easy": "It loads the model and the chat chain when it starts, then offers endpoints to predict failure from sensor readings, ask a question, re index the documents, and check health.",
+      "deep": "Lifespan context manager: read config, set the MLflow URI from env, load models:/failure-predictor/latest (a warning, not a crash, if it fails), build the RAG chain (also tolerant). GET /health returns model and rag readiness. POST /predict takes SensorInput, a pydantic model whose fields carry the dataset's column names as aliases with defaults (300 K, 310 K, 1500 rpm, 40 Nm, 100 min, M) and populate_by_name; it builds a one row DataFrame, runs engineer_features, takes predict_proba, and returns failure_prediction (proba >= 0.5), failure_probability rounded to 4 places, and rule based risk_factors: wear above 200, power outside 3500 to 9000 W, HDF when temp gap < 8.6 K and rpm < 1380, torque above 55 Nm. POST /ask returns 503 if the chain is not ready. POST /rag/ingest re embeds. CORS allows all origins. Endpoints are async def but call blocking sklearn and OpenAI code, which blocks the event loop; plain def handlers would run in the threadpool.",
+      "evidence": [
+        "repo:shopfloor-ai/src/api/main.py: state.model = mlflow.sklearn.load_model(f\"models:/{state.config['mlflow']['model_name']}/latest\")",
+        "repo:shopfloor-ai/src/api/main.py: return {\"failure_prediction\": bool(proba >= 0.5),",
+        "repo:shopfloor-ai/src/api/main.py: if temp_diff < 8.6 and sensor.rpm < 1380:"
+      ],
+      "sources": [
+        "https://fastapi.tiangolo.com/advanced/events/"
+      ],
+      "tags": [
+        "fastapi",
+        "serving"
+      ]
+    },
+    {
+      "id": "sf-36",
+      "type": "why",
+      "level": 3,
+      "q": "Is there any train and serve skew in the prediction API?",
+      "easy": "Yes, one real bug. The product grade is turned into a number by a label encoder that is refit on each request's single row, so at serving time every grade becomes 0, which during training meant grade H.",
+      "deep": "engineer_features calls LabelEncoder().fit_transform(df['Type']) inside the function. On the 10,000 row training frame the classes sort to H = 0, L = 1, M = 2. In /predict the frame has one row, so the encoder sees one class and maps it to 0, which the model reads as H whatever grade was sent. Because OSF limits differ by grade (11,000 for L, 12,000 for M, 13,000 for H minNm), serving everything as H understates overstrain risk for L and M parts. Sharing one feature function between training and serving was the right instinct; the fix is to make the encoding stateless (a fixed mapping {L: 0, M: 1, H: 2}) or fit the encoder in the training pipeline and log it with the model, plus a test that scores the same row through both paths and compares.",
+      "evidence": [
+        "repo:shopfloor-ai/src/ml/features.py: df[\"type_encoded\"] = le.fit_transform(df[\"Type\"])",
+        "repo:shopfloor-ai/src/data/sop_documents.py: threshold (11000 for L, 12000 for M, 13000 for H variants)."
+      ],
+      "sources": [],
+      "tags": [
+        "train serve skew",
+        "bugs",
+        "features"
+      ]
+    },
+    {
+      "id": "sf-37",
+      "type": "how",
+      "level": 1,
+      "q": "What is the 7 service Docker Compose topology?",
+      "easy": "Kafka and its coordinator Zookeeper, the MLflow tracking server, the ChromaDB vector database, Airflow, the FastAPI backend, and the Streamlit dashboard. The compose file has nine entries because Airflow is split into a setup step, a web server, and a scheduler.",
+      "deep": "docker-compose.yml services: zookeeper (cp-zookeeper 7.6.0, 2181); kafka (cp-kafka 7.6.0, 9092 host and 29092 internal, auto topic creation, offsets replication factor 1); mlflow (v2.16.0, 5000, SQLite store, artifacts bind mounted); chromadb (0.5.0, 8000, persisted to ./data/vectordb); airflow-init (db migrate, admin user); airflow-webserver (8080); airflow-scheduler; api (built from the python 3.11 slim Dockerfile, 8001, uvicorn with reload, depends on kafka, mlflow, chromadb); dashboard (same image, 8501, depends on api). Counting Airflow as one gives seven, which matches the write up; the producer and consumer are not containers and run from the host. depends_on orders startup but does not wait for readiness, which is why the API tolerates a missing model or chain at startup.",
+      "evidence": [
+        "portfolio: The three parts run as seven containerized services rather than a notebook.",
+        "repo:shopfloor-ai/docker-compose.yml: ports: [\"5000:5000\"]",
+        "repo:shopfloor-ai/docker-compose.yml: image: chromadb/chroma:0.5.0",
+        "repo:shopfloor-ai/docker-compose.yml: KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092"
+      ],
+      "sources": [],
+      "tags": [
+        "docker compose",
+        "infrastructure"
+      ]
+    },
+    {
+      "id": "sf-38",
+      "type": "why",
+      "level": 2,
+      "q": "What doesn't match between the write up, the README, and the repo?",
+      "easy": "A few small things: the MLflow port, the CI workflow, the environment template, and two descriptions of what the pipeline does.",
+      "deep": "(1) The write up and README list MLflow at :5001, while docker-compose maps 5000:5000, config.yaml uses localhost:5000, and make up prints 5000. (2) The write up and README mention GitHub Actions CI and the README tree shows .github/workflows/ci.yml, but no .github directory is in the repository. (3) make setup copies .env.example, which is not in the repository either. (4) The README says the data quality gate checks value ranges; the DAG does not. (5) The write up says the streaming layer keeps predictions current and the gate keeps a bad batch out of production; the code does neither as written (see the streaming and gate cards). (6) The README tree marks the dataset as gitignored, but there is no .gitignore. None changes a reported number; each is a credibility detail an interviewer who opens the repo could notice, so it is better raised first.",
+      "evidence": [
+        "portfolio: Services come up on these ports: dashboard (:8501), API docs (:8001/docs), MLflow (:5001), Airflow (:8080).",
+        "repo:shopfloor-ai/docker-compose.yml: ports: [\"5000:5000\"]",
+        "repo:shopfloor-ai/README.md: # GitHub Actions CI",
+        "portfolio: A 15-test suite (make test) and GitHub Actions CI cover data loading, feature engineering, streaming, and SOP structure.",
+        "repo:shopfloor-ai/README.md: **Data quality gate**: Validates row count, null targets, value ranges, and class distribution"
+      ],
+      "sources": [],
+      "tags": [
+        "consistency",
+        "documentation"
+      ]
+    },
+    {
+      "id": "sf-39",
+      "type": "how",
+      "level": 2,
+      "q": "What do the 15 tests cover, and what do they miss?",
+      "easy": "They check the dataset loads with the right shape and columns, the features have no gaps and sensible power values, the streaming alert rules fire, and the six documents are well formed. They do not test training, the API, the registry, the DAG, or the RAG answers.",
+      "deep": "tests/test_core.py: TestDataDownload (5): 10,000 rows, required columns, every failure mode present, types exactly L, M, H, schema info; TestFeatures (4): shape and at least 10 columns, no NaNs, engineered columns exist, power_W between 0 and 20,000; TestStreaming (4): processor adds rolling fields, FAILURE_RATE_HIGH after five failures, TORQUE_SPIKE at 70 Nm, TOOL_WEAR_HIGH at 220 min; TestSOPs (2): at least 5 documents, each with title, category, and over 200 characters. Data tests download the dataset on first run, so they need network access. Missing and highest value: a serving parity test (the same row through training features and /predict, which would have caught the label encoder bug), a gate test asserting nothing is registered below 0.80, a FastAPI TestClient test of /predict with a stub model, and a cooldown test for alerts.",
+      "evidence": [
+        "repo:shopfloor-ai/README.md: Runs 15 unit tests covering data loading, feature engineering, streaming logic, and SOP document structure.",
+        "portfolio: A 15-test suite (make test) and GitHub Actions CI cover data loading, feature engineering, streaming, and SOP structure."
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "pytest"
+      ]
+    },
+    {
+      "id": "sf-40",
+      "type": "how",
+      "level": 2,
+      "q": "What does the dashboard show?",
+      "easy": "Four pages: overall KPIs and failure charts from the dataset, a slider form that calls the prediction API, a chat page for the document assistant, and a page of rolling averages labeled as drift monitoring.",
+      "deep": "Streamlit app reading API_URL from env. KPI page: total units, failure rate, mean torque, mean tool wear; failure mode counts; failure rate by Type; rpm against torque colored by failure; tool wear histogram by failure (Plotly, dark template). Predictor: sliders for the five sensors and a Type select, posts to /predict, shows probability and risk factors. Chat: session state history, posts to /ask, shows sources in an expander, plus quick question buttons. Drift Monitor: 200 row rolling means of torque and tool wear over the static CSV, captioned that upward trends signal data drift.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "streamlit",
+        "dashboard"
+      ]
+    },
+    {
+      "id": "sf-41",
+      "type": "pushback",
+      "level": 2,
+      "q": "Your drift monitor is a rolling mean of a static CSV. That isn't drift detection.",
+      "easy": "Agreed. It shows the shape of two sensors over the dataset's row order. It does not compare live data against the training distribution, and tool wear in this dataset rises and resets by design, so an upward trend there is normal.",
+      "deep": "Concede: the page plots 200 row rolling means of torque and tool wear from data/raw/ai4i2020.csv; no reference window, no statistic, no threshold, and nothing reads the Kafka stream. Tool wear accumulates per tool and resets at replacement, so its rolling mean trending up is the generator, not drift. Real drift detection compares a recent window to the training distribution per feature with PSI or a KS test, watches the predicted failure rate, and once labels arrive, the model's precision and recall. This gap is one of the things Tanay built properly in the follow up ZTF pipeline, which computes PSI on the prediction distribution from a tested monitoring table.",
+      "say": "Agreed, it isn't. It's a rolling average of the static dataset, and tool wear rising is just how the data was generated. Real drift detection compares recent data to the training distribution with something like PSI. I built that properly in my next project.",
+      "evidence": [
+        "portfolio: I designed this project to close the three gaps I listed as limitations in ShopFloor AI"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "drift",
+        "monitoring"
+      ]
+    },
+    {
+      "id": "sf-42",
+      "type": "pushback",
+      "level": 2,
+      "q": "Seven services for 10,000 rows is over engineered.",
+      "easy": "For the data volume, yes. The services exist because each is a part of a real ML platform I wanted to wire together and learn: tracking and registry, orchestration, streaming, a vector store, an API, and a UI.",
+      "deep": "Concede: a notebook plus a pickled model would score this dataset just as well, the stream is replayed, and running Kafka, Zookeeper, MLflow, ChromaDB, three Airflow processes, an API, and a dashboard on a laptop costs memory and start up complexity, and several of the integrations show gaps when read closely (the gate, the Airflow config, the streaming label). Defend: the write up says the interesting engineering is everything around the model, and each service maps to a production concern: training and serving separated by a registry, scheduled retraining, a stream for operational KPIs, and retrieval over documents. The honest lesson Tanay took forward: wire fewer pieces and verify each one with a test, which is how the ZTF pipeline was built.",
+      "say": "For 10,000 rows, yes. I built it to learn how the platform pieces fit: registry, orchestration, streaming, retrieval. Reading it back, a few of the seams don't hold as written, like the promotion gate. The lesson I took into my next project was fewer pieces, each one verified.",
+      "evidence": [
+        "portfolio: The three parts run as seven containerized services rather than a notebook.",
+        "portfolio: 10,000 records at a 3.39% failure rate, across five independent failure modes"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "architecture"
+      ]
+    },
+    {
+      "id": "sf-43",
+      "type": "pushback",
+      "level": 1,
+      "q": "Your write up says a model must clear 0.80 F1 before promotion. Show me where that's enforced.",
+      "easy": "It isn't enforced as written, and I'd say so before you found it. The training task registers the model before the gate branch, and the API loads the newest version, so the gate only decides whether a print statement runs.",
+      "deep": "Concede: retrain_dag.py's train task calls train_and_evaluate(register_best=True), which registers; should_register then chooses between a register task that prints and an EmptyOperator; the API loads models:/failure-predictor/latest. So a model under 0.80 would still become the newest version. Defend what is right: the DAG structure (quality check, train, branch on a metric, conditional promotion, downstream refresh with the correct trigger rule) is the right shape, and the gate threshold is pulled from XCom correctly. Fix: register_best=False in train, register and set a champion alias inside the register task, serve models:/failure-predictor@champion, and add a test that a sub threshold run leaves the alias untouched.",
+      "say": "It's not enforced, and I'd rather tell you than have you find it. Training registers before the branch, and the API loads the latest version, so the gate just decides whether a print runs. The DAG shape is right. The fix is registering only in the gated task and serving by a champion alias.",
+      "evidence": [
+        "repo:shopfloor-ai/src/airflow/dags/retrain_dag.py: results = train_and_evaluate(register_best=True)",
+        "repo:shopfloor-ai/src/airflow/dags/retrain_dag.py: print(f\"Registered {model} (F1={f1:.4f})\")",
+        "portfolio: A newly trained model must clear a 0.80 F1 threshold in the nightly pipeline before it can be promoted, so a bad batch never reaches production.",
+        "repo:shopfloor-ai/src/api/main.py: state.model = mlflow.sklearn.load_model(f\"models:/{state.config['mlflow']['model_name']}/latest\")"
+      ],
+      "sources": [
+        "https://mlflow.org/docs/latest/ml/model-registry/workflow/"
+      ],
+      "tags": [
+        "pushback",
+        "quality gate",
+        "mlflow"
+      ]
+    },
+    {
+      "id": "sf-44",
+      "type": "pushback",
+      "level": 2,
+      "q": "Why classical ML and not a neural network or a time series model?",
+      "easy": "Because the data is a table of independent rows with 16 features, where tree ensembles are the standard strong baseline, and AI4I has no real time order per machine to model.",
+      "deep": "Tabular data with a few thousand rows of signal and threshold shaped decision boundaries is where gradient boosted trees reliably match or beat neural networks, train in seconds, and need no feature scaling. AI4I rows are separate processes rather than a per machine sensor history, so sequence models (LSTMs, temporal convolutions) have nothing to exploit; on real equipment with continuous sensor histories, remaining useful life models and sequence features become the right choice. Logistic regression was included as the linear baseline and showed why the interactions matter.",
+      "say": "It's a table of independent rows, so boosted trees are the strong baseline and they train in seconds. There's no per machine history in AI4I for a sequence model to use. On real equipment with sensor histories, I'd look at remaining useful life models.",
+      "evidence": [
+        "repo:shopfloor-ai/README.md: | Logistic Regression | 0.3054 | 0.9455 |"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "model choice"
+      ]
+    },
+    {
+      "id": "sf-45",
+      "type": "why",
+      "level": 2,
+      "q": "What went wrong, looking back?",
+      "easy": "The parts each work on their own, but several connections between them do not do what the write up says: the promotion gate, the streaming predictions, the grade encoding at serving time, and the Airflow container setup.",
+      "deep": "Reading the code back: (1) the 0.80 gate does not block registration and the API serves latest; (2) the consumer never calls the model and computes its failure rate from ground truth labels; (3) the label encoder refit per request maps every grade to H at serving; (4) the Airflow containers lack configs, the MLflow URI, and a shared metadata database; (5) nightly RAG refresh duplicates every chunk; (6) the CI workflow and .env.example referenced in docs are not in the repo, and the MLflow port is documented as 5001 but mapped to 5000; (7) the drift page is a rolling mean of a static file. The pattern is integration claims without integration tests. That diagnosis is what shaped the next project: the ZTF pipeline lists closing ShopFloor's gaps as its purpose, runs on real data through a real broker, and has a tested warehouse layer.",
+      "say": "Each piece worked alone, but the seams between them didn't do what I claimed. The promotion gate didn't gate, the stream didn't use the model, and serving encoded every product grade the same way. The common cause was no integration tests, and fixing that was the whole point of my next project.",
+      "evidence": [
+        "repo:shopfloor-ai/src/airflow/dags/retrain_dag.py: results = train_and_evaluate(register_best=True)",
+        "repo:shopfloor-ai/src/streaming/consumer.py: failures = [r.get(\"Machine failure\", 0) for r in w]",
+        "repo:shopfloor-ai/src/ml/features.py: df[\"type_encoded\"] = le.fit_transform(df[\"Type\"])",
+        "portfolio: I designed this project to close the three gaps I listed as limitations in ShopFloor AI"
+      ],
+      "sources": [],
+      "tags": [
+        "what went wrong",
+        "lessons"
+      ]
+    },
+    {
+      "id": "sf-46",
+      "type": "compare",
+      "level": 2,
+      "q": "Compare ShopFloor AI with the ZTF pipeline that followed it.",
+      "easy": "ShopFloor used a synthetic dataset, a replayed stream with no warehouse, and a model with no real baseline. ZTF moved to real public telescope alerts over a real broker, added a tested warehouse layer, and was more careful about what it claimed.",
+      "deep": "ShopFloor: AI4I synthetic table, Kafka replay of CSV rows as JSON, MLflow registry, nightly Airflow retrain, LangChain RAG, F1 and AUC headline numbers, 15 tests, several integration gaps. ZTF (by the write up, designed to close ShopFloor's three listed limitations): real ZTF Avro alerts replayed through a real Kafka broker, a dbt warehouse with 21 data tests and source freshness, PSI drift monitoring, CI that builds the warehouse, and an explicit statement that its classifier is a placeholder with no accuracy claim. The comparison is a good interview arc: the first project chased a model number on synthetic data; the second treated data contracts and honest claims as the deliverable.",
+      "evidence": [
+        "portfolio: I designed this project to close the three gaps I listed as limitations in ShopFloor AI",
+        "portfolio: Synthetic dataset. AI4I is 10,000 synthetic records"
+      ],
+      "sources": [],
+      "tags": [
+        "comparison",
+        "ztf"
+      ]
+    },
+    {
+      "id": "sf-47",
+      "type": "case",
+      "level": 3,
+      "q": "What would production need, and what breaks at 10x and 100x?",
+      "easy": "Real machine data from shop floor systems, predictions on the stream itself, a model gate that actually gates, monitoring that compares live data with training data, and infrastructure that is not one laptop.",
+      "deep": "Production: MES or SCADA connectors (OPC UA or MQTT into Kafka), per machine keys and event time, labels joined later from maintenance logs, a time based train and test split, calibrated probabilities with a cost based threshold, an alias based registry promotion with champion versus challenger comparison, feature parity tests, PSI or KS drift per feature, and secrets management for the OpenAI key. 10x (100,000 rows or 10 machines streaming): fine for training; the consumer's per message window scan and single process are still fine; MLflow on SQLite starts to strain under concurrent writes, move to Postgres. 100x (millions of events a day across a plant): partition topics by machine and run a consumer group, compute windows with a stream processor (Kafka Streams, Flink, or Spark Structured Streaming) with state stores so a restart does not lose them, serve the model behind a batching model server, move MLflow artifacts to object storage (the write up's planned S3 backed MLflow on ECS), and replace Compose with an orchestrator.",
+      "evidence": [
+        "portfolio: Planned. SHAP explanations in the prediction API, multi model A/B testing in the DAG, WebSocket live dashboard updates, and AWS ECS deployment with S3 backed MLflow storage."
+      ],
+      "sources": [],
+      "tags": [
+        "production",
+        "scale",
+        "system design"
+      ]
+    },
+    {
+      "id": "sf-48",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next?",
+      "easy": "Fix the seams first: make the gate real, serve by alias, fix the grade encoding, score inside the stream. Then add the evaluation the project lacks, and only then the planned features.",
+      "deep": "Order: (1) gate and registry: register only in the gated task, champion alias, API loads by alias, test it; (2) serving parity: stateless Type mapping and a test running one row through both paths; (3) streaming: score each record with the registered model in the consumer and alert on predicted risk, drop the label based KPI or mark it lagging; (4) evaluation: report cross validated F1 and PR-AUC, tune thresholds on validation data, compare models at a cost based operating point; (5) RAG: idempotent upserts and a small question set with gold sources; (6) infra: mount configs and env into Airflow, Postgres for Airflow and MLflow, restore the CI workflow. Then the write up's planned items: SHAP explanations in /predict, A/B testing of models in the DAG, WebSocket dashboard updates, and ECS with S3 backed MLflow.",
+      "evidence": [
+        "portfolio: Planned. SHAP explanations in the prediction API, multi model A/B testing in the DAG, WebSocket live dashboard updates, and AWS ECS deployment with S3 backed MLflow storage."
+      ],
+      "sources": [],
+      "tags": [
+        "roadmap",
+        "next steps"
+      ]
+    },
+    {
+      "id": "sf-49",
+      "type": "define",
+      "level": 1,
+      "q": "Define predictive maintenance, OEE, MES, and SCADA.",
+      "easy": "Predictive maintenance means fixing equipment based on signs it is about to fail rather than on a fixed calendar or after it breaks. OEE is a standard measure of how productive a machine is. MES and SCADA are the factory software systems that collect production and sensor data.",
+      "deep": "Predictive maintenance sits between reactive (run to failure) and preventive (fixed interval) maintenance: act when a model or rule says failure is near, trading inspection cost against downtime. OEE = Availability x Performance x Quality, and the bundled SOP sets a target of at least 85%. MES (manufacturing execution system) tracks orders, units, and quality on the floor; SCADA (supervisory control and data acquisition) collects sensor and PLC data from equipment. The write up's limitation says a production deployment would integrate real MES and SCADA feeds instead of the synthetic AI4I table.",
+      "evidence": [
+        "portfolio: Synthetic dataset. AI4I is 10,000 synthetic records"
+      ],
+      "sources": [],
+      "tags": [
+        "definitions",
+        "manufacturing"
+      ]
+    },
+    {
+      "id": "sf-50",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain ShopFloor AI to a hiring manager for an ML engineering role.",
+      "easy": "A full ML platform on a public predictive maintenance benchmark: training with tracking and a registry, an API, a stream, retrieval over documents, nightly retraining. Honest about the synthetic data and the seams that need work.",
+      "deep": "Lead with the platform and the 0.85 F1 with its synthetic caveat in the same sentence, then the registry and DAG, then what reading it back revealed and how that shaped the next project.",
+      "say": "ShopFloor AI predicts machine failures, streams sensor KPIs through Kafka, and answers maintenance questions with RAG, all as one Docker Compose stack. My gradient boosting model reached 0.85 F1 on the AI4I benchmark, which is synthetic, so I treat that as a pipeline check. Reading it back, I found the promotion gate didn't actually gate. Fixing that kind of integration gap is what my next project was built around.",
+      "evidence": [
+        "portfolio: Gradient Boosting F1 = 0.85",
+        "portfolio: Synthetic dataset. AI4I is 10,000 synthetic records"
+      ],
+      "sources": [],
+      "tags": [
+        "narration",
+        "hiring manager"
+      ]
+    },
+    {
+      "id": "sf-51",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the training to serving path to a staff engineer.",
+      "easy": "Shared feature function, MLflow registration by best F1, API loads latest at startup. Then name the three defects in that path.",
+      "deep": "Features in one function used by train and serve; three pipelines logged per run; best F1 registered; API lifespan loads models:/name/latest; defects: registration before the gate, latest instead of an alias, and a label encoder refit per request.",
+      "say": "Training and serving share one feature function, which was the right call. Training logs three pipelines to MLflow and registers the best by F1, and the API loads the latest version at startup. Three things are wrong in that path. Registration happens before the gate. Serving uses latest instead of an alias. And the grade encoder is refit on each one row request, so every grade becomes the same number.",
+      "evidence": [
+        "repo:shopfloor-ai/src/api/main.py: state.model = mlflow.sklearn.load_model(f\"models:/{state.config['mlflow']['model_name']}/latest\")",
+        "repo:shopfloor-ai/src/ml/features.py: df[\"type_encoded\"] = le.fit_transform(df[\"Type\"])",
+        "repo:shopfloor-ai/src/airflow/dags/retrain_dag.py: results = train_and_evaluate(register_best=True)"
+      ],
+      "sources": [],
+      "tags": [
+        "narration",
+        "staff engineer"
+      ]
+    },
+    {
+      "id": "sf-52",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain it to a product manager.",
+      "easy": "Machines fail, and the plant wants warning before they do. The system scores each run for failure risk, raises alerts on a live feed, and lets operators ask how to handle a problem.",
+      "deep": "Frame the user value: fewer surprise breakdowns, faster answers from procedures. Say the data is a public simulation and the alert threshold should be set from the cost of a missed failure versus an extra inspection.",
+      "say": "The goal is fewer surprise breakdowns. The system scores each machining run for failure risk, watches a live feed for warning signs, and answers operators' questions from the maintenance procedures. It's built on a public simulated dataset, so the next real step is plant data. And the alert threshold should come from what a missed failure costs compared with an extra inspection.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narration",
+        "pm"
+      ]
+    },
+    {
+      "id": "sf-53",
+      "type": "narrate",
+      "level": 2,
+      "q": "Give the recruiter version in under a minute.",
+      "easy": "Tanay built a factory AI platform that predicts machine failures, streams sensor data, and answers questions about maintenance documents, using MLflow, Kafka, Airflow, FastAPI, and LangChain.",
+      "deep": "One number with its caveat, the tool names, and the follow up project.",
+      "say": "I built a manufacturing AI platform: it predicts machine failures, streams sensor data through Kafka, and has a chat assistant over maintenance documents. My best model hit 0.85 F1 on a public benchmark dataset. It uses MLflow, Airflow, FastAPI, Docker, and LangChain. My next project took the same ideas onto real public data.",
+      "evidence": [
+        "portfolio: Gradient Boosting F1 = 0.85"
+      ],
+      "sources": [],
+      "tags": [
+        "narration",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "UCI: AI4I 2020 Predictive Maintenance Dataset",
+      "url": "https://archive.ics.uci.edu/dataset/601/ai4i+2020+predictive+maintenance+dataset",
+      "why": "The dataset's size, license, and the exact rules that generate each failure mode."
+    },
+    {
+      "title": "MLflow Model Registry",
+      "url": "https://mlflow.org/docs/latest/ml/model-registry/",
+      "why": "Registered models, versions, and aliases such as models:/name@champion."
+    },
+    {
+      "title": "MLflow Model Registry workflows",
+      "url": "https://mlflow.org/docs/latest/ml/model-registry/workflow/",
+      "why": "register_model creates new versions; stages are deprecated in favor of aliases and tags."
+    },
+    {
+      "title": "Airflow: Set up a database backend",
+      "url": "https://airflow.apache.org/docs/apache-airflow/stable/howto/set-up-database.html",
+      "why": "SQLite is for development only and should never be used in production."
+    },
+    {
+      "title": "Airflow: DAG runs",
+      "url": "https://airflow.apache.org/docs/apache-airflow/stable/core-concepts/dag-run.html",
+      "why": "Schedules, logical dates, and catchup behind the nightly 2 AM retrain."
+    },
+    {
+      "title": "Confluent: Kafka message delivery semantics",
+      "url": "https://docs.confluent.io/kafka/design/delivery-semantics.html",
+      "why": "At least once by default and how commit order affects a rolling window consumer."
+    },
+    {
+      "title": "FastAPI: Lifespan events",
+      "url": "https://fastapi.tiangolo.com/advanced/events/",
+      "why": "The lifespan pattern the API uses to load the model before serving."
+    }
+  ]
+}
