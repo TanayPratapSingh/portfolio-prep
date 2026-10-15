@@ -1,0 +1,1163 @@
+{
+  "deck_id": "p-orderbook-microstructure",
+  "title": "Order Book Microstructure",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/orderbook-microstructure",
+  "summary_easy": "A live browser page that rebuilds Kraken's BTC/USD order book from a snapshot and about 142 updates a second, and checks it against the exchange's own checksum after every update, rebuilding from a fresh copy if a check ever fails. From that verified copy it measures how buying pressure moves the price and how volatile the price is. In a 330 second run all 46,892 checksums matched.",
+  "summary_deep": "A pure module, book/book.js, runs Kraken's v2 WebSocket protocol: instrument channel first for price and size precision, then the book channel at depth 100 and trades. Each side is a pair of sorted arrays with binary search, truncated to 100 levels after every message, and verified against a CRC32 over the top 10 levels per side formatted at the instrument's precision; a mismatch unsubscribes and resubscribes the book and excludes the affected second from statistics. On exchange time it computes mid, spread, size weighted microprice and top of book imbalance, order flow imbalance per Cont, Kukanov and Stoikov (2014) regressed on per second mid changes by OLS over 300 seconds, and realized volatility at 1 s and 10 s sampling with a sampling error test on their gap. A node run of the same module verified 46,892 of 46,892 checksums at about 142 updates a second, found an OFI slope of 1.10 USD per BTC with R squared 0.54, and measured volatility reversed from the noise prediction (27.0% at 1 s against 31.9% at 10 s). No checksum mismatched naturally, so recovery is evidenced by the test suite rather than live logs.",
+  "sheet": {
+    "easy": "## What it is\n- A live page that keeps its own copy of Kraken's BTC/USD **order book** (who is waiting to buy and sell, at what price, how much), in the browser.\n- The exchange sends one full copy, then only changes, about **142 a second**.\n- After every change the page checks its copy against the exchange's **checksum** (a CRC32 fingerprint of the top 10 levels each side). On a mismatch it rebuilds from a fresh copy.\n- Only from a verified copy does it compute market statistics.\n\n## The numbers (node runs of the same code, Oct 8 2026)\n| What | Result | Caveat |\n| --- | --- | --- |\n| Checksums, 330 s run | 46,892 of 46,892, 0 resyncs | no natural mismatch, so recovery is proven by tests |\n| Earlier 330 s run | 44,534 of 44,534 | |\n| BTC to ETH to SOL switch, 95 s | 10,214 of 10,214 | |\n| Buying pressure vs price move (OFI) | 1.10 USD per BTC, R squared 0.54 | same second, partly mechanical, not a forecast |\n| Volatility, 1 s vs 10 s sampling | 27.0% vs 31.9% | reversed from textbook; 10 s uses only 30 returns |\n| Delay, median / p95 | 89 / 143 ms | includes clock offset |\n| Tests | 18 (16 book + 2 shared) | |\n\n## Key ideas\n- **Snapshot plus delta**: one full picture, then changes; zero size deletes a level.\n- **Truncate to 100 levels** after every update, or stale levels pile up (the checksum cannot see them).\n- **Precision matters**: 0.0157 must print as 0.01570000 or every check fails.\n- **Microprice** leans the mid toward the thinner side; **imbalance** is bid size share at the best prices.\n- **Order flow imbalance**: net buying pressure at the best prices, summed per second.\n- **Realized volatility**: square root of summed squared returns, annualized.\n\n## Honest limits\n- One venue, 100 levels. Trade direction is the exchange's label. Hidden tabs leave heatmap gaps. Recovery never triggered live.\n",
+    "deep": "## Architecture\n- One WebSocket, `wss://ws.kraken.com/v2`, public. `BookSession` (pure, in `book/book.js`) owns protocol, book, verification; `book/app.js` owns the socket, sampler, heatmap, charts.\n- States: `idle` -> `instrument` (subscribe instrument, snapshot true) -> `syncing` (book depth 100, trade snapshot false) -> `live` (snapshot verified). Updates ignored unless live; other symbols ignored and counted.\n- Message mix, run 2 (330 s): 47,595 messages, 9,821,562 bytes; 46,891 updates (about 142/s), 1 snapshot, 326 heartbeats, 371 trade messages (849 trades), 4 acks.\n\n## Book\n- `BookSide`: parallel arrays `px`, `qty`, best first (bids descending, asks ascending). `search` binary search $O(\\log n)$; `set` overwrite, splice insert, or splice delete on qty 0, $O(n)$; best level $O(1)$; `truncate(depth)` $O(1)$.\n- Updates are absolute sizes; apply all levels of a message in order, then truncate both sides to 100 (Kraken never sends deletes past the subscribed depth).\n- Depths offered: 10, 25, 100, 500, 1000. No sequence numbers in the payload.\n\n## Checksum\n$$\\text{field}(x) = \\text{stripZeros}(\\text{removePoint}(\\text{toFixed}(x, p)))$$\n$$s = \\Vert_{i=0}^{9} \\text{field}(P^a_i)\\,\\text{field}(Q^a_i) \\;\\Vert_{i=0}^{9} \\text{field}(P^b_i)\\,\\text{field}(Q^b_i), \\qquad \\text{ok} \\iff \\mathrm{CRC32}(s) = \\text{checksum} \\ggg 0$$\n- CRC32: reflected polynomial `0xEDB88320` (normal `0x04C11DB7`), init `0xFFFFFFFF`, final xor, 256 entry table. Check value `CRC32('123456789') = 0xCBF43926`. Detects all bursts up to 32 bits; not tamper proof.\n- Precision from the instrument channel: BTC/USD 1/8, ETH/USD 2/8, SOL/USD 2/8. `0.0157` at 8 must give `1570000`.\n- Doubles: values have about 13 or fewer significant digits, so `toFixed(p)` recovers the exact decimal; Kraken recommends decimal parsing; production would use integer ticks and lots.\n- Blind spot: levels 11 to 100. A non truncating book passes all 601 fixture checksums.\n- Mismatch: count, `unsubscribe` + `subscribe` book, ignore updates until a snapshot verifies, `FlowSeconds.reset()`.\n\n## Connection handling\n- Watchdog: close if no message for 10 s (heartbeats about 1/s). Backoff $\\min(30\\,\\text{s}, 2^{a}\\,\\text{s}) \\times U(0.8, 1.2)$, reset on verified snapshot. `closed()` clears the book. Stale socket callbacks ignored (`ws !== me`).\n- Latency = arrival minus exchange timestamp (microseconds kept by `parseTs`): p50/p95 84.9/129.7, 88.8/143.1, 82.6/133.5 ms; includes clock offset.\n\n## Top of book\n$$\\text{mid} = \\tfrac{P_b + P_a}{2},\\quad \\text{spread}_{bps} = \\tfrac{P_a - P_b}{\\text{mid}} 10^4,\\quad I = \\tfrac{Q_b}{Q_b + Q_a},\\quad \\text{micro} = \\tfrac{P_b Q_a + P_a Q_b}{Q_a + Q_b} = P_b + (P_a - P_b) I$$\n- Run 2 last quote: 81,657.9 x 0.947 / 81,658.0 x 0.184: one tick (0.1 USD, about 0.012 bps), $I \\approx 0.84$, micro about mid + 0.03 (computed). Size weighted mid, not Stoikov's 2018 Markov micro price.\n\n## Order flow imbalance (Cont, Kukanov, Stoikov 2014)\n$$e_n = \\mathbb{1}\\{P^b_n \\ge P^b_{n-1}\\} Q^b_n - \\mathbb{1}\\{P^b_n \\le P^b_{n-1}\\} Q^b_{n-1} - \\mathbb{1}\\{P^a_n \\le P^a_{n-1}\\} Q^a_n + \\mathbb{1}\\{P^a_n \\ge P^a_{n-1}\\} Q^a_{n-1}$$\n- Summed per exchange second (`FlowSeconds`, 900 s kept); mid carried forward; newest second excluded; reset second invalid.\n- OLS $\\Delta P = a + b\\,\\text{OFI}$ over 300 s (drawn after 30): $b = S_{xy}/S_{xx}$, $R^2 = 1 - SSE/SST$, $se(b) = \\sqrt{SSE/(n-2)/S_{xx}}$ (lower bound: heavy tails, clustering).\n- Paper: NYSE TAQ, 50 stocks, linear relation, slope inversely proportional to depth.\n- Run 2: $b = 1.105$, se 0.0586, $R^2 = 0.544$, n = 300, intercept -0.32. Run 1: $b = 1.45$, se 0.104, $R^2 = 0.40$. Contemporaneous, partly mechanical.\n\n## Realized volatility\n$$r_i = \\ln(m_i/m_{i-1}),\\quad RV = \\sqrt{\\textstyle\\sum r_i^2},\\quad RV_{ann} = RV\\sqrt{365 \\cdot 86400 / T}$$\n- Mids at the end of each exchange second, 300 s window (shown after 120 s), steps of 1 s (300 returns) and 10 s (30 returns), both ending at the newest point.\n- iid Gaussian: $\\mathrm{Var}(RV^2) = 2n\\sigma^4 \\Rightarrow$ rel. SE $= 1/\\sqrt{2n}$: 4.1% at 300, 12.9% at 30. Kurtosis $\\kappa$: $\\mathrm{Var}(RV^2) = n(\\kappa - 1)\\sigma^4$.\n- Noise model $X_t + u_t$: $E[RV^2] = T\\sigma^2 + 2n\\eta^2$, so finer sampling reads higher.\n- Gap rule: $|a_1 - a_{10}| \\le 2\\sqrt{(a_1/\\sqrt{2n_1})^2 + (a_{10}/\\sqrt{2n_{10}})^2}$ means agree; positive beyond means noise; negative beyond means short runs.\n- Run 2: 27.0% vs 31.9% (gap -4.9 pts vs 2 SE 8.5, within). Run 1: 34.1% vs 48.1% (gap -14.0 vs 12.9, outside). Variance ratios about 1.39 and 1.99 (computed).\n\n## Trades and depth\n- Taker side as reported; VWAP $= \\sum pq / \\sum q$; buy share; log10 notional bins; 10 s flow bins by arrival time; trades per minute after 60 s.\n- Cumulative depth step chart over 100 levels; 5 bps band is a lower bound when level 100 is inside it.\n\n## Heatmap\n- Every 500 ms, copy the book into Float64Arrays; 4 minute span (480 columns). Rows = price buckets, one per CSS pixel; byte index 0 empty, 1 unobserved, 2 to 255 log10 size between 2nd and 99.5th percentile (refreshed every 2 s); 256 entry Uint32 LUT from a Catmull-Rom ramp; `ImageData` on an offscreen canvas; rebuild only on new column, axis, or scale change. Recenter when mid leaves the middle 60% of a 0.05%, 0.15% or 0.5% window. Unobserved ranges hatched.\n\n## Results (node runs of `book/book.js`, Oct 8 2026)\n| Run | Length | Updates | Verified | Mismatch / resync | OFI b, R2 | RV 1 s / 10 s | Lag p50 / p95 |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| BTC 1 | 330 s | 44,533 | 44,534 of 44,534 | 0 / 0 | 1.45, 0.40 | 34.1% / 48.1% | 84.9 / 129.7 ms |\n| BTC 2 | 330 s | 46,891 | 46,892 of 46,892 | 0 / 0 | 1.10, 0.54 | 27.0% / 31.9% | 88.8 / 143.1 ms |\n| BTC, ETH, SOL | 95 s | 10,211 | 10,214 of 10,214 | 0 / 0 | not meaningful | not meaningful | 82.6 / 133.5 ms |\n\n- All logs show `forced_corruptions 0`; the live forced corruption described in the write up is not in a committed log.\n\n## Tests (`node --test tests/*.test.mjs`, Node 22 and 24, no install)\n- 16 book tests + 2 formatting = 18. Fixture: real snapshot + 600 updates (601 checksums), depth 100, precision 1/8. Failure modes: one unit size error, wrong precision, no truncation, corrupted checksum resync, other symbol ignored. Structures: random BookSide ops, truncation. Stats: microprice, imbalance, spread; six OFI cases; per second bins with reset; OLS recovers slope 0.8 within 4 se; RV on random walk within 4 rel SE at 1 s and 10 s; noise formula; trade tally; microsecond timestamps.\n\n## Limits and next\n- One venue; 100 levels; taker side as reported; clock offset in lag; hidden tab gaps; no natural mismatch; doubles not decimals; contemporaneous OFI; two windows.\n- Next: predictive and multi level OFI, Newey West or bootstrap errors, RV signature plot, logged forced corruption run, integer ticks, Web Worker ingestion.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "I rebuilt Kraken's live bitcoin order book in the browser from a snapshot and about 142 updates a second, and checked it against the exchange's own CRC32 checksum after every update. In a 330 second run, all 46,892 checksums matched with no resyncs. Only from that verified copy do I compute statistics: order flow imbalance explained 54% of per second price moves, and realized volatility came out reversed from the textbook, which I report rather than hide.",
+      "keypoints": [
+        "Snapshot plus delta book, about 142 updates a second",
+        "CRC32 verified after every update",
+        "46,892 of 46,892, 0 resyncs",
+        "OFI R squared 0.54",
+        "Reversed volatility result reported"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "Every trading system keeps a local order book built from a snapshot and a stream of changes, and the classic failure is silent drift: miss one update and everything downstream is quietly wrong. Kraken publishes a CRC32 of the top ten levels of its book with every update, so I made verification part of ingestion. The page opens one WebSocket to Kraken's v2 API. It reads the instrument channel first to get price and size precision, then subscribes to the book at depth 100 and to trades. Each side of the book is a sorted array with binary search. After every message I truncate both sides to 100 levels, because the exchange stops updating levels that fall off the end. Then I rebuild the checksum string, ten asks then ten bids, each number printed at the instrument's precision with the point and leading zeros removed, and compare CRC32s. On a mismatch I unsubscribe, resubscribe, and ignore updates until a fresh snapshot verifies. A node script ran the same module for 330 seconds: 46,891 updates, about 142 a second, and all 46,892 checksums matched. On top of the book I compute order flow imbalance after Cont, Kukanov and Stoikov and regress the per second mid change on it: a slope of 1.10 dollars per bitcoin with R squared 0.54. One result went the other way. Volatility at one second sampling should read higher because of quote noise, but I got 27% at one second against 31.9% at ten, and the ten second figure rests on only 30 returns, so the page tests the gap against its sampling error. Limits: one venue, 100 levels, and recovery was never triggered naturally, so the test suite carries that evidence. Next I'd make the order flow fit predictive.",
+      "keypoints": [
+        "Problem: silent drift in snapshot plus delta books",
+        "Precision from the instrument channel, sorted arrays, truncation",
+        "Checksum recipe and resync",
+        "46,892 of 46,892 at about 142 a second",
+        "OFI slope 1.10, R squared 0.54",
+        "Reversed RV result and its sampling error",
+        "Limits and next step"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "The design rule was that no statistic gets computed from a book that hasn't just been verified. Protocol. One WebSocket to wss://ws.kraken.com/v2. A BookSession object owns the protocol and has four states: idle, instrument, syncing, live. On open it subscribes to the instrument channel, stores price and quantity precision per symbol, unsubscribes, then subscribes to book at depth 100 and trade. The first book message is a snapshot of 100 levels per side. Updates list only changed levels with their new absolute size, and zero deletes. There are no sequence numbers in the payload, so the checksum is the only integrity signal. Data structure. Each side is a pair of parallel arrays, prices and sizes, best first. Lookup is binary search, about seven comparisons. Insert and delete are splices, O(n), but at n equals 100 that moves under a kilobyte and beats any tree. After applying all levels in a message I truncate both sides to 100, because Kraken never sends a delete for a level that falls past the subscribed depth. Checksum. Ten asks ascending, then ten bids descending. Each price and size is printed with toFixed at the instrument precision, the point removed, leading zeros stripped, concatenated, then CRC32 with the reflected polynomial 0xEDB88320, compared unsigned. Formatting is where this breaks: the feed sends 0.0157 as a JSON number, and the string has to be 0.01570000. Tests show that one unit in the eighth decimal, or the wrong precision, fails the check. Prices are stored as doubles, which Kraken advises against, but every field has fewer significant digits than a double reproduces, and 46,892 live matches back that up. In production I'd use integer ticks and lots. What the checksum can't see. It covers ten levels. A test runs a book with no truncation beside a correct one: the bad one accumulates stale levels and still passes all 601 fixture checksums. So truncation is tested on its own. Recovery. On mismatch the session counts it, unsubscribes and resubscribes the book, ignores updates until a new snapshot verifies, and resets the order flow chain so no event spans the gap. A watchdog closes the socket after ten seconds without a heartbeat, and reconnects back off exponentially to 30 seconds with jitter. The book is cleared on close, so a stale copy is never verified against a new stream. Analytics, on exchange time. Order flow imbalance per Cont, Kukanov and Stoikov: each BBO change contributes new bid size if the bid didn't fall, minus old bid size if it didn't rise, and the mirror on the ask. Summed per second and regressed by OLS on the mid change over 300 seconds: slope 1.10 dollars per bitcoin, standard error 0.059, R squared 0.54. An earlier window gave 1.45 and 0.40. It's contemporaneous and partly mechanical, so I don't call it a signal. Realized volatility at one and ten second sampling: 27.0% against 31.9%, reversed from the noise prediction. With 30 returns the ten second figure has about 13% error, and by the page's own two standard error rule that run is within sampling error, while the earlier run, 34.1 against 48.1, is just outside it. Rendering is decoupled: handlers only mutate state, and a heatmap writes 500 millisecond book columns into a pixel buffer through a lookup table. Gaps: one venue, a hundred levels, and no natural mismatch, so recovery evidence is the unit test.",
+      "keypoints": [
+        "State machine: instrument, then book and trade, then verified snapshot",
+        "Sorted arrays, binary search, truncation to 100",
+        "Checksum recipe, precision from instrument channel, doubles caveat",
+        "Top 10 blind spot and the truncation test",
+        "Resync, watchdog, backoff with jitter",
+        "OFI 1.10, se 0.059, R squared 0.54; 1.45 and 0.40 earlier",
+        "RV 27.0 vs 31.9, within error by the page's rule",
+        "Recovery proven by tests, not live logs"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone without a technical background.",
+      "script": "An exchange keeps a list of everyone waiting to buy or sell bitcoin and at what price. Instead of sending the whole list every time, it sends one full copy and then only the changes, more than a hundred a second. If you miss one change, your copy is wrong and nothing warns you. The exchange also sends a short fingerprint of its list with every change, so I built a page that keeps its own copy and checks the fingerprint every time. In a five and a half minute test, all 46,892 checks matched. Only after that does the page answer questions like whether buying pressure moves the price, which it did, explaining about half of the second by second moves. One result surprised me, and I reported it as it came out.",
+      "keypoints": [
+        "Exchange sends one copy, then changes",
+        "Missing a change makes the copy silently wrong",
+        "Fingerprint check every time",
+        "46,892 of 46,892 matched",
+        "Buying pressure explained about half the moves",
+        "Surprising result reported honestly"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the architecture on the whiteboard.",
+      "script": "First I draw Kraken on the left and one WebSocket arrow into a box labelled BookSession, and inside it the four states in a row: idle, instrument, syncing, live. I say the instrument channel comes first because the checksum depends on precision. Second, under the session, I draw the book: two arrays, bids descending and asks ascending, with index zero marked as the best level and a line at level 100 labelled truncate. Next to it I draw the per message pipeline as four boxes: apply levels, truncate, build the checksum string from ten asks then ten bids, compare CRC32. From the compare box I draw two arrows: match goes right to the analytics, mismatch loops back to the session labelled unsubscribe, resubscribe, wait for snapshot. I circle levels 11 to 100 and write not covered by checksum. Third, on the right, the analytics fed only by verified books, on exchange time: mid, spread, microprice and imbalance from the best level; OFI events summed per second into an OLS fit of mid change, with the result 1.10 dollars per bitcoin, R squared 0.54; realized volatility at one and ten seconds with 27.0 and 31.9. Last, along the bottom, a separate paint loop reading state, with the heatmap fed by a 500 millisecond sampler, and a note that ingestion never waits for painting. If there is room I write 46,892 of 46,892 in the corner.",
+      "keypoints": [
+        "Kraken to one WebSocket to BookSession states",
+        "Sorted arrays with truncation at 100",
+        "Apply, truncate, checksum, compare",
+        "Mismatch loop to resubscribe",
+        "Top 10 coverage marked",
+        "Analytics on verified books with results",
+        "Separate paint loop"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How exactly is the checksum string built, and where do implementations usually fail?",
+      "script": "Take the top ten asks from the lowest price up, then the top ten bids from the highest down. For each level, print price and size with the instrument's precision, remove the decimal point, strip leading zeros, and append price then size. CRC32 the whole string and compare it, unsigned, with the exchange's value. The failure point is formatting. The feed sends sizes as JSON numbers, so 0.01570000 arrives as 0.0157, and printing the shortest form changes the string and fails every check. That's why I read precision from the instrument channel per symbol instead of hardcoding it, and why two tests show a one unit size error and a wrong precision both break the checksum.",
+      "keypoints": [
+        "Ten asks ascending then ten bids descending",
+        "Print at instrument precision, drop point, strip zeros",
+        "CRC32 compared unsigned",
+        "Trailing zeros lost in JSON numbers",
+        "Precision read per symbol, tested"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "There are no sequence numbers. How would you notice a dropped message?",
+      "script": "Only through the checksum, and only near the top of the book. If a dropped update touched the top ten levels on either side, the next message's checksum fails and I resync. If it touched a deep level, I don't see it until that level moves up or changes again, and since updates carry absolute sizes, the next change to that level corrects it. On a single WebSocket over TCP, messages arrive in order, so the realistic risks are client bugs and server side gaps. For deep book analytics in production I'd also resubscribe periodically for a fresh snapshot and diff it against the local book, and I'd add my own sequence numbers when republishing.",
+      "keypoints": [
+        "Checksum is the only signal",
+        "Top ten errors caught on the next message",
+        "Deep errors corrected by absolute updates",
+        "TCP ordering on one socket",
+        "Periodic snapshot diff in production"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Walk me through order flow imbalance and what your regression found.",
+      "script": "Order flow imbalance looks at each change of the best bid and ask. If the bid price holds or rises, the new bid size counts as buying pressure; if it holds or falls, the old bid size counts against. The ask side mirrors that. So an unchanged quote contributes its size change, and a price move contributes the whole queue. I sum events per exchange second and regress the mid change over that second on it by OLS over 300 seconds. The slope was 1.10 dollars per bitcoin, standard error 0.059, R squared 0.54, and an earlier window gave 1.45 and 0.40. It's contemporaneous, so it describes price impact rather than predicting it.",
+      "keypoints": [
+        "Four indicator terms",
+        "Size change vs whole queue on price moves",
+        "Per second sums, OLS over 300 s",
+        "1.10, se 0.059, R squared 0.54",
+        "Earlier window 1.45 and 0.40, not predictive"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Explain the realized volatility result that went the wrong way.",
+      "script": "Realized volatility is the square root of the sum of squared log returns. Quote noise adds about two times the noise variance to every squared return, so finer sampling normally reads higher. I got the opposite: 27.0% at one second against 31.9% at ten, and in the earlier run 34.1 against 48.1. Noise can't produce that; positively autocorrelated returns, prices moving in short runs, can. But the ten second figure comes from only 30 returns, so its error is about 13%. The page compares the gap with twice its standard error before naming a cause, and by that rule the final run is within sampling error and the earlier run is just outside it.",
+      "keypoints": [
+        "RV definition",
+        "Noise adds 2 n eta squared",
+        "27.0 vs 31.9, and 34.1 vs 48.1",
+        "Short runs, not noise, can do this",
+        "30 returns, 13% error, two SE rule"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you test it?",
+      "script": "The core test replays a real snapshot and the 600 updates that followed, captured from the live feed, and requires every one of the 601 exchange checksums to match. That checks my code against Kraken's own values. Then each failure mode has a test: a one unit size error, the wrong precision, a book that never truncates, which piles up stale levels and still passes every checksum, and a corrupted update that must trigger a resync and recover on the next snapshot. The statistics are tested against simulations with known answers: OLS must recover a planted slope, and realized volatility must match a random walk of known variance and show the predicted noise inflation. It's 18 tests on Node 22 and 24 with nothing to install.",
+      "keypoints": [
+        "Fixture replay against exchange checksums",
+        "Failure mode tests including truncation blind spot",
+        "Resync test",
+        "Simulated known answers for OLS and RV",
+        "18 tests, Node 22 and 24, no dependencies"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your recovery path never ran on live data. Why should I believe it works?",
+      "script": "You're right that none of my three committed logs contain a mismatch; they all show zero resyncs and zero forced corruptions. The write up describes a forced corruption live, but the evidence in the repository is the test. That test uses real fixture data: it sends an update with a corrupted checksum, checks that a mismatch is counted, that the page unsubscribes and resubscribes, ignores updates while syncing, and goes live again on the next snapshot. The forward path is strongly evidenced: 46,892 consecutive exact matches against an external oracle. The fix for the gap is simple, a logged run that corrupts periodically and measures time to recover.",
+      "keypoints": [
+        "Concede: no live mismatch in logs",
+        "Evidence is a test on real data",
+        "Every resync step asserted",
+        "Forward path: 46,892 exact matches",
+        "Next: logged forced corruption run"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "R squared 0.54 on a same second regression is mechanical. Isn't this overclaiming?",
+      "script": "It is partly mechanical, and I don't present it as a trading signal. When the best bid rises, order flow imbalance adds the new bid size and the mid rises in the same second, so the two are linked by construction. What the result shows is that this summary of top of book events explains about half of per second price variance on one crypto venue, which replicates the relation the paper found for US equities. The slope moved from 1.45 to 1.10 between two windows, which fits the paper's point that it depends on depth. The honest next tests are predictive, next second on this second's flow, and slope against measured depth.",
+      "keypoints": [
+        "Concede mechanical link",
+        "Not a trading signal",
+        "Replication of the paper's relation on crypto",
+        "Slope varies with conditions",
+        "Next: predictive and depth tests"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "obm-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is the Order Book Microstructure project, in two sentences?",
+      "easy": "A live page that keeps its own copy of Kraken's BTC/USD order book, rebuilt in the browser from a snapshot and more than a hundred updates a second, and checks that copy against the exchange's checksum after every update. Only from a copy known to be correct does it compute microstructure statistics such as order flow imbalance, microprice, and realized volatility.",
+      "deep": "One WebSocket to Kraken's public v2 API carries the book channel at depth 100 and the trade channel. A pure module, book/book.js, holds each side as a sorted array with binary search, truncates to the subscribed depth after every message, rebuilds the exchange's CRC32 string from the top 10 levels per side using the instrument's own precision, and on a mismatch unsubscribes and resubscribes the book. On top of the verified book it computes mid, spread, microprice and top of book imbalance, per second order flow imbalance after Cont, Kukanov and Stoikov (2014) regressed on mid changes by OLS, and realized volatility at 1 s and 10 s sampling. In a 330 second node run of the same module on October 8, 2026, all 46,892 checksums matched with 0 resyncs, and the OFI slope was 1.10 USD per BTC with R squared 0.54 over 300 seconds.",
+      "say": "I keep a local copy of Kraken's BTC order book in the browser and check it against the exchange's own checksum after every update, about 142 a second. Only then do I compute things like order flow imbalance and volatility from it. In a five and a half minute run, all 46,892 checksums matched.",
+      "evidence": [
+        "portfolio: 330 second run on BTC/USD (Oct 8 2026): 46,892 of 46,892 book checksums verified, 0 resyncs",
+        "portfolio: 47,595 messages, of which 46,891 were book updates, about 142 a second"
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "order book",
+        "streaming"
+      ]
+    },
+    {
+      "id": "obm-02",
+      "type": "concept",
+      "level": 1,
+      "q": "What problem does the project address, and why does it matter?",
+      "easy": "Every trading system keeps a local copy of the order book built from a starting picture and a stream of changes. If one change is missed or applied wrong, every number computed from the book is quietly wrong, and nothing tells you. Kraken sends a fingerprint of its book with each update, so the page can prove its copy is right after every message.",
+      "deep": "Plain version: a copy of the book that drifts gives wrong prices with no warning. Technical version: a snapshot plus delta protocol makes the client responsible for state; a dropped message, a misordered update, a precision bug, or a missing truncation leaves the local book divergent while every downstream statistic (mid, spread, imbalance, OFI, volatility) still computes a plausible number. Kraken's book channel includes a CRC32 over the top 10 levels per side in every snapshot and update, so divergence near the touch becomes detectable per message. The project builds the verification into the ingest path: verify, and on failure resync and exclude the affected second from statistics, before any analytics run. The write up frames it as stateful stream processing with an integrity check on every message and automatic recovery.",
+      "evidence": [
+        "portfolio: Every trading system starts from a local copy of the order book, built from a snapshot and a stream of deltas, and the classic failure is silent drift."
+      ],
+      "sources": [],
+      "tags": [
+        "problem",
+        "motivation",
+        "integrity"
+      ]
+    },
+    {
+      "id": "obm-03",
+      "type": "define",
+      "level": 1,
+      "q": "Define an L2 order book: bids, asks, levels, best bid and offer, and depth.",
+      "easy": "An order book lists the prices where people are waiting to buy (bids) and sell (asks), and how much is waiting at each price. The best bid is the highest buy price, the best ask the lowest sell price, and depth is how many price levels on each side you can see.",
+      "deep": "Level 2 (L2) data aggregates resting orders by price: each level is (price, total size), so individual orders and their queue positions are not visible, which would be L3 or market by order data. Bids are kept highest first and asks lowest first, so index 0 on each side is the top of book; the pair (best bid price and size, best ask price and size) is the BBO. A healthy book is never crossed: best bid < best ask, and the fixture test asserts that after replaying 600 updates. Depth here is 100 levels per side, chosen from the depths Kraken offers (10, 25, 100, 500, 1000); anything past level 100 is invisible to the page and is hatched grey in the heatmap. For BTC/USD the price step (tick) is 0.1 USD and sizes have 8 decimals.",
+      "evidence": [
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: [4.2s] snapshot BTC/USD verified; bids 100 asks 100 precision 1/8"
+      ],
+      "sources": [
+        "https://docs.kraken.com/api/docs/websocket-v2/book"
+      ],
+      "tags": [
+        "order book",
+        "definitions"
+      ]
+    },
+    {
+      "id": "obm-04",
+      "type": "define",
+      "level": 2,
+      "q": "What does Kraken v2 send on this connection, and what does a book message look like?",
+      "easy": "One public WebSocket at wss://ws.kraken.com/v2 carries several channels: instrument (pair metadata), book (snapshot then updates), trade, heartbeat about once a second, and status. Book messages carry the changed levels, a CRC32 checksum, and a timestamp with microseconds.",
+      "deep": "A book message is {channel: 'book', type: 'snapshot' or 'update', data: [{symbol, bids: [{price, qty}], asks: [...], checksum, timestamp}]}. Prices and sizes arrive as JSON numbers, so 0.04674110 arrives as 0.0467411 with its trailing zero gone, which matters for the checksum. Timestamps are RFC 3339 with microsecond fractions; parseTs() parses them by regex to fractional milliseconds so microseconds survive, which Date.parse would truncate. The instrument channel's snapshot gives price_precision, qty_precision, tick_size (0.1 for BTC/USD) and qty_min. Run 2's message mix: 47,595 messages, of which 46,891 book updates, 1 book snapshot, 326 heartbeats, 371 trade messages carrying 849 trades, 4 acks, 1 status and 1 instrument message. There is no sequence number in the book payload, so the checksum is the only per message integrity signal.",
+      "evidence": [
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: messages 47595 bytes 9821562 by_type {\"status\":1,\"ack\":4,\"instrument\":1,\"heartbeat\":326,\"trade\":371,\"snapshot\":1,\"update\":46891}"
+      ],
+      "sources": [
+        "https://docs.kraken.com/api/docs/websocket-v2/book"
+      ],
+      "tags": [
+        "kraken",
+        "websocket",
+        "protocol"
+      ]
+    },
+    {
+      "id": "obm-05",
+      "type": "concept",
+      "level": 1,
+      "q": "Explain the snapshot plus delta protocol as Kraken implements it.",
+      "easy": "After subscribing, the first book message is a full picture of the best 100 levels per side. Every later message lists only the levels that changed, each with its new total size; a size of zero removes the level.",
+      "deep": "Updates are absolute, not incremental: a level's qty in an update replaces the old size rather than adding to it, which makes reapplying the same update idempotent for that level but makes order matter across updates. Kraken's docs say one update message may contain several changes to the same price level and that updates must be processed in sequence, so applyLevels() walks each array in order and the last change wins. All levels in a message are applied before the checksum is computed, then both sides are truncated to the subscribed depth, because Kraken does not send qty 0 for levels that fall past that depth. In the captured fixture, 399 of 600 updates touched one level and 201 touched two, about 80 updates a second in that 7.6 second window. Over TCP on one connection messages arrive in order, so the remaining risks are client bugs and silent server side gaps, which the checksum catches near the touch.",
+      "evidence": [],
+      "sources": [
+        "https://docs.kraken.com/api/docs/websocket-v2/book",
+        "https://docs.kraken.com/api/docs/guides/spot-ws-book-v2"
+      ],
+      "tags": [
+        "protocol",
+        "snapshot",
+        "delta"
+      ]
+    },
+    {
+      "id": "obm-06",
+      "type": "how",
+      "level": 2,
+      "q": "Walk through the BookSession state machine and why precision is fetched first.",
+      "easy": "The session moves through four states: idle, instrument, syncing, and live. On connect it asks for instrument data first to learn the price and size decimals, then subscribes to the book and trades, and only accepts updates once a snapshot has verified.",
+      "deep": "start() sets state instrument and subscribes to the instrument channel with snapshot true. When the instrument snapshot arrives, it stores price_precision and qty_precision per symbol, unsubscribes instrument, and calls subscribeData(), which builds a new OrderBook with that precision, sets syncing, and subscribes book (symbol, depth 100) and trade (snapshot false). A book snapshot is applied, truncated and verified; if it matches the state becomes live, otherwise it counts a mismatch and resyncs. Updates are counted but ignored unless live, and book or trade messages for another symbol are ignored and counted, which is how a symbol switch drops stragglers (24 ignored in the switch run). closed() on socket close sets idle and clears the book, so a stale book is never verified against a new stream. The suite checks the exact message sequence: subscribe instrument, unsubscribe instrument, subscribe book, subscribe trade, with depth 100.",
+      "evidence": [
+        "repo:orderbook-microstructure/runs/2026-10-08-book-symbol-switch.txt: snapshots 3 updates_applied 10211 checksums_verified 10214 mismatched 0 resyncs 0 ignored 24 trades 145 forced_corruptions 0"
+      ],
+      "sources": [],
+      "tags": [
+        "state machine",
+        "protocol",
+        "implementation"
+      ]
+    },
+    {
+      "id": "obm-07",
+      "type": "number",
+      "level": 2,
+      "q": "What were the message rate and bandwidth in the long run?",
+      "easy": "In the 330 second run the page received 47,595 messages, 46,891 of them book updates, about 142 updates a second, and about 9.8 MB of data.",
+      "deep": "Run 2: 47,595 messages and 9,821,562 bytes over 330 s, about 206 bytes a message and about 29 KB a second (Tanay's arithmetic from the log). Updates 46,891, about 142 a second; run 1 had 44,533, about 135 a second. Trades are sparse by comparison: 849 trades in 371 trade messages in run 2 and 994 in run 1, so the book changes roughly fifty times for every trade. Per message work is a binary search and a splice of at most 100 entries per changed level, then a CRC over a string of 20 levels, which is trivial at this rate; painting is decoupled and runs a few times a second.",
+      "evidence": [
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: messages 47595 bytes 9821562",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: snapshots 1 updates_applied 46891 checksums_verified 46892 mismatched 0 resyncs 0 ignored 0 trades 849 forced_corruptions 0",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run1.txt: snapshots 1 updates_applied 44533 checksums_verified 44534 mismatched 0 resyncs 0 ignored 0 trades 994 forced_corruptions 0",
+        "portfolio: 47,595 messages, of which 46,891 were book updates, about 142 a second"
+      ],
+      "sources": [],
+      "tags": [
+        "throughput",
+        "results"
+      ]
+    },
+    {
+      "id": "obm-08",
+      "type": "define",
+      "level": 1,
+      "q": "What is CRC32, and what can it detect?",
+      "easy": "CRC32 is a 32 bit fingerprint computed by treating the data as a long binary polynomial and taking the remainder after dividing by a fixed polynomial. It catches accidental changes very reliably, but anyone can recompute it, so it does not protect against deliberate tampering.",
+      "deep": "The message bits are the coefficients of a polynomial over GF(2) (arithmetic mod 2, where addition is xor); the CRC is the remainder of dividing it, shifted by 32, by the generator 0x04C11DB7, written 0xEDB88320 in reflected form for least significant bit first processing. The common CRC-32 variant starts the register at 0xFFFFFFFF and xors the result with 0xFFFFFFFF, and crc32() does both. It is table driven: a 256 entry table precomputes the effect of each byte, so each input byte costs one table lookup, one xor and one shift. An n bit CRC detects every single burst error of length up to n, and a random corruption slips through with probability about 2^-32. The suite checks the standard check value, CRC32('123456789') = 0xCBF43926, plus the empty string and UTF-8 input.",
+      "evidence": [
+        "repo:orderbook-microstructure/book/book.js: for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1;",
+        "repo:orderbook-microstructure/tests/book.test.mjs: assert.equal(crc32('123456789'), 0xCBF43926);"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Cyclic_redundancy_check"
+      ],
+      "tags": [
+        "crc32",
+        "checksum"
+      ]
+    },
+    {
+      "id": "obm-09",
+      "type": "how",
+      "level": 1,
+      "q": "How is the checksum string built from the local book?",
+      "easy": "Take the 10 best asks from lowest price up, then the 10 best bids from highest price down. For each level, print price and size with the instrument's decimal places, remove the decimal point, strip leading zeros, and append price then size. CRC32 of that string must equal the exchange's number.",
+      "deep": "checksumField(x, prec) = x.toFixed(prec), then remove '.', then strip leading zeros: 81452.0 at precision 1 becomes '814520', 0.0157 at precision 8 becomes '1570000', 1e-8 becomes '1', 2450.05 at precision 2 becomes '245005'. checksumString concatenates field(price) + field(qty) for asks[0..9] then bids[0..9]. verify(expected) compares crc32(string) with Number(expected) >>> 0, an unsigned 32 bit comparison, because JavaScript bitwise results are signed until shifted with >>> 0. Kraken's guide gives the same recipe and an example where '0.10000000' becomes '10000000' and '45283.5' becomes '452835'. The guide also says to apply every level in a message before computing the checksum, which is what applyUpdate does.",
+      "evidence": [
+        "repo:orderbook-microstructure/book/book.js: return x.toFixed(prec).replace('.', '').replace(/^0+/, '');"
+      ],
+      "sources": [
+        "https://docs.kraken.com/api/docs/guides/spot-ws-book-v2"
+      ],
+      "tags": [
+        "checksum",
+        "implementation"
+      ]
+    },
+    {
+      "id": "obm-10",
+      "type": "why",
+      "level": 1,
+      "q": "Why read precision from the instrument channel instead of hardcoding it?",
+      "easy": "The checksum is computed over printed numbers, so the number of decimals must match the exchange exactly. Printing 0.0157 instead of 0.01570000 changes the string and fails every check, and different pairs use different decimals.",
+      "deep": "Precision varies by pair: the logs show BTC/USD at 1 decimal for price and 8 for size, and ETH/USD and SOL/USD at 2 and 8. Reading price_precision and qty_precision from the instrument snapshot per symbol means a symbol switch or an exchange change to tick size cannot silently break verification. Two tests pin this: adding one unit in the last decimal place (10^-8) to one bid size breaks the checksum, and building the book with price precision one higher than the instrument's also breaks it. That second test is the bug the write up describes, a formatting slip that would fail every check rather than some. Failing loudly on every message is the good outcome; the dangerous case is a bug that passes the checksum, which is why truncation has its own test.",
+      "evidence": [
+        "portfolio: printing 0.0157 instead of 0.01570000 changes the string and fails every check.",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-symbol-switch.txt: [30.3s] snapshot ETH/USD verified; bids 100 asks 100 precision 2/8",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-symbol-switch.txt: [60.3s] snapshot SOL/USD verified; bids 100 asks 100 precision 2/8"
+      ],
+      "sources": [
+        "https://docs.kraken.com/api/docs/guides/spot-ws-book-v2"
+      ],
+      "tags": [
+        "precision",
+        "checksum",
+        "design"
+      ]
+    },
+    {
+      "id": "obm-11",
+      "type": "why",
+      "level": 2,
+      "q": "Prices and sizes are stored as JavaScript doubles. Kraken recommends decimal or string parsing. Why does this work, and when would it break?",
+      "easy": "A double holds about 15 to 17 significant digits, and these prices and sizes need at most about 13, so printing them back with the exact number of decimals recovers the original decimal string. It would break for values with more significant digits than a double can hold.",
+      "deep": "The feed sends JSON numbers, JSON.parse turns them into IEEE 754 doubles, and the book stores them in plain arrays. 0.0467411 is stored as the nearest double, about 0.046741099999999998, and toFixed(8) rounds that back to '0.04674110' because the representation error (around 10^-18) is far below half a unit in the eighth decimal. A BTC price like 81535.7 has 6 significant digits and a size like 1234.12345678 has 12, both well inside the 15 digits a double reproduces exactly when printed. Price equality in BookSide.set uses ===, which works because the same decimal literal always parses to the same double. Kraken's guide still says to parse with a decimal or string decoder so no precision is lost, and a production system would store integer ticks and integer lots (price / 0.1, size x 10^8) or decimal strings, which removes the question entirely. The fixture replay of 600 real updates and 46,892 live checks are the evidence that the double path holds for these pairs.",
+      "evidence": [
+        "portfolio: All 46,892 checksums (the snapshot and every update) matched, with no resyncs."
+      ],
+      "sources": [
+        "https://docs.kraken.com/api/docs/guides/spot-ws-book-v2"
+      ],
+      "tags": [
+        "precision",
+        "floating point",
+        "design"
+      ]
+    },
+    {
+      "id": "obm-12",
+      "type": "concept",
+      "level": 2,
+      "q": "What can the checksum catch, and what can it not catch?",
+      "easy": "It catches any error in the best 10 levels on each side the moment it happens. It cannot see mistakes in levels 11 to 100, and it says nothing about trades.",
+      "deep": "Because the CRC covers only the top 10 per side, a wrong size at level 40 passes every check until that level moves into the top 10. The suite demonstrates this with a book that never truncates: stale levels pile up past depth 100, yet every one of the fixture's 601 checksums still matches. So the deep book has to be correct by construction, and the depth chart and heatmap, which use all 100 levels, rely on truncation being right. The feed also has no sequence numbers, so a dropped update that only touched deep levels is invisible, while one that touched the top 10 fails on the next message. Trades are a separate channel with no checksum, so the trade tape is trusted as delivered.",
+      "evidence": [
+        "repo:orderbook-microstructure/tests/book.test.mjs: assert.ok(deep.bids.length > fixture.depth || deep.asks.length > fixture.depth);"
+      ],
+      "sources": [
+        "https://docs.kraken.com/api/docs/guides/spot-ws-book-v2"
+      ],
+      "tags": [
+        "checksum",
+        "limitations"
+      ]
+    },
+    {
+      "id": "obm-13",
+      "type": "how",
+      "level": 1,
+      "q": "What happens on a checksum mismatch?",
+      "easy": "The page counts the mismatch, unsubscribes from the book, subscribes again, and ignores every update until a fresh snapshot arrives and verifies. The second containing the resync is left out of the order flow regression.",
+      "deep": "In BookSession.handle, both the snapshot and the update paths call verify(); on failure they increment mismatched, call onMismatch, and call resync(), which increments resyncs, sets state syncing, and sends unsubscribe then subscribe on the book channel at the same depth. While syncing, updates are ignored and counted, so nothing is applied to a book known to be wrong. The new snapshot replaces the book wholesale through applySnapshot (clear, apply, truncate), and onSnapshot calls FlowSeconds.reset(), which breaks the chain of previous quotes so no OFI event is computed across the gap and that second is marked invalid. The app also marks resyncs and reconnects as dashed lines on the time charts. Resubscribing the channel costs one round trip and avoids tearing down the socket and the trade subscription.",
+      "evidence": [
+        "repo:orderbook-microstructure/book/book.js: if (!this.book.verify(d.checksum)) { st.mismatched++; this.onMismatch(d, 'update'); this.resync(); return; }"
+      ],
+      "sources": [],
+      "tags": [
+        "resync",
+        "recovery",
+        "implementation"
+      ]
+    },
+    {
+      "id": "obm-14",
+      "type": "number",
+      "level": 1,
+      "q": "How many checksums were verified on live data, and against what?",
+      "easy": "Three node runs on October 8, 2026 verified every checksum: 44,534 of 44,534 and 46,892 of 46,892 in two 330 second BTC/USD runs, and 10,214 of 10,214 in a 95 second run that switched between BTC, ETH and SOL. There were no mismatches and no resyncs.",
+      "deep": "Each count is the snapshot plus every applied update: run 1 had 1 snapshot and 44,533 updates, run 2 had 1 and 46,891, and the switch run had 3 snapshots (one per symbol) and 10,211 updates. The comparison is the exchange's own CRC32 per message, so a match means the local top 10 levels per side were byte for byte what Kraken printed. The caveat travels with the number: zero natural mismatches means the resync path never ran on live data in these logs. The write up says a deliberately corrupted update failed its checksum and recovered from a fresh snapshot, but all three committed logs show forced_corruptions 0, so the repository evidence for recovery is the unit test.",
+      "say": "Every one of 46,892 checksums matched in the long run, and the other two runs were also perfect. The flip side is that recovery never triggered naturally, so the evidence for the resync path in my repo is the test suite, not a live log.",
+      "evidence": [
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run1.txt: snapshots 1 updates_applied 44533 checksums_verified 44534 mismatched 0 resyncs 0 ignored 0 trades 994 forced_corruptions 0",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: snapshots 1 updates_applied 46891 checksums_verified 46892 mismatched 0 resyncs 0 ignored 0 trades 849 forced_corruptions 0",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-symbol-switch.txt: snapshots 3 updates_applied 10211 checksums_verified 10214 mismatched 0 resyncs 0 ignored 24 trades 145 forced_corruptions 0",
+        "portfolio: An earlier 330 second run verified 44,534 of 44,534, and a run switching between BTC, ETH and SOL verified 10,214 of 10,214."
+      ],
+      "sources": [],
+      "tags": [
+        "checksum",
+        "results"
+      ]
+    },
+    {
+      "id": "obm-15",
+      "type": "case",
+      "level": 2,
+      "q": "The write up says the resync path was exercised by a forced corruption. What exactly is the evidence?",
+      "easy": "The test suite feeds a real update with a wrong checksum and checks that the session counts a mismatch, resubscribes, ignores updates, and goes live again on a fresh snapshot. The live forced corruption is described in the write up and README but is not in the committed run logs.",
+      "deep": "Test 'session: replays the fixture, then resyncs on a corrupted update' replays the 601 fixture messages through BookSession, then sends the last update with checksum + 1. It asserts one mismatch, one resync, state syncing, and the exact messages sent: unsubscribe book then subscribe book. It then sends an ordinary update (ignored, still syncing) and the original snapshot (live again), and checks that a message for ETH/USD changes nothing. The README's limitations say a natural mismatch never happened and the resync path is exercised by a forced corruption and the suite. All three logs print forced_corruptions 0, so the honest statement is: tested in the suite, described as done live, not logged.",
+      "evidence": [
+        "portfolio: To exercise the resync path, a deliberately corrupted update failed its checksum and the book recovered from a fresh snapshot; that case is also in the test suite.",
+        "repo:orderbook-microstructure/README.md: A natural checksum mismatch never happened in testing; the resync path is exercised by a forced corruption and by the test suite.",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: snapshots 1 updates_applied 46891 checksums_verified 46892 mismatched 0 resyncs 0 ignored 0 trades 849 forced_corruptions 0"
+      ],
+      "sources": [],
+      "tags": [
+        "resync",
+        "testing",
+        "honesty"
+      ]
+    },
+    {
+      "id": "obm-16",
+      "type": "how",
+      "level": 1,
+      "q": "What data structure holds each side of the book, and what does each operation cost?",
+      "easy": "Each side is two parallel arrays, prices and sizes, kept in best first order: bids descending, asks ascending. A binary search finds the level, and an insert or delete shifts the array.",
+      "deep": "```js\nsearch(p) {  // first index not strictly better than p\n  const a = this.px; let lo = 0, hi = a.length;\n  if (this.desc) while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] > p) lo = m + 1; else hi = m; }\n  else while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < p) lo = m + 1; else hi = m; }\n  return lo;\n}\n```\nset(p, q): if q is 0, splice the level out when it exists (deleting a missing level is a no op); if the price exists, overwrite qty; otherwise splice in at the insertion point. Search is O(log n), about 7 comparisons at n = 100; insert and delete are O(n) because splice shifts up to 100 numbers, a few hundred bytes of contiguous memory. Best bid and ask are index 0, O(1); top(10) for the checksum is O(10); truncate is O(1) by setting length. A randomized test of 400 inserts, updates and deletes checks strict ordering on both sides.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "data structures",
+        "complexity",
+        "code"
+      ]
+    },
+    {
+      "id": "obm-17",
+      "type": "compare",
+      "level": 2,
+      "q": "Compare sorted arrays with a balanced tree, a hash map, and a price indexed ladder for an L2 book.",
+      "easy": "At 100 levels a sorted array is fastest in practice because the data is tiny and contiguous. Trees and hash maps win only when books get much deeper or updates far more frequent.",
+      "deep": "Sorted arrays: O(log n) search, O(n) insert and delete, best level O(1), in order iteration free, excellent cache locality; at n = 100 a splice moves under a kilobyte. Balanced tree (red-black, B tree): O(log n) for everything and ordered iteration, but pointer chasing and allocation per node cost more than shifting 100 numbers. Hash map from price to size: O(1) update, but the best level and the top 10 need a separate heap or a scan, and the checksum needs sorted order every message. Price ladder (an array indexed by (price - base) / tick): O(1) update and fast best level tracking, the usual choice in low latency engines, but it needs recentering as price moves and is sparse far from the touch. The code comment states the reasoning: at depth 100 a splice is cheaper than any tree. At depth 1,000 or with many symbols per process, a ladder or B tree would be worth measuring.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "data structures",
+        "compare"
+      ]
+    },
+    {
+      "id": "obm-18",
+      "type": "why",
+      "level": 1,
+      "q": "Why truncate the book to 100 levels after every update?",
+      "easy": "Kraken stops sending changes for a level once it falls past level 100, so if the page kept it, that level would carry a stale size forever. Cutting both sides back to 100 after each message removes them.",
+      "deep": "When a better level is inserted, the 100th level becomes the 101st, and the exchange will never send a qty 0 for it; Kraken's guide says to truncate after each update for exactly this reason. truncate(depth) sets the array length to depth, O(1). A test inserts a better bid into a depth 3 book and checks the worst level is pushed out. The fixture test runs a never truncating book beside a truncating one: the untruncated book grows past 100 levels, yet passes all 601 checksums, because the checksum only sees the top 10. That makes truncation a correctness property the checksum cannot enforce, which matters for the depth chart and the heatmap, both of which use all 100 levels.",
+      "evidence": [
+        "repo:orderbook-microstructure/book/book.js: truncate(depth) { if (this.px.length > depth) { this.px.length = depth; this.qty.length = depth; } }",
+        "repo:orderbook-microstructure/tests/book.test.mjs: assert.ok(deep.bids.length > fixture.depth || deep.asks.length > fixture.depth);"
+      ],
+      "sources": [
+        "https://docs.kraken.com/api/docs/guides/spot-ws-book-v2"
+      ],
+      "tags": [
+        "truncation",
+        "correctness"
+      ]
+    },
+    {
+      "id": "obm-19",
+      "type": "formula",
+      "level": 1,
+      "q": "Define mid, spread in absolute terms, in basis points, and in ticks. What did BTC/USD look like?",
+      "easy": "Mid is the average of the best bid and best ask. Spread is ask minus bid; in basis points it is that gap divided by mid times 10,000; in ticks it is the gap divided by the smallest price step. BTC/USD on Kraken usually sat at one tick, 0.1 USD.",
+      "deep": "mid = (Pb + Pa) / 2; spread = Pa - Pb; spread_bps = (Pa - Pb) / mid x 10,000; ticks = round(spread / tick), with tick = 10^-pricePrecision (0.1 for BTC/USD). At the last quote of run 2, best bid 81,657.9 and best ask 81,658.0, the spread was one tick, 0.1 USD, about 0.012 bps (Tanay's arithmetic). A one tick spread means the book is tick constrained: the spread cannot narrow, so liquidity shows up as size at the touch rather than as price improvement, which is why imbalance and microprice carry information here. Spread and imbalance are sampled every 500 ms on arrival time and charted over 5 minutes.",
+      "evidence": [
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: last bbo {\"pb\":81657.9,\"qb\":0.94691926,\"pa\":81658,\"qa\":0.18416437} mid 81657.95"
+      ],
+      "sources": [],
+      "tags": [
+        "spread",
+        "mid",
+        "formula"
+      ]
+    },
+    {
+      "id": "obm-20",
+      "type": "formula",
+      "level": 1,
+      "q": "Define microprice and top of book imbalance. How is this microprice related to Stoikov's?",
+      "easy": "Imbalance is the bid size divided by bid plus ask size at the best prices. Microprice weights each best price by the size on the opposite side, so a heavy bid pulls the estimate toward the ask, where the next trade is more likely.",
+      "deep": "I = Qb / (Qb + Qa); microprice = (Pb Qa + Pa Qb) / (Qa + Qb) = Pb + spread x I. Test: bid 100 with size 3 and ask 101 with size 1 gives microprice 100.75 and imbalance 0.75, and equal sizes give the mid. At run 2's last quote, 0.947 BTC bid against 0.184 BTC ask gave I about 0.84 and microprice about 81,657.98, 0.03 above the mid (Tanay's arithmetic). The intuition: the thin side is more likely to be depleted, so the price is more likely to tick toward it. This is the size weighted mid; Stoikov's 2018 micro price is a different estimator, the limit of expected future mids under a Markov model of imbalance and spread, which corrects the weighted mid's tendency to overreact. The page's own note says microprice beats mid only to the extent that touch size carries information, and imbalance uses the best level only.",
+      "evidence": [
+        "repo:orderbook-microstructure/book/book.js: export const microprice = b => (b.pb * b.qa + b.pa * b.qb) / (b.qa + b.qb);",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: last bbo {\"pb\":81657.9,\"qb\":0.94691926,\"pa\":81658,\"qa\":0.18416437} mid 81657.95"
+      ],
+      "sources": [],
+      "tags": [
+        "microprice",
+        "imbalance",
+        "formula"
+      ]
+    },
+    {
+      "id": "obm-21",
+      "type": "define",
+      "level": 2,
+      "q": "Define tick, basis point, taker side, VWAP, and notional as the page uses them.",
+      "easy": "A tick is the smallest price step (0.1 USD for BTC/USD). A basis point is 0.01%. The taker side is the side of the trader who crossed the spread. VWAP is the volume weighted average trade price, and notional is price times size in dollars.",
+      "deep": "Tick = 10^-price_precision from the instrument channel. A basis point is 1/10,000 of the price. Kraken labels each trade with side buy (a buyer lifted the ask) or sell (a seller hit the bid); the page uses that label as is rather than inferring direction with a rule like Lee and Ready, which the write up lists as a limitation. VWAP = sum(price x size) / sum(size) over trades since subscribing, kept as running sums in TradeTally. Notional bins are log10 steps of price x size: under $10, $10, $100, $1k, $10k, $100k, $1M+. One large order that fills several resting orders appears as several trades, so the size histogram counts fills, not parent orders.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "definitions",
+        "trades"
+      ]
+    },
+    {
+      "id": "obm-22",
+      "type": "concept",
+      "level": 1,
+      "q": "What is order flow imbalance (Cont, Kukanov and Stoikov 2014), and how is each event computed?",
+      "easy": "Order flow imbalance measures net buying pressure at the best prices: new or larger bids and removed asks count as buying; removed bids and new or larger asks count as selling. Summed over a second, it explains a large share of that second's price move.",
+      "deep": "For consecutive best quotes (primes for the earlier state): e = 1{Pb >= Pb'} Qb - 1{Pb <= Pb'} Qb' - 1{Pa <= Pa'} Qa + 1{Pa >= Pa'} Qa'. Unchanged bid price: both bid terms fire, contributing Qb - Qb', the size change. Bid price up: only the first fires, adding the whole new bid size; bid price down: only the second fires, removing the whole old bid size. The ask side mirrors with opposite signs: ask down subtracts the whole new ask size; ask up adds back the whole old ask size. Tests from the code: from bid 100 x 2 and ask 101 x 3, a bid at 100.5 x 1 gives +1; a bid at 99.5 gives -2; an ask at 100.5 x 1 gives -1; an ask at 101.5 gives +3; unchanged prices with bid 5 and ask 1 give +5; no change gives 0. The paper found, on NYSE TAQ data for 50 US stocks, a linear relation between OFI and price changes over short intervals, with slope inversely proportional to market depth.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/1011.6402"
+      ],
+      "tags": [
+        "ofi",
+        "theory"
+      ]
+    },
+    {
+      "id": "obm-23",
+      "type": "how",
+      "level": 2,
+      "q": "How are OFI events aggregated into seconds, and how are gaps handled?",
+      "easy": "Every verified book update adds one OFI event to the bin for its exchange second, and each bin remembers the last mid. A row in the regression is one complete second: its total OFI and how far the mid moved.",
+      "deep": "FlowSeconds.add(tMs, bbo) bins by floor(exchange timestamp / 1000), adds ofiEvent(prev, bbo) if a previous quote exists, otherwise marks the bin as a gap, then stores the mid and keeps up to 900 seconds. rows(n) returns the n complete seconds before the newest (still filling) second; a second with no events carries the previous mid forward with OFI 0 and dmid 0. dmid is the mid at the end of the second minus the mid at the end of the previous one, and a row is valid only if both mids exist and the bin is not a gap. reset() after any snapshot clears prev, so no event spans a resync and that second is dropped from the fit. Events are computed per message, so if one message changes the best quotes twice only the net change is seen. The suite builds a three second case by hand and checks the OFI of 4, the carry forward, and the excluded reset second.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "ofi",
+        "implementation"
+      ]
+    },
+    {
+      "id": "obm-24",
+      "type": "formula",
+      "level": 2,
+      "q": "Write out the OLS fit used for OFI, including R squared and the slope standard error.",
+      "easy": "The page fits a straight line, mid change = a + b x OFI, over the last 300 seconds by ordinary least squares. b is how many dollars the mid moves per BTC of net buying pressure, and R squared is the share of the variance in price moves the line explains.",
+      "deep": "With x = OFI and y = dmid over valid rows: b = sum (x - xbar)(y - ybar) / sum (x - xbar)^2, a = ybar - b xbar, SSE = SST - b Sxy, R^2 = 1 - SSE/SST, se(b) = sqrt(SSE / (n - 2) / Sxx). ols() in assets/util.js computes these in one pass after the means and returns null below 3 points or when Sxx is 0. The page draws the fit once 30 seconds are available and uses a 300 second window. The standard error assumes independent, equal variance residuals; per second crypto returns are heavy tailed and volatility clusters, so the page labels it a lower bound on uncertainty. Heteroskedasticity and autocorrelation consistent (Newey West) errors or a block bootstrap would be the honest upgrade. A test plants a slope of 0.8 in 300 noisy points, adds one invalid outlier row, and checks b within 4 se of 0.8, n = 300 and R squared above 0.9.",
+      "evidence": [
+        "repo:orderbook-microstructure/book/app.js: const OFI_WIN = 300, OFI_MIN = 30;"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1011.6402"
+      ],
+      "tags": [
+        "ols",
+        "regression",
+        "formula"
+      ]
+    },
+    {
+      "id": "obm-25",
+      "type": "number",
+      "level": 1,
+      "q": "What did the OFI regression find on live BTC/USD?",
+      "easy": "Over the last 300 seconds of the 330 second run, each BTC of net buying pressure moved the mid by about 1.10 USD within the same second, standard error 0.059, and the line explained 54% of the variance of per second price moves.",
+      "deep": "Run 2: n = 300, b = 1.105, se 0.0586 (a t statistic near 19, Tanay's arithmetic), R squared 0.544, intercept -0.32 USD a second. Run 1, an earlier 330 second window: b = 1.45, se 0.104, R squared 0.40. So the linear relation the paper reports for equities shows up clearly on one crypto venue, but the slope moved by a third between two windows 17 minutes apart, consistent with the paper's point that the slope depends on depth, which changes. Caveats: one venue, two windows, contemporaneous rather than predictive, and the standard error is a lower bound because residuals are heavy tailed and clustered.",
+      "say": "Over five minutes, every bitcoin of net buying pressure at the best prices moved the mid about 1.10 dollars in the same second, and that explained 54% of the variance in price moves. An earlier window gave 1.45 and 40%, so the slope moves with conditions, which the paper predicts since it depends on depth.",
+      "evidence": [
+        "portfolio: The OFI regression over the last 300 seconds gave a slope of 1.10 USD per BTC of net flow, standard error 0.059, with R&sup2; = 0.54.",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: ofi_1s window_s 300 n 300 beta 1.1048903412613393 r2 0.5441811081384151 se 0.05857812617951825 intercept -0.32279131349340284",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run1.txt: ofi_1s window_s 300 n 300 beta 1.451587811581829 r2 0.396292769980073 se 0.1037863634049451"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1011.6402"
+      ],
+      "tags": [
+        "ofi",
+        "results"
+      ]
+    },
+    {
+      "id": "obm-26",
+      "type": "why",
+      "level": 3,
+      "q": "How should the 0.54 R squared be interpreted? Is it a trading signal?",
+      "easy": "No. The fit is contemporaneous: OFI and the price move are measured over the same second, so it describes how price impact works rather than forecasting the next move. Part of the fit is also mechanical, because a bid moving up both adds OFI and raises the mid.",
+      "deep": "When the best bid price rises, OFI adds the new bid size and the mid rises by half the tick change, so the two variables share a common cause by construction; the same holds for ask moves. The paper's contribution is that the slope is stable and inversely proportional to depth, so OFI summarises the order book events that drive price better than trade volume alone; it does not claim predictability. A predictive test would regress the next second's dmid on this second's OFI (and on lagged OFI), and would almost certainly show a much smaller R squared. Other checks Tanay has not run: multi level OFI that includes levels 2 to 10, regressions at 5 s and 10 s, and the relation between the slope and measured depth across windows.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/1011.6402"
+      ],
+      "tags": [
+        "ofi",
+        "interpretation"
+      ]
+    },
+    {
+      "id": "obm-27",
+      "type": "formula",
+      "level": 1,
+      "q": "Define realized volatility and the annualization the page uses.",
+      "easy": "Realized volatility is the square root of the sum of squared log returns over a window. To compare it with the usual yearly figure, it is scaled up by the square root of how many such windows fit in a year, using 365 days because crypto trades every day.",
+      "deep": "Mids are sampled at the end of each exchange second (carried forward through quiet seconds). Log returns r_i = ln(m_i / m_(i-1)) at a step of 1 s or 10 s, walking back from the newest point so both samplings end at the same instant. RV = sqrt(sum r_i^2), and annualized = RV x sqrt(365 x 86,400 / T) for a window of T seconds; at T = 300 the factor is about 324. The window is 300 s, giving 300 returns at 1 s and 30 at 10 s, and the tiles appear after 120 s. Under a continuous price process, RV^2 converges to the integrated variance as sampling gets finer, which is why high frequency data is attractive, until microstructure noise takes over. The page notes that the annualized figure rescales five minutes of movement and says nothing about the coming year.",
+      "evidence": [
+        "repo:orderbook-microstructure/book/book.js: export const YEAR_SECONDS = 365 * 86400;",
+        "repo:orderbook-microstructure/book/app.js: const RV_WIN = 300, RV_MIN = 120;"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Realized_variance"
+      ],
+      "tags": [
+        "realized volatility",
+        "formula"
+      ]
+    },
+    {
+      "id": "obm-28",
+      "type": "formula",
+      "level": 2,
+      "q": "Where does the 1/sqrt(2n) relative standard error come from, and what breaks it?",
+      "easy": "If returns are independent and normal, the variance of the sum of squared returns gives a relative error of 1/sqrt(2n) for the volatility. With 300 returns that is about 4%; with 30 it is about 13%.",
+      "deep": "For iid r_i ~ N(0, sigma^2), RV^2 = sum r_i^2 has mean n sigma^2 and variance n (E r^4 - sigma^4) = n (3 sigma^4 - sigma^4) = 2 n sigma^4, so sd(RV^2)/RV^2 = sqrt(2/n). By the delta method RV = sqrt(RV^2) has half that relative error, 1/sqrt(2n). At n = 300 that is 0.0408 and at n = 30 it is 0.129, exactly the rel_se values in the run log. Fat tails break it: with kurtosis kappa the variance of RV^2 is n (kappa - 1) sigma^4, so per second crypto returns with kappa well above 3 have a larger error than the formula says. Volatility clustering and the carried forward zero returns of quiet seconds also violate the iid assumption.",
+      "evidence": [
+        "repo:orderbook-microstructure/book/book.js: export const rvRelSE = n => n > 0 ? 1 / Math.sqrt(2 * n) : NaN;",
+        "portfolio: The 10 second figure rests on only 30 returns, so its sampling error is about 13%"
+      ],
+      "sources": [],
+      "tags": [
+        "realized volatility",
+        "standard error",
+        "formula"
+      ]
+    },
+    {
+      "id": "obm-29",
+      "type": "concept",
+      "level": 2,
+      "q": "Explain microstructure noise and why it usually makes 1 second volatility read higher than 10 second volatility.",
+      "easy": "The mid you observe is the true price plus a small jitter from the tick grid and quotes flickering back and forth. Squaring returns adds that jitter in every return, so the more returns you take, the more noise piles into the sum.",
+      "deep": "Model the observed log mid as X_t + u_t, with X a random walk of variance sigma^2 per second and u iid noise of variance eta^2. Each observed return is the true return plus u_i - u_(i-1), so E[RV^2] = T sigma^2 + 2 n eta^2 for n returns over T seconds: the true part depends on T only, while the noise part grows with n. Ten times as many returns means ten times as much noise bias, so finer sampling reads higher, and the gap between the 1 s and 10 s figures is a live estimate of eta^2. The suite simulates this with sigma = 10^-4 and eta = 2 x 10^-4 over 3,000 seconds and checks both expectations and that 1 s RV exceeds 1.5 times 10 s RV. Standard remedies, none implemented here, are sparse sampling, subsampling and averaging (two scales RV), pre averaging, and realized kernels; Wikipedia's realized variance page lists the bias variance tradeoff of sampling frequency.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Realized_variance"
+      ],
+      "tags": [
+        "microstructure noise",
+        "realized volatility"
+      ]
+    },
+    {
+      "id": "obm-30",
+      "type": "number",
+      "level": 1,
+      "q": "What happened with realized volatility on live data, and why is it called a reversed result?",
+      "easy": "In both long runs the 10 second figure came out higher, the opposite of what noise predicts: 27.0% annualized at 1 second against 31.9% at 10 seconds in the final run, and 34.1% against 48.1% in the earlier one.",
+      "deep": "Run 2: 1 s RV annualized 0.270 from 300 returns (relative error about 4%), 10 s RV 0.319 from 30 returns (about 13%). Run 1: 0.341 from 299 returns and 0.481 from 29. Noise can only push the 1 s figure up, so a higher 10 s figure means either sampling error in a 30 return estimate or returns that are positively autocorrelated at a few seconds, prices moving in short runs. Squaring the ratio gives a variance ratio of about 1.39 in run 2 and 1.99 in run 1 (Tanay's arithmetic); a ratio above 1 is the classic signature of positive autocorrelation, while bid ask bounce would push it below 1. The write up reports it as a result that went the other way rather than tuning sampling until it matched the textbook.",
+      "say": "Textbook says one second volatility should read higher because of quote noise. In both long runs it was the other way, 27% at one second against 31.9% at ten. Ten second volatility rests on only 30 returns, so I compare the gap with its own error before calling it anything.",
+      "evidence": [
+        "portfolio: 27.0% annualized at 1 second against 31.9% at 10 seconds in the final run.",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: rv_1s raw 0.0008341300672467658 n 300 annualized 0.27044344050138297 rel_se 0.040824829046386304",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: rv_10s raw 0.0009837556436664587 n 30 annualized 0.31895536599462054 rel_se 0.12909944487358055",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run1.txt: rv_1s raw 0.0010484678060175784 n 299 annualized 0.34050446330025785 rel_se 0.040893041005476534",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run1.txt: rv_10s raw 0.0014574008162321927 n 29 annualized 0.4805994981140519 rel_se 0.13130643285972254"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Realized_variance"
+      ],
+      "tags": [
+        "realized volatility",
+        "results",
+        "reversed result"
+      ]
+    },
+    {
+      "id": "obm-31",
+      "type": "how",
+      "level": 2,
+      "q": "How does the page decide whether the 1 s versus 10 s gap is noise, sampling error, or short runs?",
+      "easy": "It computes the gap between the two annualized figures and compares it with twice the gap's standard error. Inside that band it says the two agree; a positive gap beyond it is called noise; a negative gap beyond it is called prices moving in short runs.",
+      "deep": "gap = a1 - a10; seGap = hypot(a1 x 1/sqrt(2 n1), a10 x 1/sqrt(2 n10)), treating the two estimates as independent; within = |gap| <= 2 seGap. Applied to the logs (Tanay's arithmetic): run 2 has gap -4.9 points against 2 seGap of 8.5, so the page's rule says the figures agree within sampling error; run 1 has -14.0 against 12.9, just outside, so it reads as short runs. That nuance matters in an interview: the write up's reversed result is real in sign in both runs but statistically clear only in run 1. Treating the estimates as independent overstates the standard error of the difference, because both come from the same price path and are positively correlated, so the rule leans toward saying they agree; fat tails pull the other way. A signature plot across 1 to 60 second sampling over a longer window would settle it better than two points.",
+      "evidence": [
+        "repo:orderbook-microstructure/book/app.js: const within = Math.abs(gap) <= 2 * seGap;",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: rv_1s raw 0.0008341300672467658 n 300 annualized 0.27044344050138297 rel_se 0.040824829046386304",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: rv_10s raw 0.0009837556436664587 n 30 annualized 0.31895536599462054 rel_se 0.12909944487358055",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run1.txt: rv_1s raw 0.0010484678060175784 n 299 annualized 0.34050446330025785 rel_se 0.040893041005476534",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run1.txt: rv_10s raw 0.0014574008162321927 n 29 annualized 0.4805994981140519 rel_se 0.13130643285972254"
+      ],
+      "sources": [],
+      "tags": [
+        "realized volatility",
+        "hypothesis test",
+        "implementation"
+      ]
+    },
+    {
+      "id": "obm-32",
+      "type": "how",
+      "level": 2,
+      "q": "What does the page compute from trades?",
+      "easy": "Trades per minute, buyer versus seller volume every 10 seconds, VWAP, the buy share, and a histogram of trade sizes in dollars. Trades come from a separate channel and are not covered by the checksum.",
+      "deep": "onTrade drops trades with non positive price or size, pushes each into a 5,000 trade ring and a 20 trade tape, adds it to TradeTally (running sums for VWAP and buy and sell volume, plus log10 notional bins), and adds its size to a 10 s arrival time bin for the flow chart over 10 minutes. Trades per minute counts trades by arrival time over the last 60 s and shows only after 60 s of subscription. Bins still filling, and the partial bin at subscription, are left out so a half empty bin does not look like a lull. Run 2 saw 849 trades in 330 s, against 46,891 book updates. Trade lag is recorded separately from book lag, and trade direction is Kraken's taker side label.",
+      "evidence": [
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: snapshots 1 updates_applied 46891 checksums_verified 46892 mismatched 0 resyncs 0 ignored 0 trades 849 forced_corruptions 0"
+      ],
+      "sources": [],
+      "tags": [
+        "trades",
+        "vwap"
+      ]
+    },
+    {
+      "id": "obm-33",
+      "type": "how",
+      "level": 2,
+      "q": "How is the cumulative depth chart computed, and what is its blind spot?",
+      "easy": "For each side it adds up the size from the best price outward across all 100 levels and draws it as a step chart: bids to the left, asks to the right. A footnote reports how much sits within 0.05% of the mid.",
+      "deep": "Cumulative size is flat between levels and jumps at each level, so the chart is built from step points [price_i, cum_(i-1)], [price_i, cum_i]. The band is fixed at 5 basis points either side of mid; hover reads size and notional between the best price and the pointer. Because each curve stops at level 100, a band total is a lower bound whenever level 100 falls inside the band, which can happen in thin markets or with a wide window. Depth relies on the full 100 levels being right, which the checksum does not cover, so it depends on truncation and level updates being correct by construction. Depth is also the denominator in the OFI story: a thicker book means each BTC of flow moves the price less.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "depth",
+        "liquidity"
+      ]
+    },
+    {
+      "id": "obm-34",
+      "type": "how",
+      "level": 2,
+      "q": "How is the liquidity heatmap built, and why from raw pixel buffers?",
+      "easy": "Every 500 ms the page copies the whole book into a new column, keeping 4 minutes of columns. Each pixel row is a price bucket, coloured by the log of the size resting there, and the picture is written directly into a pixel array instead of drawing thousands of rectangles.",
+      "deep": "The sampler stores, per column, Float64Array copies of bid and ask prices and sizes plus the best quotes, so changing the price window or recentering can repaint history correctly. For each column, sizes are summed into rows of fixed price width (one row per CSS pixel) and cached on the column. Each row maps to a byte: 0 empty, 1 not observed (past level 100 when that side was full, or no connection), 2 to 255 for log10 size between the 2nd and 99.5th percentile of visible buckets, refreshed every 2 s. A 256 entry Uint32Array lookup table built from a Catmull-Rom spline through six theme colours turns bytes into RGBA, written through a Uint32Array view of an ImageData on an offscreen canvas and drawn scaled in one call. About 480 columns by a few hundred rows is around 200,000 pixels, which is cheap as one buffer write and expensive as 200,000 fillRect calls; the image is rebuilt only when a column, the axis or the colour scale changes, while quote lines and trade bubbles are vector overlays each frame.",
+      "evidence": [
+        "repo:orderbook-microstructure/book/app.js: const COL_MS = 500, HEAT_SPAN = 240e3;",
+        "repo:orderbook-microstructure/book/app.js: if (logs.length > 10) { const [a, z] = quantiles(logs, [0.02, 0.995]);"
+      ],
+      "sources": [],
+      "tags": [
+        "canvas",
+        "heatmap",
+        "rendering"
+      ]
+    },
+    {
+      "id": "obm-35",
+      "type": "why",
+      "level": 2,
+      "q": "Why a log colour scale with percentile limits, a recentering window, and hatched unobserved areas?",
+      "easy": "Order sizes span several orders of magnitude, so a linear scale would show a few big walls and nothing else. Percentile limits stop one huge order from washing out the rest, and hatching makes it clear where the page simply cannot see.",
+      "deep": "log10 compresses sizes from fractions of a coin to tens of coins into a usable range; clipping at the 2nd and 99.5th percentiles of visible buckets makes the scale follow the market instead of a single outlier, and refreshing it every 2 s keeps it stable enough to read. The price window is a fraction of mid either side (0.05%, 0.15%, 0.5%) and recenters only when mid leaves the middle 60%, so the picture does not jitter tick by tick. Prices past the 100th level are hatched grey, so absence of colour never pretends to mean no liquidity. Best bid and ask lines are drawn 1 px outside their prices so both stay visible at a one tick spread. Trade circles have area proportional to size.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "visualization",
+        "design"
+      ]
+    },
+    {
+      "id": "obm-36",
+      "type": "why",
+      "level": 2,
+      "q": "How does the page keep up with about 142 messages a second without dropping verification?",
+      "easy": "Message handlers only update state: apply the update, verify the checksum, record statistics. Drawing happens separately on a timer a few times a second, so the message rate never controls how often the screen repaints.",
+      "deep": "Per message work is JSON.parse, a binary search and splice per changed level, truncation, a 20 level checksum string and a table driven CRC, and an OFI event; all O(depth) with depth 100. onPaint jobs run from one requestAnimationFrame loop at their own minimum intervals (the heatmap every 250 ms, or 1,000 ms with reduced motion), and pausing the display stops painting but not ingestion or verification. The heatmap only rebuilds its image when a new 500 ms column arrives. The known gap: browsers throttle timers in hidden tabs, so the 500 ms sampler fires rarely and heatmap columns sampled while hidden are sparse, while WebSocket messages, and therefore verification, keep flowing.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "performance",
+        "architecture"
+      ]
+    },
+    {
+      "id": "obm-37",
+      "type": "how",
+      "level": 1,
+      "q": "How is latency measured, and what were the numbers?",
+      "easy": "Latency is arrival time on the local machine minus the exchange's timestamp on each update. In the long run the median was 89 ms and the 95th percentile 143 ms, but that includes any offset between the two clocks.",
+      "deep": "parseTs() keeps microseconds from the RFC 3339 timestamp, and the arrival time is Date.now() when the message is handled. Lags are stored in per second bins (book and trade separately) for 300 s, and the chart shows per second p50 and p95. Logged runs: p50 84.9 ms and p95 129.7 ms (run 1), 88.8 and 143.1 ms (run 2), 82.6 and 133.5 ms (switch run). Clock offset between the laptop and Kraken shifts the level, so changes over time are more trustworthy than the absolute value; NTP synced clocks are usually within a few milliseconds but not guaranteed. The lag also includes JSON parse and queueing in the browser event loop.",
+      "evidence": [
+        "repo:orderbook-microstructure/README.md: Arrival lag was 89 ms at the median and 143 ms at p95, which includes any offset between this machine's clock and Kraken's.",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run1.txt: lag_ms p50 84.876953125 p95 129.72280273437502 n 44533",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: lag_ms p50 88.820068359375 p95 143.1309814453125 n 46891",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-symbol-switch.txt: lag_ms p50 82.59912109375 p95 133.4635009765625 n 10211"
+      ],
+      "sources": [],
+      "tags": [
+        "latency",
+        "results"
+      ]
+    },
+    {
+      "id": "obm-38",
+      "type": "how",
+      "level": 2,
+      "q": "How does the page detect a dead connection and reconnect?",
+      "easy": "Kraken sends a heartbeat about once a second, so if nothing arrives for 10 seconds the page closes the socket itself. Reconnects wait 1, 2, 4 seconds and so on up to 30, with random jitter, and the book is cleared so a stale copy is never trusted.",
+      "deep": "A watchdog runs every 2 s and closes an open socket when the last message is more than 10 s old, which catches half open TCP connections that never fire onclose. onclose calls session.closed() (state idle, book cleared), marks a pending reconnect event for the charts, and schedules connect() after min(30 s, 1 s x 2^attempt) times a random factor between 0.8 and 1.2; jitter spreads reconnects so many clients do not hit the server in lockstep. attempt resets to 0 when a snapshot verifies, so a flapping connection backs off but a healthy one recovers quickly. Each handler checks ws !== me and returns, so callbacks from an old socket cannot touch state after a new one opens. send() only writes when readyState is 1 (OPEN). On reconnect the full sequence repeats: instrument, then book and trade, then a verified snapshot.",
+      "evidence": [
+        "repo:orderbook-microstructure/book/app.js: const delay = Math.min(30e3, 1000 * 2 ** attempt) * (0.8 + Math.random() * 0.4);",
+        "repo:orderbook-microstructure/book/app.js: setInterval(() => { if (ws && ws.readyState === 1 && Date.now() - lastMsgAt > 10e3) ws.close(); }, 2000);"
+      ],
+      "sources": [],
+      "tags": [
+        "reconnect",
+        "backoff",
+        "heartbeat"
+      ]
+    },
+    {
+      "id": "obm-39",
+      "type": "how",
+      "level": 2,
+      "q": "What happens when the user switches symbol, and what did the switch run show?",
+      "easy": "The page unsubscribes from the old symbol's book and trades, subscribes to the new one, resets all its statistics, and waits for a new verified snapshot. In a 95 second run switching BTC to ETH to SOL, all 10,214 checksums matched and 24 messages for the old symbol were dropped.",
+      "deep": "setSymbol() sends unsubscribe book and unsubscribe trade for the old symbol, then subscribeData() builds a fresh OrderBook with the new symbol's precision (ETH and SOL use 2 price decimals against BTC's 1) and subscribes. In the app, S = fresh(sym) discards the heatmap columns, flow bins, trades and lag history, and session.resetStats() zeroes the counters. Messages already in flight for the old symbol fail the d.symbol !== this.symbol check and are counted as ignored. The switch run had 3 snapshots and 2,813, 3,835 and 3,563 updates for BTC, ETH and SOL. Its OFI and RV numbers come from only the last 34 seconds of SOL, so they are not meaningful and are not quoted.",
+      "evidence": [
+        "repo:orderbook-microstructure/runs/2026-10-08-book-symbol-switch.txt: snapshots 3 updates_applied 10211 checksums_verified 10214 mismatched 0 resyncs 0 ignored 24 trades 145 forced_corruptions 0",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-symbol-switch.txt: per_symbol_updates {\"BTC/USD\":2813,\"ETH/USD\":3835,\"SOL/USD\":3563}"
+      ],
+      "sources": [],
+      "tags": [
+        "symbol switch",
+        "protocol"
+      ]
+    },
+    {
+      "id": "obm-40",
+      "type": "why",
+      "level": 2,
+      "q": "Which statistics use exchange time and which use arrival time, and why?",
+      "easy": "Order flow imbalance, mid changes and realized volatility use the exchange's timestamps, because they measure the market. The heatmap, spread chart, trade flow and trades per minute use arrival time on the local machine, because they show what the viewer is watching now.",
+      "deep": "OFI and dmid must line up in the same exchange second; arrival time would smear an update and its price change across seconds whenever delivery is clumped or delayed. Realized volatility likewise samples mids on an exchange time grid. The display side samples the book every 500 ms by the local clock, which is the natural cadence for a picture and needs no knowledge of exchange time. Mixing the two is a deliberate split rather than an accident, and the page says which is which. The same lesson appears in the companion edit stream project, where arrival time bins produced false bursts.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "event time",
+        "design"
+      ]
+    },
+    {
+      "id": "obm-41",
+      "type": "how",
+      "level": 1,
+      "q": "How is the project tested?",
+      "easy": "A node test suite replays a real captured BTC/USD snapshot and the 600 updates that followed and checks every checksum, then tests each failure mode and each statistic against a known answer. It runs on Node 22 and 24 in CI with nothing to install.",
+      "deep": "book.test.mjs has 16 tests and util.test.mjs 2 shared formatting tests, 18 in all, which is the README count; the write up's badge counts the 16. Coverage: CRC32 check value and UTF-8; checksum field formatting and the top 10 ordering; the fixture replay (every checksum matches, depth stays at 100, the book never crosses); a one unit size error and the wrong precision both break the checksum; a non truncating book piles up stale levels yet still passes; BookSession replays the fixture, resyncs on a corrupted checksum, ignores updates until a snapshot, and drops other symbols; BookSide ordering under 400 random operations; truncation; microprice, imbalance and spread; six hand built OFI cases; per second bins with carry forward and reset exclusion; OLS recovering a planted slope; RV on a random walk of known variance at both samplings; the noise inflation formula; trade tally; and microsecond timestamps. Random streams use the seeded mulberry32 generator.",
+      "evidence": [
+        "repo:orderbook-microstructure/README.md: 18 tests on node 22 or newer, nothing to install; two of them cover the shared duration formatting.",
+        "portfolio: 16 tests"
+      ],
+      "sources": [],
+      "tags": [
+        "testing"
+      ]
+    },
+    {
+      "id": "obm-42",
+      "type": "how",
+      "level": 2,
+      "q": "How was the replay fixture captured, and why is it the core test?",
+      "easy": "During the first live run, the logging script saved the first book snapshot and the next 600 updates exactly as received. The test replays them through the same book code and requires every one of the 601 checksums to match.",
+      "deep": "The fixture records source wss://ws.kraken.com/v2, channel book, symbol BTC/USD, depth 100, price precision 1, qty precision 8, the instrument record, and 601 messages, unmodified apart from JSON number formatting. Because the expected values are the exchange's own CRC32s, the test checks the implementation against an external oracle rather than against itself: a formatting, ordering, or truncation bug in the top 10 fails it. The 600 updates span about 7.6 seconds and touch one or two levels each, so the fixture covers ordinary churn but not rare events such as a crossed book or a very large sweep. The same fixture drives the session test, the truncation test, and the precision tests, which keeps every failure mode tied to real data.",
+      "evidence": [
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run1.txt: fixture written (copied to live/tests/fixtures/kraken-book-btcusd.json) messages 601"
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "fixture",
+        "oracle"
+      ]
+    },
+    {
+      "id": "obm-43",
+      "type": "how",
+      "level": 3,
+      "q": "How are the statistics tested when there is no exchange checksum for them?",
+      "easy": "By simulating data where the right answer is known. The regression must recover a slope planted in noisy data, and realized volatility must match a random walk of known variance, and must show the predicted noise inflation when noise is added.",
+      "deep": "OLS: 300 points with dmid = 0.8 x OFI plus uniform noise, plus one invalid row at (1000, -1000) that must be excluded; assert n = 300, slope within 4 standard errors of 0.8, R squared above 0.9. RV: a 3,000 second geometric random walk with per second sd 2 x 10^-4; 1 s and 10 s RV must each be within 4 relative standard errors of sigma sqrt(N), and the annualized value within 4 of sigma sqrt(365 x 86,400). Noise: the same with additive noise of sd 2 x 10^-4 on the observed log price; sums of squares must match E[RV^2] = N sigma^2 + 2 n eta^2 within 15% (1 s) and 30% (10 s), and 1 s RV must exceed 1.5 times 10 s RV. OFI events are tested by six hand computed cases covering every branch of the indicator formula. Seeds make the random tests deterministic.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "testing",
+        "simulation",
+        "statistics"
+      ]
+    },
+    {
+      "id": "obm-44",
+      "type": "case",
+      "level": 2,
+      "q": "What are the honest limitations?",
+      "easy": "One venue and 100 levels, trade direction taken from the exchange's label, latency that includes clock offset, hidden tabs that leave gaps in the heatmap, and a resync path that never triggered naturally.",
+      "deep": "Venue: Kraken's book is one slice of BTC/USD liquidity; other exchanges and anything past level 100 are invisible. Direction: the taker side as reported, not inferred. Latency: arrival minus exchange time, including clock offset. Hidden tabs: timers are throttled, so 500 ms heatmap columns are sparse while hidden. Integrity: the checksum covers the top 10 only, there are no sequence numbers, and the live logs contain no mismatch, so recovery evidence is the unit test. Statistics: two 300 second windows, OLS standard errors that understate uncertainty, a 10 s RV built from 30 returns, and a contemporaneous OFI fit. Numbers are stored as doubles, which works for these pairs but is not what Kraken recommends.",
+      "evidence": [
+        "repo:orderbook-microstructure/README.md: A natural checksum mismatch never happened in testing; the resync path is exercised by a forced corruption and by the test suite."
+      ],
+      "sources": [],
+      "tags": [
+        "limitations",
+        "honesty"
+      ]
+    },
+    {
+      "id": "obm-45",
+      "type": "case",
+      "level": 3,
+      "q": "What breaks at 10 times and 100 times the load, and what would production need?",
+      "easy": "At 10 times the update rate (about 1,400 a second) one browser tab still copes, though JSON parsing starts to matter. At 100 times, or with many symbols and deeper books, you need a server side book builder with integer prices, a faster data structure, persistence, and monitoring of checksum failures.",
+      "deep": "10x: per message work stays O(depth) and the CRC string stays 20 levels, but the main thread spends more time in JSON.parse and garbage from per message objects; moving ingestion into a Web Worker would isolate it from painting. 100x or depth 1,000: splices of 1,000 entries per change and a 1,000 level copy every 500 ms for the heatmap get expensive; a price ladder or B tree, integer ticks and lots instead of doubles, and incremental heatmap columns would be the fix. Production: a server process per venue that builds books, verifies checksums, publishes verified snapshots and deltas with its own sequence numbers, persists them for replay, and alerts on mismatch rate and resync frequency; a consolidated book across venues; and clock discipline (PTP or at least NTP monitoring) before quoting latency.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "scaling",
+        "production"
+      ]
+    },
+    {
+      "id": "obm-46",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next?",
+      "easy": "Turn the price impact fit into a forecasting test, add deeper order flow measures, fix the statistics' error bars, and measure volatility across many sampling intervals instead of two.",
+      "deep": "Predictive OFI: regress the next second's mid change on current and lagged OFI and report out of sample R squared. Multi level OFI: include levels 2 to 10, which the paper's follow up literature finds adds explanatory power. Error bars: Newey West standard errors or a block bootstrap for the slope, and a fat tail correction for RV. Volatility: a signature plot of RV at 1 to 60 second sampling over a longer window, plus a two scales or realized kernel estimator. Integrity: log a forced corruption run alongside the others so the recovery claim has a committed log, and parse prices as integer ticks. Depth: relate the OFI slope to measured top of book depth window by window, which is the paper's central prediction.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next steps"
+      ]
+    },
+    {
+      "id": "obm-47",
+      "type": "pushback",
+      "level": 1,
+      "q": "The checksum only covers the top 10 levels. How do you know the other 90 are right?",
+      "easy": "I don't, from the checksum alone, and the page says so. Levels 11 to 100 are right by construction: absolute size updates applied in order, deletes on zero, and truncation after every message, which has its own test.",
+      "deep": "Concede: a wrong size deep in the book passes every check until it reaches the top 10, and the feed has no sequence numbers to reveal a dropped deep update. Defend: the update semantics are absolute (each level change carries the new total size), so a deep level is corrected the next time it changes; truncation removes the levels the exchange stops updating; and the test suite shows a non truncating book passing all 601 checksums, which is exactly why truncation is tested separately rather than trusted to the checksum. The analytics that matter most here (mid, spread, microprice, OFI) depend only on the best level, which the checksum covers on every message. For deep book analytics in production, I would periodically resubscribe for a fresh snapshot and diff it against the local book.",
+      "say": "Only by construction, and I say that on the page. Updates carry absolute sizes, zero deletes, and I truncate after every message, which has its own test because the checksum can't see it. The statistics I care most about use only the best level, which is verified every message.",
+      "evidence": [
+        "repo:orderbook-microstructure/tests/book.test.mjs: assert.ok(deep.bids.length > fixture.depth || deep.asks.length > fixture.depth);"
+      ],
+      "sources": [
+        "https://docs.kraken.com/api/docs/guides/spot-ws-book-v2"
+      ],
+      "tags": [
+        "pushback",
+        "integrity"
+      ]
+    },
+    {
+      "id": "obm-48",
+      "type": "pushback",
+      "level": 1,
+      "q": "Zero mismatches in 46,892 checks just means your recovery code never ran. Why trust it?",
+      "easy": "That's true for the live logs, and I say it. The recovery path is covered by a test that feeds a real update with a corrupted checksum and checks every step of the resync.",
+      "deep": "Concede: all three logs show 0 mismatches, 0 resyncs and forced_corruptions 0, so no committed live log demonstrates recovery; the write up's live forced corruption is described but not logged. Defend: the session test asserts the full sequence on real fixture data: mismatch counted, unsubscribe and subscribe sent, updates ignored while syncing, live again on the next snapshot, and other symbols dropped. The zero mismatch result is still informative about the forward path: 46,892 consecutive exact matches against an external oracle would not happen with a formatting, ordering or truncation bug near the touch. Next I would add a logged run with periodic forced corruptions and measure time to recover.",
+      "say": "Right, the live logs never triggered a resync, and my repo's evidence for recovery is a unit test on real fixture data. Forty six thousand exact matches do show the forward path is right. The fix is a logged run that corrupts on purpose and measures recovery time.",
+      "evidence": [
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: snapshots 1 updates_applied 46891 checksums_verified 46892 mismatched 0 resyncs 0 ignored 0 trades 849 forced_corruptions 0"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "testing"
+      ]
+    },
+    {
+      "id": "obm-49",
+      "type": "pushback",
+      "level": 2,
+      "q": "An R squared of 0.54 for a same second regression is mostly mechanical. What does it really show?",
+      "easy": "Partly mechanical, yes: a bid moving up adds to OFI and raises the mid at the same time. What it shows is how well top of book events summarise price changes, which is the paper's claim, not that OFI predicts returns.",
+      "deep": "Concede: OFI and dmid share quote changes by construction, so a strong contemporaneous fit is expected; R squared is not a trading edge, and I make no predictive claim. Defend: the result is a replication of a known microstructure relation on a different asset class and venue, computed live with the right exclusions (no OFI across resyncs, only complete seconds). Two windows gave slopes of 1.45 and 1.10 and R squared of 0.40 and 0.54, which is the kind of variation the paper's depth dependence predicts. The interesting next tests are predictive regressions on lagged OFI and the relation between the slope and measured depth.",
+      "say": "It's partly mechanical and I don't sell it as a signal. It replicates the price impact relation from the paper on crypto, live, with resync seconds excluded. The predictive version, next second on this second's flow, is the test I'd run next.",
+      "evidence": [
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run2.txt: ofi_1s window_s 300 n 300 beta 1.1048903412613393 r2 0.5441811081384151 se 0.05857812617951825 intercept -0.32279131349340284",
+        "repo:orderbook-microstructure/runs/2026-10-08-book-run1.txt: ofi_1s window_s 300 n 300 beta 1.451587811581829 r2 0.396292769980073 se 0.1037863634049451"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1011.6402"
+      ],
+      "tags": [
+        "pushback",
+        "ofi",
+        "statistics"
+      ]
+    },
+    {
+      "id": "obm-50",
+      "type": "pushback",
+      "level": 2,
+      "q": "Why parse prices as floating point when the exchange tells you to use decimals?",
+      "easy": "Because for these pairs a double holds every price and size exactly enough to print back the same decimal string, and 46,892 checksums confirmed it. For production I would switch to integer ticks and lots.",
+      "deep": "Concede: Kraken's guide recommends a decimal or string decoder, and floats are a classic source of off by one unit bugs, so a design review should flag it. Defend: with at most about 13 significant digits per field and toFixed at the instrument's precision, the printed string is exact; prices compare with === because identical decimal literals parse to identical doubles; and the test suite shows a single unit error in the eighth decimal breaks the checksum, so a precision bug would be loud. The real fix is integer arithmetic: price in ticks (x 10) and size in satoshi like units (x 10^8), both well inside 2^53, which removes any rounding question and makes the book cheaper to compare.",
+      "say": "It works here because every value has fewer digits than a double holds exactly, and 46,892 checksums agree. But Kraken says to use decimals, and in production I'd store integer ticks and lots.",
+      "evidence": [
+        "portfolio: 330 second run on BTC/USD (Oct 8 2026): 46,892 of 46,892 book checksums verified, 0 resyncs"
+      ],
+      "sources": [
+        "https://docs.kraken.com/api/docs/guides/spot-ws-book-v2"
+      ],
+      "tags": [
+        "pushback",
+        "precision"
+      ]
+    },
+    {
+      "id": "obm-51",
+      "type": "pushback",
+      "level": 3,
+      "q": "Annualizing five minutes of volatility is meaningless. Why show it?",
+      "easy": "As a forecast of the year it is meaningless, and the page says so. Annualizing is just a unit, so the number can be compared with the volatility figures traders quote, and the interesting part is the comparison between 1 s and 10 s sampling.",
+      "deep": "Concede: sqrt(365 x 86,400 / 300) is about 324, so a five minute window is scaled up enormously and says nothing about next week; volatility clusters, so a calm five minutes annualizes low and a busy one high. Defend: annualization only changes units, the ratio between the two samplings is unit free, and the page reports the sampling error (about 4% and 13%) with the number. The scientifically useful output is the sign and size of the 1 s versus 10 s gap, which is a direct, live readout of microstructure noise or short horizon autocorrelation. Over longer windows the same code would give meaningful daily figures.",
+      "say": "As a forecast, yes, and the page says it says nothing about the coming year. Annualizing is a unit so the numbers read like the ones traders quote. The part I care about is the gap between one second and ten second sampling.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "realized volatility"
+      ]
+    },
+    {
+      "id": "obm-52",
+      "type": "pushback",
+      "level": 2,
+      "q": "Why sorted arrays with O(n) inserts instead of a tree?",
+      "easy": "Because n is 100. Shifting at most 100 numbers in contiguous memory is faster than walking and allocating tree nodes, and it makes the top 10 for the checksum a slice.",
+      "deep": "Concede: asymptotically a balanced tree is O(log n) per insert against O(n), and at depth 1,000 or with hundreds of books the comparison should be measured. Defend: at depth 100 a splice moves under a kilobyte, binary search needs about 7 comparisons, best level and top 10 are direct index reads, and ordered iteration for the depth chart and heatmap is free. The arrays are also trivially copyable into Float64Arrays for the heatmap columns every 500 ms. Low latency engines often use a price indexed ladder rather than a tree, which is the direction I would go before a tree.",
+      "say": "At depth 100 the array wins: a splice moves under a kilobyte, and the top 10 for the checksum is a slice. At depth 1,000 I'd benchmark, and I'd try a price ladder before a tree.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "data structures"
+      ]
+    },
+    {
+      "id": "obm-53",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to me as if I were the hiring manager.",
+      "easy": "A live copy of an exchange's order book, checked against the exchange after every update, with market statistics computed only from the verified copy.",
+      "deep": "Lead with the integrity check and its result, then one statistic, then one honest limit. The numbers to land: 46,892 of 46,892 checksums, about 142 updates a second, OFI R squared 0.54.",
+      "say": "I built a live copy of Kraken's bitcoin order book in the browser, about 142 updates a second, and checked it against the exchange's own checksum after every update: 46,892 out of 46,892 matched. Only then do I compute statistics, like how much buying pressure moves the price, which explained 54% of per second price moves. It shows I treat data integrity as part of the pipeline, not an afterthought.",
+      "evidence": [
+        "portfolio: 330 second run on BTC/USD (Oct 8 2026): 46,892 of 46,892 book checksums verified, 0 resyncs",
+        "portfolio: β = 1.10 USD per BTC, R&sup2; = 0.54, n = 300"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring manager"
+      ]
+    },
+    {
+      "id": "obm-54",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain this project to me as if I were a staff engineer.",
+      "easy": "Snapshot plus delta book with per message CRC32 verification, resync by resubscribe, truncation tested separately, OFI and RV on exchange time, decoupled painting, and the gaps admitted.",
+      "deep": "Name the invariants, the failure modes each test pins, and what the checksum cannot see. Admit no natural mismatch and the double precision choice.",
+      "say": "It's a snapshot plus delta book over one WebSocket. Each side is a sorted array with binary search, truncated to depth 100 after every message, and verified against Kraken's CRC32 over the top 10 levels formatted at the instrument's precision. A mismatch unsubscribes and resubscribes, and the second with the resync is excluded from the order flow fit. The checksum can't see levels past 10, so truncation has its own test. 46,892 checks matched, but nothing mismatched naturally, so recovery is proven by tests, not logs.",
+      "evidence": [
+        "portfolio: All 46,892 checksums (the snapshot and every update) matched, with no resyncs."
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff engineer"
+      ]
+    },
+    {
+      "id": "obm-55",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain this project to me as if I were a product manager.",
+      "easy": "A market dashboard that proves its numbers are built from a correct copy of the data before showing them, and tells the user when it is resyncing.",
+      "deep": "A PM cares about trust in the numbers and what the user sees when things go wrong. Frame the checksum as a correctness badge, the resync as graceful recovery, and the cards as plain questions with the math hidden.",
+      "say": "Market dashboards can quietly show wrong numbers if they miss one update. Mine checks its copy of the order book against the exchange after every update and shows a verified count on screen, so users can see the data is right. If a check ever fails, it rebuilds from a fresh copy and marks the moment on the charts. Each card asks a plain question, like does buying pressure move the price, with the details behind a link.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "product manager"
+      ]
+    },
+    {
+      "id": "obm-56",
+      "type": "narrate",
+      "level": 1,
+      "q": "Give me the recruiter version in under 30 seconds.",
+      "easy": "A live order book dashboard in JavaScript that verifies every update against the exchange and computes market statistics, with an 18 test suite.",
+      "deep": "Say what it is, the tools, one number, and why it is relevant to data and ML engineering roles.",
+      "say": "It's a live dashboard of the bitcoin order book on Kraken, built in JavaScript, that checks its data against the exchange after every update, about 142 a second. In a five and a half minute run all 46,892 checks passed. It's the same skill as keeping a data pipeline correct in real time, with tests to prove it.",
+      "evidence": [
+        "portfolio: 47,595 messages, of which 46,891 were book updates, about 142 a second",
+        "portfolio: 330 second run on BTC/USD (Oct 8 2026): 46,892 of 46,892 book checksums verified, 0 resyncs"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "Book channel, Kraken WebSocket API v2",
+      "url": "https://docs.kraken.com/api/docs/websocket-v2/book",
+      "why": "Message format for snapshots and updates, the allowed depths, in order processing, and the checksum over the top 10 levels."
+    },
+    {
+      "title": "Spot WebSocket book v2 guide (Kraken)",
+      "url": "https://docs.kraken.com/api/docs/guides/spot-ws-book-v2",
+      "why": "The checksum recipe, truncation after each update, qty 0 removal, and the advice to parse prices with a decimal decoder."
+    },
+    {
+      "title": "The Price Impact of Order Book Events (Cont, Kukanov, Stoikov, arXiv 1011.6402)",
+      "url": "https://arxiv.org/abs/1011.6402",
+      "why": "The order flow imbalance definition and the linear price impact relation with slope inversely proportional to depth."
+    },
+    {
+      "title": "Cyclic redundancy check (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Cyclic_redundancy_check",
+      "why": "CRC as polynomial division over GF(2), the CRC-32 polynomial in normal and reflected form, burst error detection, and why it is not tamper proof."
+    },
+    {
+      "title": "Realized variance (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Realized_variance",
+      "why": "Realized variance as a sum of squared returns, convergence to integrated variance, the microstructure noise bias, and remedies such as subsampling and realized kernels."
+    }
+  ]
+}
