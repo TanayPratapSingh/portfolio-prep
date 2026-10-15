@@ -1,0 +1,41 @@
+name: Check decks and deploy
+
+# On every push: validate every deck (schema, writing rules, and every evidence
+# quote string matched against the portfolio text or the project repository),
+# then publish the site. A deck with an untraceable number fails here and never ships.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Validate decks and trace every number to its source
+        run: python scraper/build.py --evidence
+      - name: Check the site script parses
+        run: node --check assets/app.js
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+      - id: deploy
+        uses: actions/deploy-pages@v4
