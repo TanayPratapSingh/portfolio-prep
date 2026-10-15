@@ -1,0 +1,1197 @@
+{
+  "deck_id": "p-handoff",
+  "title": "handoff",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/handoff",
+  "summary_easy": "handoff is a supervisor for incident response agents where every request for human approval has an owner, a deadline, and a rule written in advance for what happens if nobody answers. On silence it can drop the action, run a safer substitute, ask the next tier, or freeze, and it never treats silence as approval. It has 212 tests, 11 scenarios, and no dependencies, and it runs on a simulated cluster with rule based workers.",
+  "summary_deep": "A hand written supervisor state machine (plan, dispatch, aggregate, decide, act, verify) fans an incident out to five deterministic workers holding a read only tool registry, so only the supervisor can execute. The aggregator tracks supporters and detractors per hypothesis; a hypothesis with voices on both sides is contested, and any action addressing it has its effective risk raised one level. A risk keyed policy table (medium 300 s escalate, high 180 s safe_fallback, critical 600 s hold with quorum 2) drives an escalation engine that routes by tier, skill, and load, halves later windows with a 30 second floor, and fires deadlines on a caller driven tick against an injected clock. OnExpiry has four members and deliberately no ALLOW; safe_fallback runs a tool's declared, import validated, strictly lower risk substitute, such as read only mode for a database failover. Config mistakes are refused at load, decisions cover approve, reject, modify, and defer, and every state change goes to an append only journal. 212 unittest cases and 11 YAML scenarios run on a bare interpreter in under a tenth of a second across Python 3.11 to 3.13; the suite caught a safety branch that was unreachable and a risk bump discarded at rule lookup. Open gaps: no scheduler, no persistence, no resume from a frozen run, and no LLM workers.",
+  "sheet": {
+    "easy": "## handoff in one line\nAgents that need a human's approval, where every request has an owner, a deadline, and a written rule for what happens if nobody answers.\n\n## Why it matters\nMost approval prompts wait forever. At 3am nobody answers, and an incident with a parked agent has nobody watching it.\n\n## How it works\n- A **supervisor** sends five read only workers to investigate, merges what they say, and proposes fixes, cheapest first.\n- Cheap actions run on their own. Medium and above go to an **escalation engine**.\n- The engine pages the right person (tier, skill, load) with a **deadline**.\n- On silence it does one of four things: **deny**, **safe fallback**, **escalate** to the next tier, or **hold**. There is no **allow**.\n- If workers **disagree**, the fix is treated as one level riskier, so it asks a human.\n- Every step goes into an append only **journal**.\n\n## The policy\n| Risk | Ask? | First deadline | On silence | Sign offs |\n|---|---|---|---|---|\n| read only, low | no | none | deny | 1 |\n| medium | yes | 300 s | escalate | 1 |\n| high | yes | 180 s | safe fallback | 1 |\n| critical | yes | 600 s | hold | 2 |\n\n## The story to tell\nFailover proposed, Ana paged with 180 seconds, nobody answers, the database goes read only instead. Nothing lost, reversible, and the log says nobody answered.\n\n## Numbers\n212 tests, 11 scenarios, 0 dependencies, under a tenth of a second, CI on Python 3.11 to 3.13. Simulated cluster, rule based workers.\n\n## Honest gaps\nNo scheduler for the deadline tick, no pager attached, static seven person roster, no LLM workers, frozen incidents cannot resume.\n",
+    "deep": "## Architecture\n```\nIncident -> Supervisor (only executor)\n  PLANNING     static plan: logs, metrics, replication, runbook -> remediation (depends on all 4)\n  DISPATCHING  workers get a READ_ONLY-filtered ToolRegistry\n  AGGREGATING  support/against per hypothesis, supporters/detractors, CONFLICT_DETECTED\n  DECIDING     drop proposals not addressing confirmed or contested hypotheses\n  ACTING       effective risk -> forbids? -> needs_human? -> raise_for -> AWAITING_HUMAN | execute\n  VERIFYING    read_metrics: p99 <= 1000 ms resolves; else next action or ABANDONED\nTerminal: RESOLVED, FROZEN, ABANDONED. advance() loop guard: 100.\nEscalationEngine: raise_for, decide, tick, open; Roster; Policy; Journal (append only, JSONL sink, subscribers)\n```\nLayers: core (no deps) <- bus, tools <- agents, escalation <- supervisor <- evalsvc. Everything constructor injected by system.build().\n\n## Escalation record\nincident_id, tool, args, risk (effective), reason, blast_radius, ladder, deadline_seconds, on_expiry, quorum, required_skill, safe_fallback, state, tier_index, attempts[tier, responder_id, assigned_at, deadline, answered, decision, note], approvals, modified_args, resolved_at, resolution_note. Owner = latest attempt's responder.\n\n## Policy (config/policy.yaml), autonomy guarded, escalate_at_or_above medium\n| risk | approval | deadline | on_expiry | quorum | ladder | skill |\n|---|---|---|---|---|---|---|\n| read_only | no | 0 | deny | 1 | none | none |\n| low | no | 0 | deny | 1 | none | none |\n| medium | yes | 300 | escalate | 1 | primary, secondary | none |\n| high | yes | 180 | safe_fallback | 1 | primary, secondary, incident_commander | infrastructure |\n| critical | yes | 600 | hold | 2 | incident_commander, engineering_manager, director | infrastructure |\n\nTier window: $w_k = \\max(30, \\lfloor d \\cdot 0.5^{k} \\rfloor)$ s. Medium 300, 150. High 180, 90, 45. Critical 600, 300, 150 (arithmetic from the code).\n\n## OnExpiry, exactly\n| value | state | effect |\n|---|---|---|\n| deny | DENIED_ON_TIMEOUT | action dropped, ACTION_DENIED, run continues |\n| safe_fallback | FELL_BACK (or DENIED_ON_TIMEOUT if none declared) | fallback runs with args narrowed to its fields, approved_by \"timeout fallback\" |\n| escalate | ASSIGNED on next tier, or EXHAUSTED | unanswered attempt kept, shorter window |\n| hold | HELD (open, never fires again) | INCIDENT_FROZEN, run goes FROZEN |\nNo ALLOW: rejected at load, asserted absent by test. The original high risk action only ever runs with a human approval.\n\n## Decisions\napprove, reject (final, no ladder), modify (needs modified_args, counts as approval), defer (next tier now). Only the current assignee may decide; terminal escalations refuse. Quorum: distinct responders, climbs tiers after each approval.\n\n## Routing\ncandidates(tier, skill): available, open_count < max_concurrent, has skill; sorted by (open_count, id). Empty tier: Attempt with responder None, ESCALATION_REASSIGNED, next tier at no time cost. Roster: 7 people, 5 tiers.\n\n## Aggregation and effective risk\n- support = sum of supporting confidences, against = sum of contradicting ones.\n- contested: supporters and detractors both non empty. confirmed: not contested and support >= 0.6. rejected: not contested, against >= 0.6, support 0.\n- actionable = confirmed + contested (fed to the planner).\n- _BUMP: read_only to low, low to medium, medium to high, high to critical, critical stays.\n\n## Workers (rules)\n| worker | rule |\n|---|---|\n| log_analyst | error_lines = int(error_rate x 1000 x 15/5); > 50 supports service_degraded (0.9); upstream top error supports upstream_fault (0.75) |\n| metrics_analyst | saturated = p99 > 1000 ms, supports or contradicts service_degraded (0.95); saturated and replicas < 8 supports capacity_shortfall (0.6) |\n| replication_analyst | lag > 5.0 s supports database_fault (0.95) |\n| runbook_retriever | latency RB-014, errors RB-002, replication RB-031 |\n| remediation_planner | scale (min(2x, 200)), restart, failover, page_vendor; ordered page_vendor 0 ... delete_volume 9 |\n\n## Tools (15)\nread_only: read_logs, read_metrics, read_replication, search_runbooks. low: restart_service, purge_cache, page_vendor, snapshot_volume. medium: scale_deployment, rollback_release, drain_node, enable_read_only. high: failover_database (irreversible, fallback enable_read_only), force_terminate (irreversible, fallback restart_service). critical: delete_volume (irreversible, fallback snapshot_volume). check_fallbacks: exists, not self, strictly lower risk; build_registry raises at import.\n\n## Load time refusals\non_expiry missing on an approval rule; unknown on_expiry (including allow); quorum > ladder; empty ladder with approval; non positive deadline; missing risk level; roster tier with no responder; broken fallback. Policy ladder to roster cross check is a unit test over shipped configs.\n\n## ADRs\n1. Explicit state machines over a framework (own the clock, readable resume). 2. No third party deps (miniyaml). 3. Escalation is a policy, not a callback. 4. No ALLOW on expiry.\n\n## Tests (212) and scenarios (11)\nengine 43, miniyaml 24, supervisor 19, builtin tools 15, roster 14, policy 13, contested 13, cli 12, aggregator 11, journal 10, tool registry 9, scenarios 8, schema 8, clock 7, types 6. Boundary: 299 s nothing, 300 s fires. Scenarios 01 to 11: guarded cheap, medium waits, approval resumes, rejection, modify, silence exhausts, high falls back, contested raises, observe, autonomous, healthy null case.\n\n## Bugs found\n1. Contested risk bump unreachable (planner only saw confirmed). 2. Bumped risk discarded at rule lookup (empty ladder, instant exhaustion). 3. miniyaml flattened nested maps in list items (modified_args empty).\n\n## Gaps found reading the code\nLate approval accepted between deadline and tick; no resume from FROZEN; INCIDENT_RESUMED, PLAN_REVISED, AUTONOMY_CHANGED never emitted; README says 200 tests; autonomous bypasses the table for critical tools; fallback runs a medium tool without approval; no replay function.\n\n## Numbers and sources\n| Number | Source |\n|---|---|\n| 212 tests, 11 scenarios, 0 deps, CI 3.11 to 3.13 | portfolio, CLAUDE.md |\n| under a tenth of a second; 0.08 s to 0.10 s over three runs | portfolio; README |\n| 3666 source lines, 35 modules, 15 tools | README |\n| 180 s high deadline, quorum 2 critical | config/policy.yaml |\n| backoff 0.5, floor 30 s | engine.py, request.py |\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "handoff is an escalation layer for agents that need human approval. Most human in the loop is a dialog that waits forever. In handoff every request has an owner, a deadline, and a declared rule for silence: deny, run a safer substitute, escalate, or hold. There is no allow. If nobody answers a database failover in 180 seconds, it puts the database in read only mode instead. It has 212 tests and no dependencies, on a simulated cluster with rule based workers.",
+      "keypoints": [
+        "Escalation with owner, deadline, rule for silence",
+        "Four expiry behaviours, deliberately no allow",
+        "Failover to read only story with 180 seconds",
+        "212 tests, zero dependencies",
+        "Simulated cluster, rule based workers"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "The problem is the approval prompt that never gets answered. An agent reaches something risky, asks, and waits. At 3am nobody replies, and now the incident has nobody watching it. So I built the escalation as its own layer. A supervisor takes an incident, sends five workers to look at logs, metrics, replication, and runbooks, and a planner proposes fixes, cheapest first. Workers only get read only tools, so the supervisor is the only thing that can execute. Cheap actions run on their own. Anything at medium or above becomes an escalation. A policy file keyed by risk says which tiers can approve, how long the first one gets, how many signatures, and what happens on silence. The engine pages the least loaded person on the right tier with the right skill. A tick function fires deadlines, and it's driven by the caller, so tests hit 299 and 300 seconds exactly. On silence there are four answers: deny, run the tool's declared safer substitute, escalate to the next tier, or hold. There's no allow, because approval on timeout isn't approval. If workers disagree, the fix gets bumped one risk level, so even a restart asks a human. The numbers: 212 tests, 11 scenarios, zero dependencies, under a tenth of a second. The suite caught a safety branch that could never run, because contested hypotheses never reached the planner. The limits are real. The cluster is a dataclass, the workers are rules, and nothing calls tick on a timer yet. Next is a scheduler and one LLM worker to see if the layer holds.",
+      "keypoints": [
+        "The unanswered prompt problem",
+        "Supervisor, five read only workers, cheapest first",
+        "Policy table: tiers, deadline, quorum, on_expiry",
+        "Caller driven tick, tested at 299 and 300 seconds",
+        "Four silence behaviours, no allow; contested bumps risk",
+        "212 tests, bug where a safety branch was unreachable",
+        "Limits: simulated, rules, no scheduler; next steps"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as you would to a staff engineer.",
+      "script": "The core claim is that escalation is a routing problem with deadlines, so it gets its own layer with its own state machine. Start with the tools. Each tool declares its risk, whether it's reversible, a plain words blast radius, and optionally a strictly lower risk substitute. The registry checks every substitute at import: it must exist, it can't be itself, and it must be lower risk. Failover declares read only mode. Force terminate declares a restart. The supervisor runs a static plan: four diagnostic subtasks in one batch, then remediation that depends on all four. Workers get a registry filtered to read only tools, so they can't reach a mutating tool by name. The aggregator sums confidence per hypothesis on each side and tracks who said what. Contested means both sides have a voice, not that the net is small, because two confident opposites and two weak signals both net to zero. Confirmed and contested hypotheses both go to the planner, and any action addressing a contested one gets its risk bumped a level. Then the escalation. The policy is a YAML table by risk. Medium asks primary then secondary with 300 seconds and escalates on silence. High asks three tiers with 180 seconds and falls back on silence. Critical needs two signatures with 600 seconds and holds. raise_for picks the rule by the effective risk. That lookup used to use the declared risk, which gave a contested restart an empty ladder and an instant exhaustion. Routing filters the tier by skill and capacity and sorts by load. Later tiers get half the window with a 30 second floor. Decisions are approve, reject, modify, and defer. Reject is final. Modify needs arguments. Quorum climbs tiers and requires different people. tick is caller driven against an injected clock, which is the reason I wrote the state machines by hand. A framework's interrupt waits indefinitely and owns its scheduler. On expiry, deny drops the action. Safe fallback runs the substitute with narrowed arguments and records approved by timeout fallback. Escalate moves a tier or exhausts. Hold freezes. There's no allow, and a test asserts it. The supervisor never blocks. It returns awaiting human, and the next advance resumes on the same step, which one scenario pins so diagnosis never reruns. Everything goes to an append only journal with a closed event vocabulary. Testing is 212 unittest cases and 11 YAML scenarios that each state why they exist, run on a bare interpreter across three Python versions. The suite caught two design flaws during the build. The risk bump for contested diagnoses was unreachable, because the planner was only fed confirmed hypotheses, so no proposal ever addressed a contested one. It read like a guarantee and did nothing. My hand written YAML reader also flattened nested maps inside list items, which silently emptied the edited arguments in a scenario. Reading it back, I'd fix four things. An approval can land after its deadline if tick hasn't run. Frozen runs can't resume. The fallback runs a medium tool without approval. And autonomous mode bypasses the table for critical tools. Production needs a scheduler, persistence, a pager on the subscribe hook, and an LLM worker to test the open question.",
+      "keypoints": [
+        "Tools declare risk, reversibility, blast radius, validated fallback",
+        "Read only workers, static plan, voices based contested detection",
+        "Policy by risk, effective risk lookup bug and fix",
+        "Routing by skill and load, halving windows with a floor",
+        "Decisions, quorum, caller driven tick, no framework",
+        "Four expiry behaviours exactly, no allow, resume on same step",
+        "Gaps: late approval window, no resume from frozen, fallback and autonomy edges"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone who is not an engineer.",
+      "script": "When software runs into something risky, like switching a company's main database, it's supposed to stop and ask a person. Most systems then just wait. If it's the middle of the night and nobody answers, the problem keeps getting worse while the software sits there. I built a system where every one of those requests goes to a specific person with a deadline, and the rules for what happens if they stay silent are written down ahead of time. It might ask the next person up, or do a safer version of the action, or freeze everything until someone looks. It never treats silence as a yes. I tested it with 212 automated checks on a pretend computer system, so the next step is trying it with real AI agents.",
+      "keypoints": [
+        "Risky action means asking a person",
+        "Most systems wait forever at night",
+        "Specific person, deadline, rules for silence",
+        "Never treats silence as a yes",
+        "212 checks on a simulated system"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the architecture on the whiteboard.",
+      "script": "First I draw a box at the top labeled Supervisor, and I say it's the only component allowed to execute. Under it I draw five small boxes for the workers: logs, metrics, replication, runbook, planner. Around them I draw a dashed line labeled read only registry, and I say workers can't even name a mutating tool. Second, I draw an arrow from the workers to an Aggregator box and write supporters and detractors next to it. I add a branch labeled contested, with a plus one arrow pointing to the words effective risk. Third, I draw a diamond labeled needs a human. The no branch goes to execute. The yes branch goes to a big box labeled Escalation Engine. Inside that box I draw three inputs: the policy table, the roster with tiers, skills, and load, and a clock. Fourth, I draw the escalation's life as a line: assigned, deadline, then a fork. Approve, reject, modify, defer on one side. Silence on the other side, splitting into four arrows labeled deny, safe fallback, escalate, hold. I draw an empty fifth arrow, cross it out, and label it allow. Fifth, I write the failover example beside the safe fallback arrow: failover, 180 seconds, ana, nobody answers, read only mode. Last, I draw a long bar along the bottom labeled Journal, append only, with arrows from every box into it, and a dangling hook labeled subscribe where a pager would attach.",
+      "keypoints": [
+        "Supervisor on top, only executor",
+        "Five workers inside a read only boundary",
+        "Aggregator with contested bumping effective risk",
+        "Engine fed by policy, roster, clock",
+        "Four silence arrows plus a crossed out allow",
+        "Failover example and the journal bar with an empty subscribe hook"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What happens if the approval arrives one second after the deadline?",
+      "script": "It depends on whether tick has run. tick is caller driven. If the deadline passed but nobody has called tick yet, the escalation is still assigned, and decide accepts the approval. If tick already ran, the escalation has moved on. On escalate, the old responder is no longer the assignee, so their decision is refused. On fallback or deny, it's terminal and decide raises. That first window is a real gap, and it's on my list of missing scenarios. The fix is one line in decide: compare the clock to the attempt's deadline and refuse, or expire first. I'd want the scheduler's tick interval in the record too, since it widens every deadline in practice.",
+      "keypoints": [
+        "Before tick: still assigned, approval accepted",
+        "After tick: refused or terminal",
+        "Gap is acknowledged as a missing scenario",
+        "Fix: check the deadline inside decide",
+        "Scheduler interval widens deadlines"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you make this survive a process restart?",
+      "script": "Today it can't. Incident runs and escalations live in memory, and the journal's JSON lines sink is the only thing on disk. I'd make the events the source of truth. Every state change is already a closed set of events, so I'd write them to a durable store and rebuild escalations and runs by replaying them on startup. The journal docstring claims that's possible, but there's no replay function yet, so I'd write that first and test it by replaying every scenario's events and comparing state. Then decide needs compare and set on the escalation's state, so two approvers or two schedulers can't both win.",
+      "keypoints": [
+        "In memory today, only the JSONL sink is durable",
+        "Events as source of truth, replay on startup",
+        "Replay claimed but not written yet",
+        "Test replay against every scenario",
+        "Compare and set on escalation state"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you plug in an LLM worker, and what would you measure?",
+      "script": "I'd implement the Worker protocol, which is a name, a capability set, and a handle method, over one analyst, say metrics. It gets the same read only registry, so it can't reach a mutating tool even if it names one. Its findings need a confidence and the hypotheses they support or contradict, so I'd constrain the output to that schema and reject anything else. Then I'd run each scenario many times and measure how often contested fires, whether the expected actions still run, and whether anything runs that shouldn't. The escalation layer shouldn't change at all. If contested fires constantly, I'd add a minimum confidence before a finding counts as a voice.",
+      "keypoints": [
+        "Implement Worker over one analyst",
+        "Read only registry still applies",
+        "Schema constrained findings",
+        "Repeat scenarios, measure contested rate and wrong actions",
+        "Minimum confidence per voice if noisy"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why does high risk get a shorter deadline than medium?",
+      "script": "Because high has a cheap, safe answer to silence and medium doesn't. Every high risk tool in the registry declares a strictly safer substitute, so if nobody answers in 180 seconds, the system does the conservative thing and keeps going. Medium escalates on silence, so a longer first window means fewer needless second pages. Critical gets the longest, 600 seconds, plus two signatures, because its answer to silence is to freeze. So the deadline is set by what silence costs at that level, not by how dangerous the action sounds. Later tiers get half the window, because by then the incident has already used up the earlier ones.",
+      "keypoints": [
+        "High has a declared safer substitute",
+        "Medium escalates, so longer first window",
+        "Critical: 600 seconds, two signatures, hold",
+        "Deadline set by the cost of silence",
+        "Later tiers get half"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your fallback runs a medium risk action nobody approved. That's allow with extra steps.",
+      "script": "It's a fair hit, and it's true that read only mode is medium and runs without anyone approving it on timeout. What's different is what runs and what the record says. The failover itself never runs without a person. The substitute was declared by the tool's author, checked at import to be strictly lower risk, and chosen by whoever wrote the high risk row of the policy. And the journal records approved by timeout fallback, so nobody can mistake it for a decision. If I tightened it, I'd require every fallback to sit below the escalation bar, and enforce that when the registry loads.",
+      "keypoints": [
+        "Concede: medium tool runs without approval",
+        "Original high risk action never runs unapproved",
+        "Substitute declared and validated in advance",
+        "Journal says timeout fallback",
+        "Tighten: fallback below the escalation bar"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "This is a toy. The cluster is a dataclass and the workers are if statements.",
+      "script": "Both true, and I put both in the limitations. The cluster is a dataclass and no model is called. What I'd push back on is that the hard part is the cluster. The part people get wrong is what happens when the human doesn't answer, and that's real code with 212 tests, tested to the exact second. The world is a seam: each tool's run function takes the world and validated arguments, so swapping in real APIs doesn't touch the escalation layer. The workers are a seam too. The honest open question is whether contested detection holds up with nondeterministic workers, and that's the next experiment.",
+      "keypoints": [
+        "Concede: simulated cluster, rule based workers",
+        "Hard part is the unanswered human, tested to the second",
+        "World and Worker are seams",
+        "Open question named: nondeterministic workers"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "ho-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What problem does handoff solve, in one sentence and then technically?",
+      "easy": "When an automated system asks a human to approve something risky and nobody answers, most systems just wait forever; handoff decides in advance who gets asked, how long they have, and exactly what happens if they stay silent.",
+      "deep": "The common human in the loop shape is a blocking confirm() call: it does not say who is asked, it has no deadline, and the case where it never returns is undefined. During an incident at 3am that undefined case is the normal case, and an agent parked on an unanswered prompt is worse than one that never asked, because nothing is watching the incident. handoff treats escalation as a routing problem: a policy table keyed by risk names the tiers that may approve, the first tier's deadline, the quorum, the required skill, and a mandatory on_expiry behaviour (deny, safe_fallback, escalate, hold). A roster supplies people with tiers, skills, and load limits. A caller driven tick() fires deadlines. The domain is incident response on a simulated cluster with five rule based workers, and the README says plainly that the domain is not the point; the escalation layer is.",
+      "say": "Most human in the loop is a modal dialog that waits forever. I built the case nobody designs for: the page goes out at 3am and nobody answers. Every escalation in handoff has an owner, a deadline, and a written rule for silence.",
+      "evidence": [
+        "portfolio: Most human in the loop is a modal dialog that blocks forever."
+      ],
+      "sources": [],
+      "tags": [
+        "problem",
+        "human in the loop",
+        "overview"
+      ]
+    },
+    {
+      "id": "ho-02",
+      "type": "why",
+      "level": 2,
+      "q": "How does handoff relate to comms-agent?",
+      "easy": "comms-agent added a review gate where a person checks low confidence items before a report goes out. That covers the case where the reviewer shows up. handoff covers the case where they do not.",
+      "deep": "In comms-agent the human in the loop gate is a pause inside an agent graph: flag the uncertain items, let a reviewer correct them, then continue. Its implicit assumption is that the reviewer eventually acts. handoff makes the opposite assumption the design center: the reviewer may never act, so every question carries a deadline and a declared consequence for silence, and the escalation logic gets its own layer (roster, policy, engine, journal) instead of being a node in the graph. The write up calls the no show case the one that breaks these systems in production.",
+      "say": "comms-agent answered what happens when the reviewer shows up. handoff answers what happens when they don't, which is the case that actually breaks in production. So the escalation became its own layer with deadlines, instead of a pause inside a graph.",
+      "evidence": [
+        "portfolio: handoff covers what happens when they do not, which is the case that breaks these systems in production."
+      ],
+      "sources": [],
+      "tags": [
+        "motivation",
+        "comms-agent"
+      ]
+    },
+    {
+      "id": "ho-03",
+      "type": "concept",
+      "level": 1,
+      "q": "Walk me through the architecture.",
+      "easy": "A supervisor gets an incident, sends five workers to investigate, merges what they report, and decides what to do. Anything risky goes to an escalation engine that pages a person with a deadline. Every step is written to an append only journal.",
+      "deep": "Layers, dependencies pointing one way: core (types, injectable clock, ids, errors, miniyaml) depends on nothing; bus (closed EventKind vocabulary, append only Journal with optional JSONL sink); tools (Tool with risk, reversible, blast_radius, safe_fallback; argument schemas; the World dataclass that stands in for a cluster); agents (Worker protocol, three analysts, a runbook retriever, a remediation planner); escalation (Roster, Policy, Escalation record, EscalationEngine, which owns deadlines); supervisor (static planner, aggregator, Incident and IncidentRun, Supervisor state machine, the only component that executes a mutating tool); evalsvc (scenario parser and runner). system.build() wires it all by constructor injection so tests can swap the clock, policy, roster, or world. Flow: open, plan, dispatch, aggregate, decide, act or escalate, verify against metrics.",
+      "say": "There's a supervisor, five workers, an escalation engine, and a journal. The supervisor is the only thing allowed to execute. Workers only get read only tools, and anything at or above medium risk becomes an escalation with an owner and a deadline.",
+      "evidence": [
+        "portfolio: Workers are handed a registry filtered to read only tools, so they cannot reach a mutating one by name."
+      ],
+      "sources": [],
+      "tags": [
+        "architecture",
+        "layers"
+      ]
+    },
+    {
+      "id": "ho-04",
+      "type": "number",
+      "level": 1,
+      "q": "What are the project's numbers, and what do they measure?",
+      "easy": "212 tests and 11 behavioural scenarios, all passing, zero third party dependencies, and the whole suite runs in under a tenth of a second. CI is green on Python 3.11 to 3.13. All of it runs against a simulated cluster with rule based workers.",
+      "deep": "The write up gives 212 tests, 11 scenarios, zero dependencies, and CI on Python 3.11 to 3.13; the repo's CLAUDE.md says all 212 tests and all 11 scenarios were verified by running, and a count of test methods in tests/ gives 212 across 15 files (engine 43, miniyaml 24, supervisor 19, builtin tools 15, roster 14, policy 13, contested diagnosis 13, cli 12, aggregator 11, journal 10, tool registry 9, scenarios 8, tool schema 8, clock 7, types 6). The README's numbers table is stale on one row: it still says 200 tests. The README also gives suite wall time of 0.08 s to 0.10 s over three runs, 3666 source lines across 35 modules, and 15 tools across five risk levels. These numbers measure correctness of the orchestration and escalation logic on a dataclass world; the README states none of them is a claim about production behaviour.",
+      "say": "212 tests and 11 scenarios, all passing, no dependencies, under a tenth of a second on a bare interpreter. One honest wrinkle: my README table still says 200 tests from before the last batch. And every number is on a simulated cluster with rule based workers.",
+      "evidence": [
+        "portfolio: 212 tests / 11 behavioural scenarios / zero dependencies / unanswered page -> safer substitute / CI green on Python 3.11 to 3.13",
+        "portfolio: There are no dependencies, so the whole suite runs on a bare interpreter in under a tenth of a second.",
+        "repo:handoff/CLAUDE.md: Verified by running: all 212 tests, all 11 scenarios, the four act demo,",
+        "repo:handoff/README.md: | tests | 200, all passing |",
+        "repo:handoff/README.md: | suite wall time | 0.08s to 0.10s over three runs |",
+        "repo:handoff/README.md: | source | 3666 lines across 35 modules |",
+        "repo:handoff/README.md: | tools | 15, across five risk levels |",
+        "repo:handoff/README.md: | third party dependencies | 0 |",
+        "repo:handoff/README.md: simulated cluster with rule based workers. None of it is a claim about"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "testing"
+      ]
+    },
+    {
+      "id": "ho-05",
+      "type": "how",
+      "level": 1,
+      "q": "Describe the supervisor orchestration loop.",
+      "easy": "The supervisor moves each incident through fixed stages: plan, send work out, merge results, decide, act, check whether it worked. If it needs a person, it stops and returns, and the caller resumes it later from the same spot.",
+      "deep": "Supervisor.advance(run) loops while run.state is not terminal, with a guard that abandons the run after 100 iterations. States: TRIAGE to PLANNING; PLANNING builds a static plan (four diagnostic subtasks plus one remediation subtask that depends on them); DISPATCHING runs ready subtasks in dependency batches; AGGREGATING merges findings and journals CONFLICT_DETECTED for each contested hypothesis; DECIDING drops proposals whose addressed hypothesis is neither confirmed nor contested and closes the run if nothing is left; ACTING takes the head of the queue, computes effective risk, and either blocks it (POLICY_BLOCKED), escalates it (AWAITING_HUMAN), or executes it; VERIFYING reads metrics and resolves if p99 is no longer saturated, otherwise tries the next queued action or abandons. Terminal states are RESOLVED, FROZEN, ABANDONED. advance() never blocks: in AWAITING_HUMAN it checks the escalation and returns if it is still open, so calling it again while blocked changes nothing.",
+      "say": "advance() drives the incident as far as it can without a human, then returns. If it's waiting on a person, it returns AWAITING_HUMAN and the caller drives the clock. Calling it again while blocked is a no op, which a test checks.",
+      "evidence": [
+        "repo:handoff/handoff/supervisor/supervisor.py: if guard > 100:"
+      ],
+      "sources": [],
+      "tags": [
+        "supervisor",
+        "state machine",
+        "orchestration"
+      ]
+    },
+    {
+      "id": "ho-06",
+      "type": "define",
+      "level": 2,
+      "q": "Define the supervisor pattern, a worker, and capability routing as used here.",
+      "easy": "A supervisor is one coordinator that hands subtasks to specialist workers and decides what to do with their answers. A worker answers one kind of question. Routing by capability means a subtask asks for a skill, like metrics, and gets whichever worker offers it.",
+      "deep": "The Worker protocol is three members: name, a capabilities frozenset, and handle(subtask, ctx) returning a WorkerResult of findings (claims with confidence and the hypotheses they support or contradict) and proposals (actions with the hypothesis they address). WorkerRegistry.for_capability returns the alphabetically first worker claiming the capability, so swapping a worker is a registration change, not a planner edit. Workers never execute; the supervisor is the only caller of mutating tools, which is what makes the escalation ladder load bearing rather than advisory. A worker exception is caught, journaled as SUBTASK_FAILED, and marks the aggregate degraded, so a crashed worker degrades the run instead of ending it. Replacing a rule based analyst with an LLM backed one means implementing the same protocol.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "supervisor pattern",
+        "workers",
+        "definitions"
+      ]
+    },
+    {
+      "id": "ho-07",
+      "type": "how",
+      "level": 2,
+      "q": "What do the five workers actually do?",
+      "easy": "Three analysts read logs, metrics, and database replication and report what they see. A runbook retriever looks up a matching procedure. A planner turns the confirmed or disputed explanations into proposed fixes, cheapest first.",
+      "deep": "LogAnalyst: read_logs over 15 minutes; error_lines = int(error_rate x 1000 x window/5); more than 50 lines supports service_degraded at confidence 0.9, otherwise contradicts it; an unhealthy service's top error ('upstream timeout calling payments') supports upstream_fault at 0.75. MetricsAnalyst: saturated means p99 above 1000 ms; supports or contradicts service_degraded at 0.95, and saturated with under 8 replicas supports capacity_shortfall at 0.6. ReplicationAnalyst: lag above LAG_THRESHOLD_S = 5.0 supports database_fault at 0.95, else contradicts. RunbookRetriever: keyword match on the symptom (latency to RB-014, errors to RB-002, replication to RB-031). RemediationPlanner: capacity_shortfall to scale_deployment (replicas min(2x current, 200)), service_degraded to restart_service, database_fault to failover_database on the first replica, upstream_fault to page_vendor; sorted by a fixed order with page_vendor 0, purge_cache 1, restart 2, scale 3, rollback 4, enable_read_only 5, drain 6, failover 7, force_terminate 8, delete_volume 9, so the reversible, narrow action is tried first. All thresholds are hand written; no model is called.",
+      "evidence": [
+        "repo:handoff/handoff/tools/builtin.py: \"saturated\": svc.latency_p99_ms > 1000,",
+        "repo:handoff/handoff/agents/analysts.py: LAG_THRESHOLD_S = 5.0",
+        "repo:handoff/handoff/agents/planner_agent.py: args={\"service\": service, \"replicas\": min(current * 2, 200)},",
+        "repo:handoff/handoff/agents/planner_agent.py: \"failover_database\": 7,",
+        "portfolio: The five workers are deterministic with hand written thresholds, and no LLM is called anywhere."
+      ],
+      "sources": [],
+      "tags": [
+        "workers",
+        "rules",
+        "thresholds"
+      ]
+    },
+    {
+      "id": "ho-08",
+      "type": "why",
+      "level": 1,
+      "q": "Why hand workers a read only tool registry instead of trusting them not to call mutating tools?",
+      "easy": "Because a rule a worker is trusted to follow is a rule that one bug or one bad model output can break. If the dangerous tools are not in the worker's registry at all, the worker cannot call them even by name.",
+      "deep": "Supervisor._readonly_tools builds a fresh ToolRegistry containing only tools whose risk is READ_ONLY, and WorkerContext.call resolves names only against that registry, so a worker asking for failover_database gets UnknownToolError. This is capability based security: authority is what you hold a reference to. It is the property that keeps the escalation ladder meaningful once a worker is an LLM, since a model can be prompted into naming any tool. test_workers_cannot_see_mutating_tools pins it. The tradeoff is that a worker cannot do a safe write like attaching a note, which would need its own risk class.",
+      "say": "Workers get a registry with only read only tools in it. They can't call a mutating tool even by name. With rule based workers that's tidy, but it's the property that matters once a worker is a model, because a model can be talked into naming anything.",
+      "evidence": [
+        "repo:handoff/handoff/supervisor/supervisor.py: if tool.risk is Risk.READ_ONLY:",
+        "portfolio: Workers are handed a registry filtered to read only tools, so they cannot reach a mutating one by name."
+      ],
+      "sources": [],
+      "tags": [
+        "least privilege",
+        "tools",
+        "safety"
+      ]
+    },
+    {
+      "id": "ho-09",
+      "type": "how",
+      "level": 2,
+      "q": "How is the plan built and dispatched?",
+      "easy": "The plan is fixed: check logs, metrics, replication, and runbooks in parallel, then ask the planner for fixes once all four are done. The planner is told which explanations survived so far.",
+      "deep": "planner.plan() emits subtasks for DIAGNOSTIC_CAPABILITIES (logs, metrics, replication, runbook) with service and symptom args, then a remediation subtask whose depends_on is all four ids. planner.ready() returns subtasks whose dependencies are all done, so dispatch runs batch one (four diagnostics) then batch two (remediation). Before the remediation worker runs, the supervisor aggregates the results so far and injects interim.actionable(0.6), confirmed plus contested hypotheses, into its args. The static plan is a deliberate choice: the same incident always fans out the same way, so a change in outcome is a change in the world or the policy, never in the plan. ADR 0001 names a dynamic per incident plan as the change that would justify moving to a graph framework.",
+      "evidence": [
+        "repo:handoff/handoff/supervisor/supervisor.py: subtask.args[\"hypotheses\"] = interim.actionable(self.confidence_threshold)"
+      ],
+      "sources": [],
+      "tags": [
+        "planning",
+        "dispatch",
+        "dag"
+      ]
+    },
+    {
+      "id": "ho-10",
+      "type": "concept",
+      "level": 1,
+      "q": "How does the aggregator decide a hypothesis is confirmed, contested, or rejected?",
+      "easy": "Each worker's finding says which explanations it supports and which it contradicts, with a confidence. The aggregator adds those up per explanation and tracks who said what. If both sides have at least one voice, the explanation is contested.",
+      "deep": "For each hypothesis: support is the sum of confidences of findings that support it, against the sum of those that contradict it, with supporters and detractors as the sets of worker names. contested is true when both sets are non empty. confirmed means not contested and support at least the threshold (0.6). rejected means not contested, against at least 0.6, and zero support. actionable is confirmed plus contested, so a disputed explanation still gets a concrete proposal for a human to judge. Findings validate their own inputs: confidence must be in 0 to 1 and a finding cannot support and contradict the same hypothesis. Failed workers are excluded from the sums and flag the aggregate as degraded. Note support is a sum, so two agreeing workers can exceed 1.0; it is an evidence weight, not a probability.",
+      "evidence": [
+        "repo:handoff/handoff/supervisor/aggregator.py: return bool(self.supporters) and bool(self.detractors)",
+        "repo:handoff/handoff/supervisor/supervisor.py: confidence_threshold: float = 0.6,"
+      ],
+      "sources": [],
+      "tags": [
+        "aggregation",
+        "contested",
+        "hypotheses"
+      ]
+    },
+    {
+      "id": "ho-11",
+      "type": "why",
+      "level": 2,
+      "q": "Why define contested by voices on both sides instead of a small net score?",
+      "easy": "Two confident workers reaching opposite conclusions and two unsure workers giving weak signals both net out near zero, but only the first is a real disagreement that should stop the system.",
+      "deep": "A net score rule (support minus against near zero) cannot tell 0.9 versus 0.8 from 0.05 versus 0.04. The aggregator docstring gives exactly that example and test_contest_is_about_voices_not_net_score pins it. The common alternatives, averaging, taking the max confidence, or letting a model reconcile the findings in a summary, all hide the disagreement, and a hidden disagreement is the state in which an automated system should not act alone. The cost of the voices rule is sensitivity: any single detractor contests a hypothesis, so a noisy worker could force escalations; a production version might require each side to clear a minimum confidence before it counts as a voice.",
+      "say": "I didn't want averaging. Two confident workers disagreeing and two weak signals both net to zero, but only one of them should stop the machine. So contested means both sides have a voice. The flip side is one noisy worker can force escalations, which I'd gate with a minimum confidence.",
+      "evidence": [
+        "repo:handoff/handoff/supervisor/aggregator.py: return bool(self.supporters) and bool(self.detractors)"
+      ],
+      "sources": [],
+      "tags": [
+        "aggregation",
+        "design decision"
+      ]
+    },
+    {
+      "id": "ho-12",
+      "type": "how",
+      "level": 1,
+      "q": "How does disagreement change what happens to an action?",
+      "easy": "Any action aimed at a disputed explanation is treated as one risk level more dangerous. That can push a cheap action, like a service restart, over the line where a person must approve it.",
+      "deep": "Supervisor.effective_risk returns the tool's declared risk, bumped through _BUMP (read_only to low, low to medium, medium to high, high to critical, critical stays critical) when the proposal's addresses field names a contested hypothesis. The bumped level is passed into engine.raise_for(risk=...), and the escalation's reason gets '(risk raised to medium: the diagnosis is contested)' so the human sees why. Scenario 08: error_rate 0.25 gives 750 log error lines (supports service_degraded) while p99 300 ms is not saturated (contradicts it); restart_service is low on its own, becomes medium, escalates to primary with a 300 second deadline and on_expiry escalate, and the run ends awaiting_human. The journal's ACTION_PROPOSED carries both declared_risk and effective_risk. The design claim is that uncertainty about the diagnosis and danger in the fix are different problems with the same remedy, so one mechanism covers both.",
+      "say": "If the workers disagree about the diagnosis, any fix for it gets bumped one risk level. So a restart that would normally just run now asks a human. Same remedy for two kinds of uncertainty, one mechanism.",
+      "evidence": [
+        "repo:handoff/handoff/supervisor/supervisor.py: Risk.LOW: Risk.MEDIUM,",
+        "portfolio: Any action that addresses a contested hypothesis has its effective risk raised one level"
+      ],
+      "sources": [],
+      "tags": [
+        "effective risk",
+        "contested",
+        "escalation"
+      ]
+    },
+    {
+      "id": "ho-13",
+      "type": "how",
+      "level": 2,
+      "q": "What happens after an action runs?",
+      "easy": "The supervisor checks the service's metrics. If it is healthy the incident closes; if not, it tries the next proposed fix; if there are none left, it gives up and says so.",
+      "deep": "_do_verify calls read_metrics for the incident's service; healthy means p99 at or below 1000 ms. Healthy: RESOLVED with INCIDENT_CLOSED 'verified healthy'. Still saturated with actions queued: back to ACTING. Still saturated and out of options: ABANDONED with 'options exhausted'. A failed metrics read also abandons. Resolution is verified against the world rather than assumed from the action succeeding (test_resolution_is_verified_against_metrics_not_assumed). In the sample world, checkout starts at p99 2400 ms with 6 replicas: page_vendor changes nothing, restart halves p99 to 1200 (still saturated), and scaling to 12 replicas gives 1200 x 6/12 = 600 ms, which resolves; a modified approval of 9 replicas gives 800 ms, which also resolves. Those are simulated dynamics in a dataclass.",
+      "evidence": [
+        "repo:handoff/handoff/tools/builtin.py: \"saturated\": svc.latency_p99_ms > 1000,",
+        "portfolio: The cluster is simulated. It is a dataclass."
+      ],
+      "sources": [],
+      "tags": [
+        "verification",
+        "supervisor"
+      ]
+    },
+    {
+      "id": "ho-14",
+      "type": "define",
+      "level": 1,
+      "q": "What is in an escalation object?",
+      "easy": "Everything a person needs to decide and everything an auditor needs later: the action and its arguments, the risk, why it was proposed, what could go wrong, who is being asked, by when, what happens if they say nothing, and every page that went unanswered.",
+      "deep": "Escalation (handoff/escalation/request.py) carries incident_id, tool, args, risk (the effective risk), reason, blast_radius (copied from the tool, plain words), ladder (tiers in order), deadline_seconds, on_expiry, quorum, required_skill, safe_fallback, created_at, id, state, tier_index, attempts, approvals, modified_args, resolved_at, resolution_note. Owner: assignee is the responder on the latest Attempt; each Attempt records tier, responder_id (None if nobody was available), assigned_at, deadline, answered, decision, note. deadline is the latest attempt's deadline. effective_args returns the approver's edited args if any. audit() renders the action, risk and blast radius, reason, on expiry, raised at, every attempt, and the outcome. The record keeps its whole history so the answer to 'why did this run' includes who was asked, who did not answer, and how long they had.",
+      "evidence": [
+        "repo:handoff/handoff/escalation/request.py: blast_radius: str",
+        "repo:handoff/handoff/escalation/request.py: return self.modified_args if self.modified_args is not None else self.args"
+      ],
+      "sources": [],
+      "tags": [
+        "escalation",
+        "data model",
+        "audit"
+      ]
+    },
+    {
+      "id": "ho-15",
+      "type": "how",
+      "level": 1,
+      "q": "Walk me through the policy table.",
+      "easy": "One row per risk level says whether a human must approve, who can approve in what order, how long the first person gets, how many sign offs are needed, and what happens on silence. Read only and low run without asking; medium, high, and critical need approval.",
+      "deep": "config/policy.yaml, autonomy guarded, escalate_at_or_above medium. read_only and low: no approval, empty ladder, on_expiry deny (unused). medium: ladder primary then secondary, 300 s, on_expiry escalate, quorum 1. high: primary, secondary, incident_commander, 180 s, on_expiry safe_fallback, quorum 1, required_skill infrastructure. critical: incident_commander, engineering_manager, director, 600 s, on_expiry hold, quorum 2, required_skill infrastructure. The shape is deliberate: high has the shortest window because its tools have declared safer substitutes, so silence has a cheap, safe answer; critical has the longest window and two signatures because its silence answer is to freeze. Because it is data, someone who does not read Python can review it in a pull request and diff it after an incident review.",
+      "evidence": [
+        "repo:handoff/config/policy.yaml: deadline_seconds: 180",
+        "repo:handoff/config/policy.yaml: quorum: 2",
+        "repo:handoff/config/policy.yaml: escalate_at_or_above: medium",
+        "repo:handoff/config/policy.yaml: required_skill: infrastructure",
+        "portfolio: Because it is data, somebody who does not read Python can review it in a pull request."
+      ],
+      "sources": [],
+      "tags": [
+        "policy",
+        "config"
+      ]
+    },
+    {
+      "id": "ho-16",
+      "type": "how",
+      "level": 2,
+      "q": "How do autonomy levels interact with the policy table?",
+      "easy": "There are four settings. Observe and suggest never change anything. Guarded, the default, acts on cheap things and asks about the rest. Autonomous asks nobody.",
+      "deep": "Autonomy is applied on top of the table, so switching level never means editing rules. Policy.needs_human(risk): AUTONOMOUS returns False for everything; OBSERVE and SUGGEST (may_execute false) return True above read_only, but Policy.forbids blocks those actions outright first, journaled as POLICY_BLOCKED; GUARDED returns False below escalate_at_or_above (medium) and otherwise the rule's requires_approval. The supervisor checks forbids, then needs_human, then executes. Scenarios pin both ends: 09 (observe acts on nothing but still confirms service_degraded and capacity_shortfall, because a mode that reports nothing is off, not observing) and 10 (autonomous resolves by running page_vendor, restart_service, and scale_deployment), kept so the guarded scenarios measure the policy rather than a missing code path. Raising escalate_at_or_above widens autonomy, which CLAUDE.md forbids doing to make something run.",
+      "evidence": [
+        "repo:handoff/handoff/core/types.py: return self in (Autonomy.GUARDED, Autonomy.AUTONOMOUS)",
+        "repo:handoff/config/policy.yaml: escalate_at_or_above: medium"
+      ],
+      "sources": [],
+      "tags": [
+        "autonomy",
+        "policy"
+      ]
+    },
+    {
+      "id": "ho-17",
+      "type": "how",
+      "level": 2,
+      "q": "What mistakes does the system refuse at load time?",
+      "easy": "Four kinds of config error are caught when the files load instead of in the middle of an incident: a rule that needs approval but says nothing about silence, a sign off count bigger than the list of approvers, an approver tier with nobody on it, and a broken safer substitute.",
+      "deep": "(1) Policy.from_config raises ConfigError when a rule requires approval without on_expiry, with a message saying there is no safe default; an unknown on_expiry, including 'allow', is also rejected, naming the four that exist. (2) Rule.__post_init__ rejects quorum greater than ladder length ('so it can never be satisfied'), an approval rule with an empty ladder, a non positive deadline, and quorum below 1. (3) Roster.from_config rejects any tier listed in roster.yaml that has no responder. Precisely, the cross file check that every tier named in a policy ladder has a responder is a unit test over the shipped configs, not a load time check; a ladder naming an unknown tier would be skipped at runtime as an empty tier. (4) build_registry runs check_fallbacks and raises ValueError at import if a declared fallback is missing, points at itself, or is not strictly lower risk. A missing risk level is also a ConfigError.",
+      "evidence": [
+        "repo:handoff/handoff/escalation/policy.py: f\"{path}: rule {name!r} requires approval but does not state \"",
+        "repo:handoff/handoff/escalation/policy.py: f\"{len(self.ladder)}, so it can never be satisfied\"",
+        "repo:handoff/handoff/escalation/roster.py: raise ConfigError(f\"{path}: tiers with no responders: {empty}\")",
+        "repo:handoff/handoff/tools/builtin.py: raise ValueError(\"broken safe_fallback declarations: \" + \"; \".join(problems))",
+        "repo:handoff/handoff/tools/registry.py: f\"({self.tools[target].risk}) is not lower risk\"",
+        "portfolio: Four classes of mistake are caught at load time rather than during an incident"
+      ],
+      "sources": [],
+      "tags": [
+        "validation",
+        "config",
+        "fail fast"
+      ]
+    },
+    {
+      "id": "ho-18",
+      "type": "how",
+      "level": 2,
+      "q": "How does routing pick a person to page?",
+      "easy": "It looks at the current tier on the ladder, keeps the people who have the needed skill and spare capacity, and pages the least busy one. If nobody on that tier can take it, it moves to the next tier immediately.",
+      "deep": "Responder has id, name, tier, skills, available, max_concurrent (default 2), open_count. Roster.candidates(tier, skill) filters to has_capacity (available and open_count < max_concurrent) and can_approve(skill), then sorts by (open_count, id), so the spread is even and deterministic. _assign takes the first candidate not already in esc.approvals (so quorum needs distinct people), acquires it (open_count += 1), appends an Attempt with the deadline, and journals ESCALATION_ASSIGNED. With an empty pool it appends an Attempt with responder_id None, journals ESCALATION_REASSIGNED 'no responder with capacity on this tier', increments tier_index, and loops, so an empty tier costs no time; past the last tier it exhausts. Capacity is released on resolution, expiry, defer, and per approval when climbing for quorum. The shipped roster is seven people across five tiers; for a high risk page, ana and bo (both primary, both with infrastructure) are tied at zero load and ana wins on id.",
+      "evidence": [
+        "repo:handoff/handoff/escalation/roster.py: return sorted(pool, key=lambda r: (r.open_count, r.id))",
+        "portfolio: Seven people in a YAML file, with no rotation schedule, timezones, or handover."
+      ],
+      "sources": [],
+      "tags": [
+        "routing",
+        "roster",
+        "load balancing"
+      ]
+    },
+    {
+      "id": "ho-19",
+      "type": "how",
+      "level": 1,
+      "q": "How do deadlines work without a scheduler or sleeps?",
+      "easy": "Time is passed in as an object. Tests use a clock they move by hand, and a tick function checks which deadlines have passed. Nothing waits on a timer, so every deadline can be tested at the exact second it fires.",
+      "deep": "Clock is a protocol with now(); SystemClock is the only place datetime.now is called; ManualClock starts at 2026-01-01 UTC and advances by assignment. EscalationEngine.tick() takes now, finds every ASSIGNED escalation where now >= the latest attempt's deadline, journals ESCALATION_EXPIRED with waited_seconds and on_expiry, and applies the rule's expiry behaviour. The boundary tests: advancing 299 seconds on a 300 second rule fires nothing, advancing exactly 300 fires it. ADR 0001 gives this as a reason not to adopt a framework: a scheduler you do not own is a deadline you cannot test at 299 and 300 seconds. The cost is stated in the write up's limitations: nothing in the repository calls tick on a timer, so a deployment needs a scheduler that is not written.",
+      "evidence": [
+        "repo:handoff/tests/test_escalation_engine.py: self.clock.advance(seconds=299)",
+        "repo:handoff/tests/test_escalation_engine.py: def test_deadline_fires_exactly_on_the_boundary(self):",
+        "repo:handoff/docs/adr/0001-explicit-state-machines.md: cannot test at 299 and 300 seconds.",
+        "portfolio: No scheduler. The caller drives the deadline tick"
+      ],
+      "sources": [],
+      "tags": [
+        "deadlines",
+        "clock",
+        "testability"
+      ]
+    },
+    {
+      "id": "ho-20",
+      "type": "formula",
+      "level": 2,
+      "q": "How long does each tier get?",
+      "easy": "The first person gets the full time from the policy. Each later tier gets half as long as the one before, but never less than 30 seconds, because by then the incident has already burned through the earlier windows.",
+      "deep": "$w_k = \\max\\left(30, \\lfloor d \\cdot b^{k} \\rfloor\\right)$ seconds, where $d$ is the rule's deadline_seconds, $k$ is tier_index, and $b$ is the engine's backoff, 0.5 by default (the engine tests build it with 1.0 to keep windows equal). Applied to the shipped policy (Tanay's arithmetic from the code): medium 300 s then 150 s; high 180, 90, 45 s; critical 600, 300, 150 s. Because tier_index also advances past empty tiers, a skipped tier still shrinks the next window. The reasoning in Escalation.next_deadline's docstring: later tiers get shorter windows because the remaining urgency is higher. The shorter later windows only matter when an escalation actually climbs: on silence for medium, or after a defer, a skipped tier, or a first approval toward quorum. High falls back after its first 180 s of silence rather than climbing, so its 90 and 45 second windows apply only to defers and skipped tiers. A defensible alternative is a fixed total budget split across tiers, which bounds the worst case time to a decision.",
+      "evidence": [
+        "repo:handoff/handoff/escalation/request.py: seconds = max(30, int(self.deadline_seconds * (backoff**self.tier_index)))",
+        "repo:handoff/handoff/escalation/engine.py: backoff: float = 0.5,",
+        "repo:handoff/config/policy.yaml: deadline_seconds: 180"
+      ],
+      "sources": [],
+      "tags": [
+        "deadlines",
+        "backoff",
+        "formula"
+      ]
+    },
+    {
+      "id": "ho-21",
+      "type": "concept",
+      "level": 1,
+      "q": "What exactly does on_expiry deny do?",
+      "easy": "The action is dropped, the miss is written down, and the incident carries on with whatever else it had planned.",
+      "deep": "In _apply_expiry the silent responder is released, then the default branch sets state DENIED_ON_TIMEOUT, resolved_at now, resolution_note 'nobody answered in time, action dropped', and journals ACTION_DENIED with why 'deadline passed with no answer'. engine.resolution() returns should_run False, and Supervisor._settle notes '<tool> not taken' and moves to the next queued action (ACTING) or to VERIFYING. Deny is the conservative choice when doing nothing is safe. In the shipped policy only read_only and low name deny, and those never escalate, so deny appears in the shipped flow only through the safe_fallback branch when a tool declares no fallback.",
+      "evidence": [
+        "repo:handoff/handoff/core/types.py: drop the action, record the miss, continue the incident",
+        "repo:handoff/handoff/escalation/engine.py: esc.resolution_note = \"nobody answered in time, action dropped\""
+      ],
+      "sources": [],
+      "tags": [
+        "on_expiry",
+        "deny"
+      ]
+    },
+    {
+      "id": "ho-22",
+      "type": "concept",
+      "level": 1,
+      "q": "What exactly does on_expiry safe_fallback do?",
+      "easy": "If nobody answers, the system runs the tool's declared safer substitute instead of the risky action, and records that it did so because nobody answered. If the tool has no substitute, the action is dropped.",
+      "deep": "On expiry: if esc.safe_fallback is None, state DENIED_ON_TIMEOUT with note 'policy asked for a safe fallback but <tool> declares none, so the action was dropped' and ACTION_DENIED. Otherwise state FELL_BACK, note 'nobody answered, ran <fallback> instead', and an ACTION_ALLOWED event with substituted=<fallback> and why 'safe fallback on timeout'. engine.resolution() then returns should_run True with tool = the fallback and args narrowed to the fields the fallback accepts (force_terminate {service: checkout} becomes restart_service {service: checkout}; failover_database {target: node-b} becomes enable_read_only {}). The supervisor executes it with approved_by 'timeout fallback' and substituted_for the original tool, so the run report shows '[substituted for failover_database]'. The high rule is the one that names safe_fallback, and both shipped high tools declare one: failover_database to enable_read_only, force_terminate to restart_service.",
+      "evidence": [
+        "repo:handoff/handoff/core/types.py: run the declared safer action instead, if the tool has one",
+        "repo:handoff/handoff/escalation/engine.py: esc.resolution_note = f\"nobody answered, ran {esc.safe_fallback} instead\"",
+        "repo:handoff/handoff/escalation/engine.py: f\"policy asked for a safe fallback but {esc.tool} declares none, \"",
+        "repo:handoff/handoff/escalation/engine.py: args = {f.name: esc.args[f.name] for f in fallback.fields if f.name in esc.args}",
+        "repo:handoff/handoff/tools/builtin.py: safe_fallback=\"enable_read_only\","
+      ],
+      "sources": [],
+      "tags": [
+        "on_expiry",
+        "safe fallback"
+      ]
+    },
+    {
+      "id": "ho-23",
+      "type": "concept",
+      "level": 1,
+      "q": "What exactly does on_expiry escalate do?",
+      "easy": "The question moves to the next tier on the ladder with a new, shorter deadline. If there is no next tier, the escalation is marked exhausted and the action is not taken.",
+      "deep": "_apply_expiry releases the silent responder, increments tier_index, and if current_tier is None calls _exhaust (state EXHAUSTED, note 'ladder exhausted after N attempts: tiers', ESCALATION_EXHAUSTED, release every responder); otherwise _assign pages the next tier with next_deadline. The unanswered Attempt stays in the record ('no answer'). Exhausted resolves to should_run False. A late approval after exhaustion raises ValueError (test_a_late_approval_after_exhaustion_is_refused). Scenario 06 is the canonical case: medium scale_deployment, primary gets 300 s, secondary 150 s, the scenario advances 310 s three times, and the important assertion is the negative one: scale_deployment must not run because the system got tired of waiting. Medium names escalate because medium actions have no safe substitute in general and a second person is cheap to ask.",
+      "evidence": [
+        "repo:handoff/handoff/core/types.py: push to the next tier of the ladder",
+        "repo:handoff/evals/scenarios/06_silence_ladders_and_exhausts.yaml: advance_seconds: [310, 310, 310]"
+      ],
+      "sources": [],
+      "tags": [
+        "on_expiry",
+        "escalate",
+        "ladder"
+      ]
+    },
+    {
+      "id": "ho-24",
+      "type": "concept",
+      "level": 1,
+      "q": "What exactly does on_expiry hold do?",
+      "easy": "The incident is frozen and stays frozen until a person acts. Nothing runs, nothing is dropped, and the deadline does not fire again.",
+      "deep": "_apply_expiry releases the responder and sets state HELD with note 'held: the incident is frozen until a human acts on this', journaling INCIDENT_FROZEN. HELD counts as open (is_open includes it), so it stays in engine.open(), but is_overdue only fires for ASSIGNED, so tick never fires it again. The supervisor's _unblock sees HELD and sets the run to FROZEN, a terminal RunState. Critical names hold: the tools there, such as delete_volume, are ones where acting without two signatures is unacceptable and dropping silently loses the decision. ADR 0004 says a hold is meant to hurt: the remedy for a hold that cost downtime is a better rota, not a policy that approves things nobody read. A gap worth owning: the supervisor has no transition out of FROZEN and INCIDENT_RESUMED is declared but never emitted, so a human who later approves a held escalation updates the record but the run does not pick it up.",
+      "evidence": [
+        "repo:handoff/handoff/core/types.py: freeze the incident and keep it frozen until a human acts",
+        "repo:handoff/handoff/escalation/engine.py: esc.resolution_note = \"held: the incident is frozen until a human acts on this\"",
+        "repo:handoff/handoff/escalation/request.py: return self in (EscalationState.PENDING, EscalationState.ASSIGNED, EscalationState.HELD)",
+        "repo:handoff/config/policy.yaml: quorum: 2"
+      ],
+      "sources": [],
+      "tags": [
+        "on_expiry",
+        "hold",
+        "freeze"
+      ]
+    },
+    {
+      "id": "ho-25",
+      "type": "why",
+      "level": 1,
+      "q": "Why is there no allow on expiry, and why does none of the four approve an unreviewed high risk action?",
+      "easy": "Approving something because nobody looked at it in time is not approval. It is the absence of a decision recorded as if it were one, and it would make the whole audit trail meaningless.",
+      "deep": "ADR 0004: OnExpiry has four members and Policy.from_config rejects 'allow'. The argument: after an auto approve, the journal says the action was allowed and nothing distinguishes a considered yes from nobody having looked, and that distinction is the entire value of the audit trail; a ladder whose terminal state can be 'ran it anyway' is a delay mechanism wearing the costume of a control. Mapping the four: deny drops it, escalate asks someone else and exhausts to not running, hold freezes, and safe_fallback runs a different, strictly lower risk tool, never the original. So the high risk action itself only ever runs with a human approval. The operational objection (blocking costs downtime) is answered by safe_fallback where a safer action exists and by hold where none does. tests/test_types.py asserts 'allow' is absent, so adding it means deleting a test whose docstring says why it should not exist.",
+      "say": "Approval on timeout isn't approval. The journal would say 'allowed' and you couldn't tell a real yes from nobody looking. So there are four behaviours, and none of them runs the risky action itself without a person. Where downtime matters, the answer is a safer substitute, not a rubber stamp.",
+      "evidence": [
+        "portfolio: The expiry behaviours are deny, safe_fallback, escalate and hold. There is deliberately no allow.",
+        "portfolio: A ladder whose terminal state can be \"ran it anyway\" is a delay mechanism wearing the costume of a control.",
+        "repo:handoff/tests/test_types.py: self.assertNotIn(\"allow\", [m.value for m in OnExpiry])"
+      ],
+      "sources": [],
+      "tags": [
+        "adr",
+        "safety",
+        "on_expiry"
+      ]
+    },
+    {
+      "id": "ho-26",
+      "type": "how",
+      "level": 1,
+      "q": "How does the safe fallback mechanism work end to end?",
+      "easy": "Each risky tool names a safer tool that can stand in for it. The system checks those pairings at startup. If a high risk request times out, the safer tool runs instead, with the record showing it ran because nobody answered.",
+      "deep": "Declaration: Tool has risk, reversible, blast_radius, and safe_fallback. Shipped pairs: failover_database (high, irreversible, 'every writer reconnects, in flight transactions are lost') to enable_read_only (medium, 'writes rejected, checkout degrades but data is safe'); force_terminate (high, irreversible) to restart_service (low); delete_volume (critical, irreversible) to snapshot_volume (low). Validation: ToolRegistry.check_fallbacks returns every problem at once (missing target, self reference, not strictly lower risk), and build_registry raises if the list is non empty, so a broken declaration fails at import. A unit test also asserts every irreversible tool declares a fallback. Selection: only rules whose on_expiry is safe_fallback reach for it (high in the shipped policy; delete_volume's fallback is declared but critical holds instead). Execution: FELL_BACK resolution, args narrowed to the fallback's fields, executed with approved_by 'timeout fallback'. Risk lives on the tool, not the caller, which is why the pairing can be checked once.",
+      "evidence": [
+        "repo:handoff/handoff/tools/builtin.py: safe_fallback=\"enable_read_only\",",
+        "repo:handoff/handoff/tools/builtin.py: blast_radius=\"every writer reconnects, in flight transactions are lost\",",
+        "repo:handoff/handoff/tools/builtin.py: blast_radius=\"writes rejected, checkout degrades but data is safe\",",
+        "repo:handoff/handoff/tools/builtin.py: raise ValueError(\"broken safe_fallback declarations: \" + \"; \".join(problems))",
+        "repo:handoff/handoff/tools/registry.py: f\"({self.tools[target].risk}) is not lower risk\""
+      ],
+      "sources": [],
+      "tags": [
+        "safe fallback",
+        "tools",
+        "validation"
+      ]
+    },
+    {
+      "id": "ho-27",
+      "type": "pushback",
+      "level": 1,
+      "q": "Your fallback runs enable_read_only, a medium risk action, with nobody's approval. Isn't that allow with extra steps?",
+      "easy": "Partly. A medium action does run unapproved on timeout, and medium actions normally need approval. The difference is that the substitute was chosen in advance, checked to be strictly safer and reversible here, and the record says nobody approved it.",
+      "deep": "Concede: Supervisor._settle executes the fallback directly without re running needs_human on the fallback's own risk, so under guarded autonomy a medium tool runs without a human, which it would not if proposed on its own. Defend: (1) the original high risk action never runs; (2) the substitute is declared by the tool author and validated at import to be strictly lower risk, and the policy author opted into safe_fallback for the high row, so a human did decide, ahead of time, that read only mode beats both failover and inaction; (3) the journal records approved_by 'timeout fallback' and substituted_for, so nobody can mistake it for a considered approval. A stricter variant, worth naming, would require the fallback to sit below escalate_at_or_above or be reversible, enforced at load.",
+      "say": "Fair point, and it's true: read only mode is medium and it runs without anyone approving it. What's different from allow is that the original failover never runs, the substitute was chosen and validated in advance, and the journal says 'timeout fallback'. If I tightened it, I'd require the fallback to sit below the escalation bar and check that at load.",
+      "evidence": [
+        "repo:handoff/handoff/tools/builtin.py: safe_fallback=\"enable_read_only\",",
+        "portfolio: The journal records that it happened because nobody answered, which is a different fact from a human deciding it was a good idea."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "safe fallback"
+      ]
+    },
+    {
+      "id": "ho-28",
+      "type": "how",
+      "level": 2,
+      "q": "What can a human say to an escalation, and how is each handled?",
+      "easy": "Approve, reject, modify, or defer. Reject is final. Modify approves with edited arguments. Defer hands it to the next tier right away.",
+      "deep": "EscalationEngine.decide(id, responder_id, decision, note, modified_args): refuses a terminal escalation (ValueError), refuses a responder who is not the current assignee, records the decision on the latest Attempt, journals ESCALATION_DECIDED with the responder as actor. REJECT: REJECTED, release everyone, final; the asymmetry is deliberate, since one person saying no is enough to stop an irreversible action while one yes may not be enough to start it. DEFER: next tier immediately, releasing the deferrer. MODIFY: requires modified_args (ValueError otherwise), stores them, and counts as an approval; effective_args then returns the edited args. APPROVE or MODIFY appends the responder to approvals and resolves when the quorum is met. Scenario 05 shows why modify exists: an on call engineer agreeing with the diagnosis but not the number (9 replicas instead of 12) would otherwise reject and do it by hand, and the system would learn nothing.",
+      "evidence": [
+        "repo:handoff/handoff/escalation/engine.py: A rejection is final and does not ladder onward.",
+        "repo:handoff/handoff/escalation/request.py: return self.modified_args if self.modified_args is not None else self.args"
+      ],
+      "sources": [],
+      "tags": [
+        "decisions",
+        "human in the loop"
+      ]
+    },
+    {
+      "id": "ho-29",
+      "type": "how",
+      "level": 2,
+      "q": "How does quorum work for critical actions?",
+      "easy": "Critical actions need two different people to approve. After the first yes, the request climbs to the next tier for a second signature, and a single no at any point stops it.",
+      "deep": "critical: quorum 2, ladder incident_commander, engineering_manager, director. On APPROVE with approvals below quorum, the engine increments tier_index, releases the approver, and _assign pages the next tier, excluding anyone already in approvals, so the same person cannot supply both signatures. One rejection after one approval still stops it. If the ladder runs out before the quorum is met, the escalation exhausts. Load time validation rejects a quorum larger than the ladder because it could never be satisfied. On silence, critical holds. Tests in TestQuorum pin each of these, including test_the_same_person_cannot_supply_both_signatures and test_quorum_unmet_when_the_ladder_runs_out.",
+      "evidence": [
+        "repo:handoff/config/policy.yaml: quorum: 2",
+        "repo:handoff/handoff/escalation/policy.py: f\"{len(self.ladder)}, so it can never be satisfied\""
+      ],
+      "sources": [],
+      "tags": [
+        "quorum",
+        "critical"
+      ]
+    },
+    {
+      "id": "ho-30",
+      "type": "concept",
+      "level": 2,
+      "q": "Describe the escalation state machine.",
+      "easy": "An escalation starts pending, becomes assigned when someone is paged, and ends approved, rejected, fell back, denied on timeout, exhausted, or held. Held is the odd one: it is not finished, but its clock has stopped.",
+      "deep": "States: PENDING, ASSIGNED, APPROVED, REJECTED, FELL_BACK, DENIED_ON_TIMEOUT, HELD, EXHAUSTED. Transitions: raise_for creates PENDING and _assign moves it to ASSIGNED (or straight to EXHAUSTED when no tier has anyone). From ASSIGNED: approve or modify with quorum met to APPROVED; approve below quorum or defer to ASSIGNED on the next tier (or EXHAUSTED); reject to REJECTED; tick on an overdue attempt applies on_expiry to ASSIGNED on the next tier, EXHAUSTED, FELL_BACK, DENIED_ON_TIMEOUT, or HELD. is_open covers PENDING, ASSIGNED, HELD; everything else is terminal and decide() refuses it. resolution() maps APPROVED to run the original with effective args, FELL_BACK to run the fallback, everything else to not run. One inconsistency to know: ADR 0001 describes six terminal states, while the code and the engine docstring treat HELD as open.",
+      "evidence": [
+        "repo:handoff/handoff/escalation/request.py: return self in (EscalationState.PENDING, EscalationState.ASSIGNED, EscalationState.HELD)",
+        "repo:handoff/handoff/escalation/engine.py: A rejection is final and does not ladder onward."
+      ],
+      "sources": [],
+      "tags": [
+        "state machine",
+        "escalation"
+      ]
+    },
+    {
+      "id": "ho-31",
+      "type": "concept",
+      "level": 2,
+      "q": "How does an incident pause for a human and resume without redoing work?",
+      "easy": "Everything about the incident lives in one record. When it waits for a person, the supervisor just stops and returns. When the person answers, calling advance again picks up at the same action instead of starting over.",
+      "deep": "IncidentRun holds incident, state, subtasks, results, aggregate, queue, executed, escalation_ids, blocked_on, notes. In ACTING, a needs_human action calls raise_for, stores blocked_on, and sets AWAITING_HUMAN; advance returns. After decide() or tick(), advance() calls _unblock: still open returns False (no change); HELD sets FROZEN; terminal calls _settle, which pops the queue head and executes the resolution (original or fallback) or notes it was not taken, then continues. Scenario 03 exists for this: a run that restarted from the beginning after approval would rerun diagnosis and could re propose the cheap actions it already took; the expected executed list is page_vendor, restart_service, scale_deployment, each once. Contrast with LangGraph, where on resume the interrupted node restarts from its beginning, so code before interrupt() runs again and must be idempotent.",
+      "evidence": [
+        "repo:handoff/handoff/supervisor/supervisor.py: if guard > 100:"
+      ],
+      "sources": [
+        "https://docs.langchain.com/oss/python/langgraph/interrupts"
+      ],
+      "tags": [
+        "pause and resume",
+        "state machine"
+      ]
+    },
+    {
+      "id": "ho-32",
+      "type": "number",
+      "level": 1,
+      "q": "Tell me the 3am story: what happens when nobody answers a database failover?",
+      "easy": "The failover is proposed, the on call engineer with the infrastructure skill is paged with 180 seconds to answer, nobody answers, and the system puts the database into read only mode instead. Writes stop, but no in flight transaction is lost, and a human can undo it.",
+      "deep": "Scenario 07: checkout healthy (error_rate 0.005 gives 15 log lines, p99 180 ms), so service_degraded is rejected and nothing cheaper is proposed; replication lag 42 s against the 5 s threshold confirms database_fault; the planner proposes failover_database to node-b. Its declared risk is high, irreversible, blast radius 'every writer reconnects, in flight transactions are lost'. The high rule pages primary with required skill infrastructure; ana and bo tie at zero load and ana is chosen; deadline 180 s, on_expiry safe_fallback. The scenario advances the clock 200 s and ticks; the escalation becomes FELL_BACK; the supervisor runs enable_read_only with substituted_for failover_database and approved_by 'timeout fallback'. The scenario asserts failover was escalated, not executed, and enable_read_only ran as a substitution. All of this is on the simulated World dataclass.",
+      "say": "A failover gets proposed. It pages Ana, who has the infrastructure skill, with 180 seconds. Nobody answers. The system doesn't fail over and doesn't sit still: it puts the database in read only mode, which loses nothing and a human can undo. And the journal says it happened because nobody answered.",
+      "evidence": [
+        "portfolio: The page goes to the engineer on call who holds the infrastructure skill, with 180 seconds to answer.",
+        "repo:handoff/evals/scenarios/07_high_risk_falls_back.yaml: advance_seconds: [200]",
+        "portfolio: The journal records that it happened because nobody answered, which is a different fact from a human deciding it was a good idea.",
+        "portfolio: The cluster is simulated. It is a dataclass."
+      ],
+      "sources": [],
+      "tags": [
+        "scenario",
+        "safe fallback",
+        "story"
+      ]
+    },
+    {
+      "id": "ho-33",
+      "type": "how",
+      "level": 2,
+      "q": "What are the 11 scenarios and what does each pin down?",
+      "easy": "Each scenario is a small YAML file describing a world, an incident, any human decisions and clock jumps, and what must or must not happen, plus a written reason the case exists.",
+      "deep": "01 guarded acts on cheap things (page_vendor and restart run unattended, scale escalates); 02 medium risk waits (same evidence, stops at scale_deployment); 03 approval resumes the run on the same step; 04 rejection stops the action without crashing the run; 05 modified approval runs edited args (9 replicas); 06 silence ladders and exhausts (scale must not run); 07 high risk falls back to enable_read_only; 08 contested diagnosis raises restart to medium; 09 observe acts on nothing but still diagnoses; 10 autonomous asks nobody; 11 healthy service needs nothing (every proposal dropped, service_degraded rejected). The runner builds the real system with ManualClock and seed 7, advances, applies decisions to the current blocked escalation, then checks end_state, executed, not_executed, escalated, substituted, confirmed, contested, rejected, and names each mismatch. Meta tests require every scenario to explain itself, assert something, cover both autonomy ends, and include at least one negative assertion.",
+      "evidence": [
+        "portfolio: 212 tests / 11 behavioural scenarios / zero dependencies / unanswered page -> safer substitute / CI green on Python 3.11 to 3.13",
+        "repo:handoff/evals/scenarios/06_silence_ladders_and_exhausts.yaml: advance_seconds: [310, 310, 310]",
+        "repo:handoff/evals/scenarios/07_high_risk_falls_back.yaml: advance_seconds: [200]"
+      ],
+      "sources": [],
+      "tags": [
+        "scenarios",
+        "evals"
+      ]
+    },
+    {
+      "id": "ho-34",
+      "type": "how",
+      "level": 2,
+      "q": "How does the journal work, and is it really write before act?",
+      "easy": "Every state change becomes an event from a fixed list, appended to an in memory log and optionally to a JSON lines file, and passed to any subscribers. Intent is recorded before execution, though the executed event itself is written after the tool runs.",
+      "deep": "EventKind is a closed StrEnum (incident, plan, subtask, findings, conflict, action, escalation, policy, autonomy kinds), so a new kind of event is a deliberate code change. Event has kind, incident_id, at, detail, id, actor. Journal.append stores it, writes one sorted key JSON object per line when a sink is set, then calls subscribers; a raising subscriber propagates after the event is recorded, because a pager that silently fails is the same as no pager. Write before act, precisely: ACTION_PROPOSED is journaled before any escalation or execution, ESCALATION_* events precede the effects they describe, and the fallback's ACTION_ALLOWED precedes its execution; but in _execute the tool runs and then ACTION_EXECUTED is appended, so a crash mid tool leaves 'proposed' without 'executed', which is the recoverable 'about to' state the docstring describes. The journal docstring also claims replayability; no replay function exists yet. Three declared kinds (INCIDENT_RESUMED, PLAN_REVISED, AUTONOMY_CHANGED) are never emitted.",
+      "evidence": [
+        "repo:handoff/handoff/bus/journal.py: pager that silently fails is the same as no pager.",
+        "portfolio: The journal exposes a subscribe hook where a pager would attach. Nothing attaches to it."
+      ],
+      "sources": [],
+      "tags": [
+        "journal",
+        "audit",
+        "events"
+      ]
+    },
+    {
+      "id": "ho-35",
+      "type": "why",
+      "level": 2,
+      "q": "Why hand write the state machines instead of using LangGraph or another agent framework?",
+      "easy": "Because the transition table is the interesting part of the project, and a framework puts a layer between the reader and it. It also keeps control of the clock, so deadlines can be tested to the second.",
+      "deep": "ADR 0001 concedes the case for a framework (less code, known vocabulary, a visualizer) and argues against it on two specifics: pause and resume on the same step is the behaviour most likely to be subtly wrong, and writing it out means a reviewer checks one file instead of trusting a checkpointer they cannot see; and frameworks tend to own the scheduler, which makes deadlines untestable at 299 versus 300 seconds. LangGraph's interrupt pauses until resumed with no built in timeout, needs a checkpointer and thread id, and reruns the interrupted node from its start on resume. The ADR calls the decision reversible because node names and persisted state map onto LangGraph directly, and says to revisit it if the plan becomes dynamic per incident. Costs it names: no visualizer, no community, and a long advance() method with a loop guard.",
+      "evidence": [
+        "repo:handoff/docs/adr/0001-explicit-state-machines.md: cannot test at 299 and 300 seconds."
+      ],
+      "sources": [
+        "https://docs.langchain.com/oss/python/langgraph/interrupts"
+      ],
+      "tags": [
+        "adr",
+        "frameworks",
+        "langgraph"
+      ]
+    },
+    {
+      "id": "ho-36",
+      "type": "why",
+      "level": 2,
+      "q": "Why zero dependencies, and what did that cost?",
+      "easy": "So anyone can run the full test suite on a plain Python install in seconds with no setup. The price was writing a small YAML reader by hand, and that reader produced a real bug.",
+      "deep": "ADR 0002: everything under handoff/ imports only the standard library; tests use unittest; pytest and ruff are optional dev extras. CI proves it: the test job has no install step on a matrix of Python 3.11, 3.12, 3.13, then runs the scenario suite and the demo; a separate job installs only ruff for lint and format checks. The natural dependencies declined were pydantic, pyyaml, and pytest. The cost is miniyaml.py, a subset reader (nested maps, lists of scalars and maps, inline scalar lists, comments, folded and literal block scalars, null, bool, int, float, string) that raises ConfigError naming the line on anchors, aliases, multi document streams, or tags. It earned its keep twice: block scalars had to be resolved in the scanner so a '#' inside a folded rationale is not a comment, and an early version flattened nested maps in list items. The ADR's exit rule: take pyyaml the first time someone wants an anchor.",
+      "evidence": [
+        "repo:handoff/.github/workflows/ci.yml: python-version: [\"3.11\", \"3.12\", \"3.13\"]",
+        "repo:handoff/.github/workflows/ci.yml: # No install step on purpose. The core has no third party",
+        "repo:handoff/README.md: | third party dependencies | 0 |"
+      ],
+      "sources": [],
+      "tags": [
+        "adr",
+        "dependencies",
+        "ci"
+      ]
+    },
+    {
+      "id": "ho-37",
+      "type": "why",
+      "level": 2,
+      "q": "Why is escalation a policy rather than a callback?",
+      "easy": "A callback blocks a thread, does not say who is asked, and has no deadline. A policy table says who, how long, and what happens on silence, and anyone can read and review it.",
+      "deep": "ADR 0003 lists three failures of confirm(action): it blocks (a thread parked six hours is a resource leak with a human attached), it does not route (whoever is at the terminal answers, with no notion of tier, skill, or load), and it has no deadline (the never returns case is undefined). The decision: a declarative table keyed by risk; raise_for records the question and returns immediately; tick fires deadlines; the supervisor returns AWAITING_HUMAN and the caller drives the clock. Consequences: the policy is diffable after an incident review, load time validation catches incident time failures, and the whole system is testable with ManualClock and no sleeps. Cost, stated in the ADR and README: a deployment needs a real scheduler calling tick, and none is written.",
+      "evidence": [
+        "portfolio: Because it is data, somebody who does not read Python can review it in a pull request.",
+        "portfolio: No scheduler. The caller drives the deadline tick"
+      ],
+      "sources": [],
+      "tags": [
+        "adr",
+        "policy",
+        "design"
+      ]
+    },
+    {
+      "id": "ho-38",
+      "type": "how",
+      "level": 1,
+      "q": "What do the tests prove?",
+      "easy": "They prove each rule of the escalation layer at its exact edges: deadlines fire at the boundary second, silence never runs the risky action, rejections stop things, quorum needs two different people, bad config is refused, and workers cannot reach dangerous tools.",
+      "deep": "By file: test_escalation_engine (43) covers raising, decisions, the four expiry behaviours, quorum, empty and saturated tiers, skill gaps, and audit rendering, including fires at 300 not 299, a late approval after exhaustion is refused, and a high tool with no fallback is denied rather than silently run; test_supervisor (19) covers fan out, read only workers, guarded pauses and resumes, rejection, modify, laddering, autonomy levels, and verification against metrics; test_contested_diagnosis (13) covers detection, the risk bump, the reason shown to the human, and silence laddering rather than running; test_escalation_policy (13) and test_escalation_roster (14) cover load time refusals and routing; test_types (6) asserts no allow; test_builtin_tools (15) checks every tool has a runner and a blast radius, irreversible tools are high or critical and declare a fallback, read only calls leave the world snapshot identical; test_tool_schema (8) includes the bool guard; test_miniyaml (24); test_journal (10); test_cli (12) includes byte identical demo output across runs; test_scenarios (8) runs all 11 scenarios. What they do not prove: behaviour with nondeterministic workers, concurrency, or a real cluster.",
+      "evidence": [
+        "portfolio: 212 tests / 11 behavioural scenarios / zero dependencies / unanswered page -> safer substitute / CI green on Python 3.11 to 3.13",
+        "repo:handoff/tests/test_escalation_engine.py: def test_deadline_fires_exactly_on_the_boundary(self):",
+        "repo:handoff/tests/test_types.py: self.assertNotIn(\"allow\", [m.value for m in OnExpiry])",
+        "portfolio: The five workers are deterministic with hand written thresholds, and no LLM is called anywhere."
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "unittest",
+        "coverage"
+      ]
+    },
+    {
+      "id": "ho-39",
+      "type": "how",
+      "level": 2,
+      "q": "How is tool input validated, and what was the bool bug?",
+      "easy": "Every tool declares its argument fields with types and limits, and arguments are checked before a person is asked to approve, so nobody approves a malformed request. One subtle case: Python treats True as the number 1.",
+      "deep": "tools/schema.py: Field(name, type, required, default, choices, minimum, maximum); validate() rejects unknown keys and returns a normalized copy, coercing int to float where a float is declared. Because bool is a subclass of int, isinstance(True, int) is True, so without a guard scale_deployment(replicas=True) would validate and scale the service to one replica; the guard rejects a bool for any non bool field and a non bool for a bool field. failover_database also checks at run time that the target is a replica and raises otherwise, which the supervisor records as ACTION_FAILED rather than crashing. The principle in the module docstring: human attention is the scarce resource, so do not spend it on arguments that would fail anyway.",
+      "evidence": [
+        "repo:handoff/handoff/tools/schema.py: True. Without this guard scale_deployment(replicas=True) validates"
+      ],
+      "sources": [],
+      "tags": [
+        "validation",
+        "python",
+        "bugs"
+      ]
+    },
+    {
+      "id": "ho-40",
+      "type": "why",
+      "level": 1,
+      "q": "What went wrong during the build?",
+      "easy": "Three bugs, kept in the history on purpose. A safety check that could never run, a risk bump that got thrown away, and a config parser that silently dropped nested settings.",
+      "deep": "(1) Safety code that could not run: the supervisor raised the effective risk of contested actions, but the planner was only fed confirmed hypotheses, so a contested diagnosis produced no proposal and the risk raising branch was unreachable through the normal flow; fix: actionable() includes contested hypotheses. (2) A bump that was thrown away: having decided to escalate a contested low action at medium, the engine looked up the rule by the tool's declared low risk, whose ladder is empty, so the escalation exhausted with zero attempts and the action was dropped, which read like a policy decision; fix: raise_for takes the effective risk and uses it for the rule lookup, with a docstring explaining why. (3) A parser that flattened config: nested maps inside list items lost their nesting, so modified_args in a scenario came back empty; it surfaced only because Decision.MODIFY rejects missing arguments. The write up counts the first two as design flaws the suite caught. The pattern across all three: code that looks like a guarantee and silently is not one.",
+      "say": "Three bugs, and I kept them in the history. The worst was safety code that couldn't run: the risk bump for contested diagnoses existed, but contested hypotheses never reached the planner, so no proposal ever hit it. It read like a guarantee and was decoration. The tests caught it because they drive the whole flow, not the function.",
+      "evidence": [
+        "repo:handoff/README.md: **Safety code that could not run.** The supervisor raised the effective",
+        "repo:handoff/README.md: **A bump that was thrown away.** Having decided to escalate a contested",
+        "repo:handoff/README.md: **A parser that quietly flattened config.** Nested maps inside list items",
+        "portfolio: During the build the suite caught two design flaws, one of which was a safety path that could never actually run.",
+        "repo:handoff/handoff/escalation/engine.py: empty ladder that exhausts on its first assignment, which reads in"
+      ],
+      "sources": [],
+      "tags": [
+        "bugs",
+        "what went wrong"
+      ]
+    },
+    {
+      "id": "ho-41",
+      "type": "how",
+      "level": 2,
+      "q": "What does CI run?",
+      "easy": "On every push to main and every pull request, it runs the tests on three Python versions with nothing installed, runs all scenarios and the demo, and separately checks lint and formatting.",
+      "deep": ".github/workflows/ci.yml: job test on ubuntu-latest with matrix Python 3.11, 3.12, 3.13 and fail-fast false; steps: checkout, setup-python, python -m unittest discover -s tests -v with no install step (the comment says the job proves the core has no third party dependencies), python -m handoff.cli scenarios --dir evals/scenarios, python -m handoff.cli demo. Job lint on 3.12: pip install ruff, ruff check handoff tests, ruff format --check. Ruff selects E, F, I, UP, B, SIM with line length 100. The demo running in CI matters because test_cli also asserts the demo output is identical across runs, which depends on the seeded IdGenerator and ManualClock.",
+      "evidence": [
+        "repo:handoff/.github/workflows/ci.yml: python-version: [\"3.11\", \"3.12\", \"3.13\"]",
+        "repo:handoff/.github/workflows/ci.yml: # No install step on purpose. The core has no third party"
+      ],
+      "sources": [],
+      "tags": [
+        "ci",
+        "github actions"
+      ]
+    },
+    {
+      "id": "ho-42",
+      "type": "pushback",
+      "level": 1,
+      "q": "Why not just use LangGraph's interrupt for human in the loop?",
+      "easy": "LangGraph's interrupt pauses a graph and waits until someone resumes it. It has no deadline, no routing, and no rule for silence, which are the three things this project is about. Those would have to be built either way.",
+      "deep": "Concede: LangGraph would give persistence through a checkpointer, a known vocabulary, and a visualizer, and ADR 0001 says node names and persisted state map onto it directly. Defend: per its docs, interrupt() waits indefinitely until resumed, needs a checkpointer and thread id, and reruns the interrupted node from its start on resume, so pre interrupt side effects must be idempotent. None of that answers who is paged, by when, or what happens on silence. handoff's engine is that missing layer, and owning the clock is what lets the tests hit 299 and 300 seconds exactly. If the plan became dynamic per incident, Tanay would move the supervisor onto a graph framework and keep the escalation engine as is.",
+      "say": "LangGraph's interrupt pauses and waits until you resume it. No deadline, no routing, no rule for silence, and those are the whole project. I'd happily put the supervisor on LangGraph if the plan became dynamic, but I'd keep this escalation engine underneath it.",
+      "evidence": [
+        "repo:handoff/docs/adr/0001-explicit-state-machines.md: cannot test at 299 and 300 seconds."
+      ],
+      "sources": [
+        "https://docs.langchain.com/oss/python/langgraph/interrupts"
+      ],
+      "tags": [
+        "pushback",
+        "langgraph"
+      ]
+    },
+    {
+      "id": "ho-43",
+      "type": "pushback",
+      "level": 1,
+      "q": "The workers are hand written rules. Isn't the hard part, nondeterministic agents, untested?",
+      "easy": "Yes, and the write up says so: whether the escalation layer holds up with nondeterministic workers is the open question this project does not answer. What is tested is the layer that would sit around them.",
+      "deep": "Concede: five deterministic workers with hand written thresholds; no LLM anywhere; the 212 tests and 11 scenarios measure orchestration and escalation logic on a dataclass world. Defend: the escalation layer does not depend on how findings are produced; the contract is the Worker protocol (name, capabilities, handle) returning findings with confidence and supports or contradicts. Several properties were built for nondeterminism: read only registries stop a model from reaching mutating tools by name, contested detection turns two disagreeing outputs into a human review, and argument validation happens before a person is paged. The next step is concrete: one LLM backed analyst behind the same protocol, run many times per scenario, measuring how often contested fires and whether the scenario expectations still hold.",
+      "say": "Yes. My write up says that's the open question. What I built and tested is the layer around the workers, and several pieces exist because workers will be models: read only tools, contested detection, validation before a page. The next step is one LLM analyst behind the same interface, run many times per scenario.",
+      "evidence": [
+        "portfolio: The five workers are deterministic with hand written thresholds, and no LLM is called anywhere."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "llm agents",
+        "limitations"
+      ]
+    },
+    {
+      "id": "ho-44",
+      "type": "pushback",
+      "level": 2,
+      "q": "In autonomous mode, delete_volume runs with nobody asked. How is that safe?",
+      "easy": "It isn't meant to be safe in that mode; autonomous means the operator turned approvals off. The policy table is not consulted at all at that level, so there is no ceiling, and a production version should have one.",
+      "deep": "Concede: Policy.needs_human returns False for every risk under AUTONOMOUS, so critical and irreversible tools run unattended; scenario 10 pins that autonomous asks nobody. Defend: autonomy is an explicit operator setting applied on top of the table, the scenario exists so guarded results are known to come from policy and not from a missing code path, and every execution is still journaled with its declared risk. Fix worth naming: a hard ceiling, for example irreversible tools always require approval regardless of autonomy, enforced in needs_human and pinned by a test, plus an AUTONOMY_CHANGED event, which is declared but never emitted today.",
+      "say": "Fair. Autonomous really does bypass the table, including critical tools. That level exists so I can prove the guarded results come from the policy. In production I'd add a ceiling: irreversible tools always need a human, no matter the autonomy level, with a test that pins it.",
+      "evidence": [
+        "repo:handoff/handoff/core/types.py: return self in (Autonomy.GUARDED, Autonomy.AUTONOMOUS)"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "autonomy"
+      ]
+    },
+    {
+      "id": "ho-45",
+      "type": "pushback",
+      "level": 2,
+      "q": "Hold can leave an incident frozen forever. Isn't that the hanging behaviour you criticize?",
+      "easy": "It is close, and the difference is that it is declared and visible: the record says the incident is frozen because nobody answered, and it is only used where acting without two signatures is worse. But there is a real gap: nothing resumes a frozen run.",
+      "deep": "Concede: HELD never fires again, the run goes to FROZEN, a terminal RunState, and the supervisor has no transition out of it; INCIDENT_RESUMED is declared but never emitted, so even if the assignee later approves, the run does not pick it up. Defend: the critique of confirm() is that the silent case is undefined; hold defines it, journals INCIDENT_FROZEN, and keeps the escalation in engine.open() so it stays visible. ADR 0004 says a hold is supposed to hurt. Fix: allow decide() on HELD to reopen the run (FROZEN to ACTING with INCIDENT_RESUMED), and attach a pager to Journal.subscribe so INCIDENT_FROZEN wakes someone.",
+      "say": "It's close, and I'll own the gap. Hold is declared and visible, unlike a blocking prompt, and it's only used for critical actions. But the supervisor has no path out of frozen today. The fix is letting a later approval reopen the run and wiring a pager to the frozen event.",
+      "evidence": [
+        "repo:handoff/handoff/escalation/request.py: return self in (EscalationState.PENDING, EscalationState.ASSIGNED, EscalationState.HELD)",
+        "repo:handoff/handoff/core/types.py: freeze the incident and keep it frozen until a human acts"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "hold"
+      ]
+    },
+    {
+      "id": "ho-46",
+      "type": "pushback",
+      "level": 2,
+      "q": "212 tests in a tenth of a second sounds like you're testing trivia.",
+      "easy": "Fast does not mean shallow here. There is no I/O, no sleeping, and no network, because the clock is injected and the world is a dataclass. The tests drive whole incidents and check boundaries to the second.",
+      "deep": "Concede: speed comes partly from the simulation; nothing touches a real database, pager, or cluster, so integration risks are untested. Defend: many tests are behavioural, driving system.build() through open, advance, decide, tick, advance, and asserting what did and did not execute; the scenario runner checks negative assertions (scale_deployment must not run on silence); and the suite caught two design flaws the unit level code hid, including a safety branch that was unreachable through the normal flow. Determinism comes from ManualClock and seeded ids, which is also why the demo output is byte identical across runs.",
+      "say": "It's fast because nothing sleeps and nothing does I/O, not because it's shallow. Most of the weight is in tests that drive a whole incident and check what didn't run. That's how the suite caught a safety branch that was unreachable in the real flow.",
+      "evidence": [
+        "portfolio: There are no dependencies, so the whole suite runs on a bare interpreter in under a tenth of a second.",
+        "portfolio: During the build the suite caught two design flaws, one of which was a safety path that could never actually run."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "testing"
+      ]
+    },
+    {
+      "id": "ho-47",
+      "type": "why",
+      "level": 3,
+      "q": "What would a careful reviewer find reading the code that the write up does not say?",
+      "easy": "A handful of edges: an approval can land after its deadline if tick has not run yet, a frozen incident cannot resume, one of the four load time checks is really a unit test, and two docs are slightly out of date.",
+      "deep": "(1) decide() does not compare now with the attempt's deadline, so between a deadline passing and the next tick() a late approval is accepted; CLAUDE.md lists 'a responder who approves after the deadline has already fired' as a missing scenario. (2) No transition out of FROZEN; INCIDENT_RESUMED, PLAN_REVISED, AUTONOMY_CHANGED are declared and never emitted. (3) The ladder tier check: Roster.from_config validates roster tiers, and the policy to roster cross check is a test over shipped files; the tools registry docstring also says a policy naming safe_fallback for a tool without one is rejected at load, while the code degrades to deny at runtime. (4) The README table says 200 tests; the count is 212. (5) test_escalation_engine.py has an if __name__ == '__main__' block in the middle of the file, so running that file directly skips the later classes, though unittest discover runs them all. (6) The journal claims replayability; there is no replay function. (7) The fallback is journaled as ACTION_ALLOWED with substituted set, which a log reader filtering on kind alone could misread. None changes a documented behaviour, and each is a small fix.",
+      "evidence": [
+        "repo:handoff/handoff/escalation/roster.py: raise ConfigError(f\"{path}: tiers with no responders: {empty}\")",
+        "repo:handoff/README.md: | tests | 200, all passing |",
+        "repo:handoff/CLAUDE.md: Verified by running: all 212 tests, all 11 scenarios, the four act demo,"
+      ],
+      "sources": [],
+      "tags": [
+        "code review",
+        "gaps"
+      ]
+    },
+    {
+      "id": "ho-48",
+      "type": "case",
+      "level": 3,
+      "q": "What would production need, and what breaks at 10x and 100x?",
+      "easy": "A scheduler that calls tick, a durable store for incidents and escalations, a real paging channel, and a roster with rotations. At larger scale the in memory, single process design is the first thing to go.",
+      "deep": "Production: a scheduler calling tick every few seconds (and its own lag becomes part of every deadline); persistence of IncidentRun and Escalation records, since today everything lives in memory and a restart loses open escalations, with the JSONL sink as the start of an event sourced store; a notification adapter on Journal.subscribe with delivery retries; rotations, time zones, and handover in the roster; a real tool layer replacing World, with idempotency keys on mutating calls. 10x incidents at once: responder load limits start to bind, concurrent incidents compete for the same few people (a scenario CLAUDE.md names as missing), and the engine scanning all escalations on every tick is still cheap. 100x: one process and one in memory dict become the bottleneck and a single point of failure; escalations need a datastore with an index on deadline, ticks need leader election or a queue with delayed messages so two schedulers do not fire one deadline twice, and decide() needs compare and set on escalation state.",
+      "evidence": [
+        "portfolio: No scheduler. The caller drives the deadline tick",
+        "portfolio: The journal exposes a subscribe hook where a pager would attach. Nothing attaches to it.",
+        "portfolio: Seven people in a YAML file, with no rotation schedule, timezones, or handover."
+      ],
+      "sources": [],
+      "tags": [
+        "production",
+        "scale",
+        "system design"
+      ]
+    },
+    {
+      "id": "ho-49",
+      "type": "case",
+      "level": 2,
+      "q": "What would you build next?",
+      "easy": "A scheduler for tick, one LLM backed worker to test the open question, a pager on the journal hook, roster rotations, and scenarios for competing incidents and late approvals.",
+      "deep": "The order in CLAUDE.md, by how much each improves the project: (1) a scheduler for tick, the most honest gap; (2) one LLM backed worker implementing Worker over an existing analyst, run repeatedly to see whether contested detection and the scenario expectations hold under nondeterminism; (3) a notification channel on Journal.subscribe; (4) roster rotation with schedules, time zones, and handover; (5) scenarios for concurrent incidents competing for one responder and for an approval that arrives after the deadline fired. Tanay would add two from reading the code: a resume path from FROZEN, and an autonomy ceiling for irreversible tools. Deferred on purpose: a real cluster integration (World is the seam and a run signature away) and an approvals web UI (the Decision API is what a UI would call).",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "roadmap",
+        "next steps"
+      ]
+    },
+    {
+      "id": "ho-50",
+      "type": "compare",
+      "level": 2,
+      "q": "Compare three human in the loop designs: a blocking confirm, a graph interrupt, and handoff's escalation engine.",
+      "easy": "A blocking confirm waits forever for whoever is at the screen. A graph interrupt saves state and waits forever for someone to resume it. handoff pages a specific person with a deadline and a written rule for silence.",
+      "deep": "Blocking confirm(): holds a thread, no routing, no deadline, silent case undefined, testable only with mocks or real waiting. Graph interrupt (for example LangGraph): state checkpointed so nothing blocks, resume via a command, but no built in deadline or routing, and the interrupted node reruns from its start on resume. handoff: raise_for returns immediately; routing by tier, skill, and load; a deadline per attempt with shrinking windows; quorum; one of four declared silence behaviours; a caller driven tick testable to the second; an audit record of every attempt. What handoff lacks that a framework has: durable checkpointing, a scheduler, a visualizer, and community support.",
+      "evidence": [],
+      "sources": [
+        "https://docs.langchain.com/oss/python/langgraph/interrupts"
+      ],
+      "tags": [
+        "comparison",
+        "human in the loop"
+      ]
+    },
+    {
+      "id": "ho-51",
+      "type": "define",
+      "level": 2,
+      "q": "Define blast radius, reversibility, quorum, autonomy level, and audit trail as this project uses them.",
+      "easy": "Blast radius is a plain words description of what can break. Reversibility says whether the action can be undone. Quorum is how many different people must approve. Autonomy level is how much the operator lets the system do alone. The audit trail is the permanent record of every question, answer, and silence.",
+      "deep": "blast_radius is a string on each Tool, copied into every Escalation and shown to the human, written without jargon, for example 'every writer reconnects, in flight transactions are lost'; a test asserts every tool declares one. reversible is a bool on Tool; irreversible tools must be high or critical and declare a fallback (both pinned by tests), and the planner orders reversible actions first. quorum is per policy rule (2 for critical) and needs distinct responders. Autonomy is observe, suggest, guarded, or autonomous, applied on top of the table. The audit trail is the append only Journal plus each Escalation's attempts and audit() rendering; the reason there is no allow on expiry is to keep that trail honest about who decided.",
+      "evidence": [
+        "repo:handoff/handoff/tools/builtin.py: blast_radius=\"every writer reconnects, in flight transactions are lost\",",
+        "repo:handoff/config/policy.yaml: quorum: 2"
+      ],
+      "sources": [],
+      "tags": [
+        "definitions"
+      ]
+    },
+    {
+      "id": "ho-52",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain handoff to a hiring manager for an AI engineering role.",
+      "easy": "Agents that ask people for approval usually wait forever. Tanay built the layer that decides who to ask, how long they get, and what happens if they never answer, and tested it to the second.",
+      "deep": "Lead with the 3am failover story, then the four expiry behaviours and the missing allow, then the numbers with the simulation caveat, then the open question about LLM workers.",
+      "say": "I built the escalation layer for agents that need human approval. Every request has an owner, a deadline, and a rule for silence. If nobody answers a database failover in 180 seconds, it puts the database in read only mode instead, and the log says nobody answered. There are 212 tests and no dependencies. It runs on a simulated cluster with rule based workers, and whether it holds up with LLM workers is the next thing I'd test.",
+      "evidence": [
+        "portfolio: The page goes to the engineer on call who holds the infrastructure skill, with 180 seconds to answer.",
+        "portfolio: 212 tests / 11 behavioural scenarios / zero dependencies / unanswered page -> safer substitute / CI green on Python 3.11 to 3.13"
+      ],
+      "sources": [],
+      "tags": [
+        "narration",
+        "hiring manager"
+      ]
+    },
+    {
+      "id": "ho-53",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the deadline design to a staff engineer.",
+      "easy": "Time is injected, tick is caller driven, nothing blocks or sleeps, and every expiry behaviour is pinned at its boundary second.",
+      "deep": "Clock protocol with SystemClock and ManualClock; tick fires overdue ASSIGNED escalations and applies on_expiry; windows shrink by a 0.5 backoff with a 30 second floor; supervisor returns AWAITING_HUMAN; the missing piece is a scheduler and persistence.",
+      "say": "Every deadline is measured against an injected clock, and tick is driven by the caller, so nothing sleeps. Tests advance a manual clock 299 seconds and assert nothing fired, then one more and assert it did. Later tiers get half the window, floored at 30 seconds. What's missing is the scheduler that calls tick in production, and persistence so open escalations survive a restart.",
+      "evidence": [
+        "repo:handoff/tests/test_escalation_engine.py: self.clock.advance(seconds=299)",
+        "repo:handoff/handoff/escalation/engine.py: backoff: float = 0.5,"
+      ],
+      "sources": [],
+      "tags": [
+        "narration",
+        "staff engineer"
+      ]
+    },
+    {
+      "id": "ho-54",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain it to a product manager.",
+      "easy": "When automation needs permission and the person is asleep, something still has to happen. handoff makes that something a decision written down in advance, and it never pretends silence was a yes.",
+      "deep": "Frame it as reliability of approvals: who is asked, how long they have, a safer fallback, and an honest record. Mention that the rules live in a readable file a non engineer can review.",
+      "say": "Picture an automated system that needs a person's OK at 3am and nobody picks up. Most products just wait. Mine decides ahead of time: ask the right person, give them a deadline, and if they're silent, do the safer thing or freeze, never the risky thing. The rules live in a readable file, so an ops lead can review them without reading code.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narration",
+        "pm"
+      ]
+    },
+    {
+      "id": "ho-56",
+      "type": "define",
+      "level": 2,
+      "q": "Define failover, read only mode, mutating tool, tier, ladder, and on call roster.",
+      "easy": "A failover switches the main database to a backup copy. Read only mode keeps the database answering reads but refuses writes. A mutating tool is any action that changes the system. A tier is a level of responders, a ladder is the order tiers are asked in, and the roster lists who is on call at each tier.",
+      "deep": "failover_database promotes a replica to primary and demotes the old primary; in the World model it bumps failovers and resets lag, and the blast radius is that every writer reconnects and in flight transactions are lost, which is why it is irreversible and high. enable_read_only sets database.read_only, so writes are rejected and checkout degrades, but data is safe and a human can undo it, which makes it the declared fallback. Mutating means any tool above READ_ONLY; only the supervisor may call one. Tiers in the shipped roster: primary, secondary, incident_commander, engineering_manager, director. A policy ladder lists tiers in paging order per risk level. The roster is static: seven people with skills and max_concurrent load limits, no rotation schedule, time zones, or handover.",
+      "evidence": [
+        "repo:handoff/handoff/tools/builtin.py: blast_radius=\"every writer reconnects, in flight transactions are lost\",",
+        "repo:handoff/handoff/tools/builtin.py: blast_radius=\"writes rejected, checkout degrades but data is safe\",",
+        "portfolio: Seven people in a YAML file, with no rotation schedule, timezones, or handover."
+      ],
+      "sources": [],
+      "tags": [
+        "definitions",
+        "incident response"
+      ]
+    },
+    {
+      "id": "ho-57",
+      "type": "define",
+      "level": 2,
+      "q": "Define a state machine, an injectable clock, an append only log, a closed event vocabulary, and a seam, as used here.",
+      "easy": "A state machine lists the states something can be in and the allowed moves between them. An injectable clock is time passed in as an object, so tests can control it. An append only log never edits or deletes entries. A closed vocabulary means every event type is listed in one place. A seam is a spot where a real component can replace a simulated one without touching the rest.",
+      "deep": "State machines: RunState for incidents (eleven states, three terminal) and EscalationState for escalations (eight states); both are hand written per ADR 0001 and refuse undefined transitions (decide on a terminal escalation raises). Injectable clock: the Clock protocol with SystemClock and ManualClock; nothing else calls datetime.now and nothing sleeps. Append only log: Journal.append is the only write, with an optional JSON lines sink. Closed vocabulary: EventKind is a StrEnum, so a new kind of event is a deliberate code change rather than a free string at a call site. Seams named in docs/ARCHITECTURE.md: the World object (swap each tool's run for a real API call), the Worker protocol (swap a rule based analyst for an LLM one), and the static planner (swap for a generated plan, which ADR 0001 says would justify a framework).",
+      "evidence": [
+        "repo:handoff/tests/test_escalation_engine.py: self.clock.advance(seconds=299)"
+      ],
+      "sources": [],
+      "tags": [
+        "definitions",
+        "design"
+      ]
+    },
+    {
+      "id": "ho-55",
+      "type": "narrate",
+      "level": 2,
+      "q": "Give the recruiter version in under a minute.",
+      "easy": "Tanay built software that lets automated agents ask people for approval safely, with deadlines and backup plans, and tested it with 212 automated tests.",
+      "deep": "Name the skills: Python, agent orchestration, human in the loop design, state machines, testing, CI. One number. One honest line about simulation.",
+      "say": "I built a system for AI agents that need human sign off. It decides who to ask, gives them a deadline, and if nobody answers it does something safe instead of waiting forever. It's pure Python with no dependencies and 212 automated tests running on three Python versions in CI. It runs on a simulated cluster, which I say up front.",
+      "evidence": [
+        "portfolio: 212 tests / 11 behavioural scenarios / zero dependencies / unanswered page -> safer substitute / CI green on Python 3.11 to 3.13"
+      ],
+      "sources": [],
+      "tags": [
+        "narration",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "LangGraph: Interrupts",
+      "url": "https://docs.langchain.com/oss/python/langgraph/interrupts",
+      "why": "How a graph framework pauses for a human: checkpointer, thread id, resume command, node rerun on resume, and no built in deadline."
+    }
+  ]
+}
