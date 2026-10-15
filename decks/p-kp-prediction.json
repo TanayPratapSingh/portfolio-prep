@@ -1,0 +1,916 @@
+{
+  "deck_id": "p-kp-prediction",
+  "title": "Multi Horizon Kp Prediction",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/multi-horizon-aurora-kp-prediction",
+  "summary_easy": "A four person course project that trained one LSTM neural network on NASA's hourly OMNI2 space weather data to forecast the Kp geomagnetic storm index 1, 3, 6 and 12 hours ahead. The reported 1 hour error was 0.738 Kp, 45% below always predicting the average, falling to about 10% better at 12 hours. The deck pairs those numbers with the weaknesses an interviewer will find: a weak baseline, an input that mirrors Kp, and a repo that cannot regenerate the results.",
+  "summary_deep": "OMNI2 hourly data (2013 to 2024) was remapped after a column error (Kp at column 38, not 46), cleaned of fill values, converted from Kp x 10, and reduced to about 15 features by Pearson correlation and physics, with ap the strongest correlate (r = 0.825) and Bz weak (r = -0.238). A two layer LSTM over a 24 x 15 window with four outputs was trained with MSE and Adam (lr 0.001, batch 64), regularised with dropout and L2 after severe overfitting, and early stopped at epoch 39, on a chronological split with 8,761 hour gaps and a train only StandardScaler. Test RMSE was 0.738, 0.910, 1.073 and 1.207 at 1, 3, 6 and 12 hours against a mean baseline of 1.34, with R squared 0.690 down to 0.170 and storms underpredicted. No persistence baseline was computed even though hourly Kp repeats over its 3 hour window and ap encodes the same window's Kp, so 1 hour skill is likely overstated. The committed notebook is a scaffold with loading and training commented out, and the README reports an earlier configuration (12 hour windows, 70 / 15 / 15 split, 0.691 at 1 hour).",
+  "sheet": {
+    "easy": "## What it is\n- A four person IST 691 deep learning project: one LSTM that forecasts the Kp storm index 1, 3, 6 and 12 hours ahead.\n- Kp: 0 to 9 every 3 hours; 5 or more is a geomagnetic storm.\n\n## Data\n- NASA OMNI2 hourly solar wind and geomagnetic indices, 2013 to 2024 (96,552 records per the portfolio, although twelve years of hours is 105,192).\n- About 15 of 55 parameters: magnetic field, solar wind speed, density, pressure, and indices like ap and AE.\n- First bug: wrong column mapping; Kp is column 38, not 46.\n\n## Model (reported run)\n- Two layer LSTM, 24 hours of 15 features in, four outputs.\n- MSE loss, Adam 0.001, batch 64, early stopping at epoch 39 of 50.\n- Split by time with a year of gap between training, validation and test.\n\n## Results (test 2023 to 2024)\n| Horizon | RMSE | MAE | R squared | vs mean |\n| --- | --- | --- | --- | --- |\n| 1 h | 0.738 | 0.476 | 0.690 | +44.9% |\n| 3 h | 0.910 | 0.655 | 0.528 | +32.1% |\n| 6 h | 1.073 | 0.793 | 0.343 | +19.9% |\n| 12 h | 1.207 | 0.906 | 0.170 | +9.9% |\n- Mean baseline RMSE 1.34. Big storms underpredicted (Kp 7 to 8 predicted as 5 to 6, per README).\n\n## What to say about weaknesses\n- The baseline should have been persistence: Kp repeats for 3 hours.\n- ap is Kp on another scale, so at 1 hour the input partly contains the answer.\n- The repo's notebook is a scaffold; the numbers cannot be regenerated from it.\n- README reports an earlier run (0.691 at 1 hour) with different settings.\n",
+    "deep": "## Target and data\n- Kp: 3 hour planetary index, 0 to 9 in thirds; storm at Kp $\\ge 5$. OMNI2 word 39 stores Kp x 10 (33 = 3+, 57 = 6-); divide by 10 (thirds become tenths).\n- OMNI2 hourly, 55 words; fill values (99, 999, 999.9, 9999.9 ...) to NaN. 2013 to 2024. Records: 96,552 (portfolio, README, \"eleven years\"), but 2013 to 2024 is 4,383 days = 105,192 hours (the report says twelve years).\n- Features (report categories): IMF Bz GSM, By GSM, |B|; speed, density, temperature, pressure; E field; ap, AE, PC(N), AL, AU, Dst, f10.7. Portfolio correlations with Kp: ap 0.825, AE 0.732, AL -0.663, AU 0.690, Bz -0.238 (README: AE 0.73, AL -0.70, AU 0.66).\n\n## Split and leakage controls\n| Version | Train | Gap | Val | Gap | Test |\n| --- | --- | --- | --- | --- | --- |\n| Portfolio / report V2.0 | 2013 to 2018 (50%) | 8,761 h | 2020 to 2021 (16.6%) | 8,761 h | 2023 to 2024 (16.6%) |\n| README | 2013 to 2018 (70%, 67,206) | none | 2019 to 2020 (15%) | none | 2021 to 2024 (15%, 14,401) |\n- Minimum gap = lookback + horizon = 24 + 12 = 36 h. Scaler fit on train only (features and target).\n- Not controlled: same window information. Hourly Kp repeats over its 3 hour window; ap is a fixed table of Kp for that window. At $h = 1$, $P(\\text{same window}) = 2/3$.\n\n## Model\n- Reported: 2 layer LSTM, input $24 \\times 15$, 4 outputs, MSE, Adam lr $10^{-3}$, batch 64, max 50 epochs, best epoch 39.\n- README: 12 h windows, max 100 epochs, stop at 31. Scaffold: LSTM 128, 64, 32, Dense 16, dropout 0.2 / 0.1, one output per horizon model, batch 32, 100 epochs, EarlyStopping patience 10, ReduceLROnPlateau factor 0.5 patience 5 min 1e-6, seed 42.\n- LSTM cell:\n$$f_t = \\sigma(W_f[h_{t-1},x_t]+b_f),\\ i_t = \\sigma(W_i[\\cdot]+b_i),\\ g_t = \\tanh(W_g[\\cdot]+b_g),\\ o_t = \\sigma(W_o[\\cdot]+b_o)$$\n$$c_t = f_t \\odot c_{t-1} + i_t \\odot g_t, \\qquad h_t = o_t \\odot \\tanh(c_t)$$\n- Overfitting path (README): train 0.232 / val 0.818; 30% dropout 0.75; 50% dropout 0.67; + L2 0.59; + early stopping 0.574 (the report gives a different final value).\n- Scaffold windowing: `X[i:i+L]`, `y[i+L]` with `y = Kp.shift(-h)` gives target $h + 1$ hours after the last input (off by one).\n\n## Metrics\n$$\\text{RMSE} = \\sqrt{\\tfrac1n\\sum (y-\\hat y)^2}, \\quad \\text{MAE} = \\tfrac1n\\sum|y-\\hat y|, \\quad R^2 = 1 - \\frac{SS_{res}}{SS_{tot}}$$\n- With a mean baseline, $\\text{RMSE}_{base} \\approx \\sigma$, so improvement $= 1 - \\text{RMSE}/\\sigma$ and $R^2 \\approx 1 - (\\text{RMSE}/\\sigma)^2$: $1 - 0.738/1.34 = 0.449$; $1 - (0.738/1.34)^2 = 0.697$.\n- Skill vs persistence (not computed): $SS = 1 - \\text{MSE}_{model}/\\text{MSE}_{persist}$.\n\n## Results\n| Source | 1 h | 3 h | 6 h | 12 h | Baseline |\n| --- | --- | --- | --- | --- | --- |\n| Portfolio / report RMSE | 0.738 | 0.910 | 1.073 | 1.207 | 1.34 |\n| MAE | 0.476 | 0.655 | 0.793 | 0.906 | |\n| R squared | 0.690 | 0.528 | 0.343 | 0.170 | |\n| README RMSE | 0.691 | 0.894 | 1.067 | 1.211 | 1.333 |\n- README 1 h extras: MAE 0.489, R squared 0.727, median abs error 0.312, within 0.5 Kp 69.3%, within 1.0 Kp 89.1%, mean error under 0.05.\n- Storms: README says predictions rarely exceed 6 and Kp 7 to 8 comes out as 5 to 6. No POD, FAR, HSS reported; scaffold detection code is commented out.\n\n## Reproducibility\n- Notebook `aurora_complete_code.ipny.ipynb`: 31 code cells, only the pip install executed; download, load, split, scale, sequence, fit, predict and metrics are commented out; pickles an unfitted scaler; 38 column names for 55 words.\n- Report V2.0 is a .docx; README and portfolio disagree on configuration and results.\n\n## Limitations and fixes\n- Mean baseline only: add persistence, 27 day recurrence, linear and boosted tree baselines.\n- Same window ap: lag by one window, evaluate on window start hours, or drop.\n- Storms: weighted or quantile loss, classification head, event based POD / FAR / HSS / TSS.\n- One test block near solar maximum, one seed: blocked CV across cycle phases, seeds, intervals.\n- Production: live L1 data propagated like OMNI, ap and AE latency, drift monitoring, persistence fallback.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "It's a team deep learning project where we forecast the Kp geomagnetic storm index 1, 3, 6 and 12 hours ahead with a single LSTM, trained on NASA's OMNI2 hourly solar wind data from 2013 to 2024. At 1 hour the test RMSE was 0.738 Kp, 45% below predicting the mean. Since then I've found its weak spots: the baseline should have been persistence, and one input mirrors Kp.",
+      "keypoints": [
+        "Team project, single multi output LSTM",
+        "OMNI2 hourly, 2013 to 2024",
+        "1 hour RMSE 0.738, 45% below mean baseline",
+        "Critique: persistence baseline missing",
+        "Critique: ap mirrors Kp"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "Geomagnetic storms damage satellites and power grids, and operators need different warning times, so we built one model that forecasts the Kp index at 1, 3, 6 and 12 hours. Kp is a 3 hour index from 0 to 9, and 5 or more is a storm. The data is NASA's OMNI2, hourly solar wind and geomagnetic indices from 2013 to 2024. The first bug was ours: the column mapping was wrong, and Kp sits at column 38, not 46. We replaced NASA's fill values, divided Kp by ten, and picked about 15 features by correlation and physics: field components, solar wind speed, density and pressure, and indices like ap and AE. We split by time with a full year between training, validation and test, and fitted the scaler on training data only. The model is a two layer LSTM over 24 hours of inputs with four outputs, trained with mean squared error and stopped early at epoch 39. Before regularisation it badly overfit, 0.232 training loss against 0.818 validation. On the 2023 to 2024 test years, RMSE was 0.738 at 1 hour and 1.207 at 12, against 1.34 for predicting the mean. Looking back, three things weaken that. The mean is the wrong baseline, because Kp repeats for three hours and persistence is exact two hours in three. ap is a lookup of Kp for the same window, so at 1 hour the inputs partly contain the answer. And the public notebook is a scaffold, so the numbers can't be regenerated from the repo. Next I'd rebuild it as one script with persistence baselines, ablations without ap, and storm detection metrics.",
+      "keypoints": [
+        "Problem and horizons",
+        "OMNI2 data and the column mapping bug",
+        "Chronological split with year gaps, train only scaler",
+        "Two layer LSTM, four outputs, early stop at 39",
+        "0.738 at 1 hour, 1.207 at 12, mean baseline 1.34",
+        "Critiques: baseline, ap leakage, scaffold repo",
+        "Next: script, persistence, ablations, storm metrics"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story.",
+      "script": "The target is Kp, a planetary index of magnetic disturbance defined on 3 hour windows, 0 to 9 in thirds, with 5 or more counting as a storm. We wanted one model to forecast it 1, 3, 6 and 12 hours ahead, because satellite, grid and GPS operators need different lead times and four separate models can contradict each other. Data came from NASA's OMNI2 hourly set, 2013 to 2024, which merges upstream spacecraft measurements already shifted to Earth with geomagnetic indices, 55 words per hour. We concatenated the yearly files, built timestamps from year, day of year and hour, and found our first real bug: the column mapping was wrong, and Kp is word 39, column 38 counting from zero, not 46. NASA's fill values became NaN, and Kp, stored as ten times its value with thirds encoded, was divided by ten, which turns thirds into tenths, a small error I'd now fix with a lookup. Features were chosen by Pearson correlation and physics: field components, speed, density, temperature, pressure, an electric field, and indices ap, AE, AL, AU, PC(N), Dst and f10.7. ap correlated at 0.825 and Bz only at minus 0.24. The weak Bz number reflects that coupling is rectified and delayed, which a same hour linear correlation can't see. For validation we split chronologically: training 2013 to 2018, validation 2020 to 2021, test 2023 to 2024, with a year of gap between each, far more than the 36 hours a 24 hour window plus a 12 hour horizon strictly needs. The scaler was fitted on training data only. The model was a two layer LSTM reading 24 hours of 15 features, with four outputs, MSE loss, Adam at 0.001 and batch 64. The first version overfit, training loss 0.232 against 0.818 on validation; dropout at 30 then 50 percent, L2 and early stopping brought validation loss down, and the best epoch was 39. Test RMSE was 0.738 at 1 hour, 0.910 at 3, 1.073 at 6 and 1.207 at 12, against 1.34 for predicting the mean, so 45 down to 10 percent better, and R squared fell from 0.69 to 0.17. Those two metrics are the same fact, since the mean baseline's RMSE is the standard deviation. Storms were underpredicted: the README notes actual 7 to 8 coming out as 5 to 6, which is what plain MSE does with rare events and no reweighting. Now the part I'd lead with today. First, the baseline. Kp repeats across the three hours of its window, so persistence is exact two hours in three at the 1 hour horizon and was never computed. Second, ap is a table conversion of Kp for the same window, so the latest ap already contains the 1 hour target most of the time; our defence that indices are past 3 hour averages doesn't touch that. Third, reproducibility: the public notebook is a scaffold with loading and training commented out, it even has an off by one that makes the 1 hour target two hours ahead, and the README reports an earlier run with different settings and 0.691 at 1 hour. The fixes are concrete: one script with a config, persistence and boosted tree baselines, an ablation without same window indices, storm metrics like detection and false alarm rates, and then serving on the live feeds I later built a dashboard for.",
+      "keypoints": [
+        "Kp definition and multi horizon motivation",
+        "OMNI2 pipeline and column 38 bug",
+        "Correlation based features; Bz rectified and delayed",
+        "Chronological split with year gaps, 36 hour minimum",
+        "Two layer LSTM, overfitting fixed, epoch 39",
+        "0.738 to 1.207 RMSE vs 1.34 mean; storms underpredicted",
+        "Critiques: persistence, ap leakage, scaffold and version drift",
+        "Fix list and link to live serving"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone without a technical background.",
+      "script": "Storms on the Sun can disturb Earth's magnetic field, which can knock out satellites, power grids and GPS. Scientists rate that disturbance on a 0 to 9 scale called Kp. In a team class project, we trained a type of neural network on twelve years of NASA space weather data to predict that score one, three, six and twelve hours ahead, all from one model. One hour ahead it was off by about three quarters of a point on average, much better than just guessing the usual level, but it got steadily worse further out and tended to underestimate the big storms. Looking back, I'd test it against a tougher comparison, simply assuming the score stays the same, because that is harder to beat than it sounds.",
+      "keypoints": [
+        "Why Kp matters",
+        "Team project, one model, four horizons",
+        "About three quarters of a point error at 1 hour",
+        "Worse further out; big storms underestimated",
+        "Tougher comparison needed"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the system on the whiteboard.",
+      "script": "First I draw a timeline from 2013 to 2024 and mark the split: training 2013 to 2018, a gap year, validation 2020 to 2021, another gap, test 2023 to 2024. I note the minimum safe gap is 36 hours, lookback plus horizon, and we used a year. Second, the data pipeline as boxes: OMNI2 yearly files, concatenate, column mapping with a red note 'Kp is column 38, not 46', fill values to NaN, Kp divided by ten, feature selection down to about 15, StandardScaler fitted on training only. Third, a 24 by 15 grid for one input window, an arrow into two stacked LSTM boxes, and a head with four outputs labelled 1, 3, 6 and 12 hours. I write the training settings beside it: MSE, Adam 0.001, batch 64, early stop at epoch 39. Fourth, a small table of RMSE by horizon, 0.738 to 1.207, with a dashed line at 1.34 for the mean baseline, and R squared from 0.69 to 0.17. Last, I draw a 3 hour Kp window as a block covering three hourly cells, and an ap arrow pointing into the same block. I say: at 1 hour, the target is in the same window as the latest input two times in three, so persistence and ap leakage both need checking, and I add 'persistence baseline' and 'storm POD and FAR' as the missing boxes.",
+      "keypoints": [
+        "Timeline split with year gaps",
+        "Pipeline with the column 38 bug",
+        "24 by 15 window into two LSTM layers, four outputs",
+        "RMSE by horizon vs 1.34 mean",
+        "3 hour window diagram explaining persistence and ap leakage"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How did you prevent leakage?",
+      "script": "Four controls. We split by time instead of randomly, so overlapping windows can't straddle train and test. We left a full year between sets, much more than the 36 hours a 24 hour window and 12 hour horizon need. We fitted the scaler on training data only. And every input window uses only past hours. What those controls don't catch is same window information: ap is Kp on another scale for the same 3 hour block, and hourly Kp repeats for three hours, so at 1 hour the latest input often contains the target. I'd lag ap by a full window or score on window start hours.",
+      "keypoints": [
+        "Chronological split",
+        "Year gaps vs 36 hour minimum",
+        "Train only scaler",
+        "Past only windows",
+        "Same window ap leakage not caught"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why did the model underpredict big storms?",
+      "script": "Storm hours are a small share of the data, and we trained with plain mean squared error, which rewards getting the many quiet hours right. When inputs are ambiguous, the loss minimising prediction shrinks toward the average, so a Kp 8 comes out as 5 or 6, which the README states directly. We didn't reweight storm hours, use a quantile loss, or add a storm classifier, and we didn't report detection or false alarm rates. I'd add weighted loss or an upper quantile output, and evaluate storms as events.",
+      "keypoints": [
+        "Storms rare; MSE dominated by quiet hours",
+        "Shrinkage toward the mean",
+        "Kp 7 to 8 predicted as 5 to 6",
+        "No reweighting or storm metrics",
+        "Fix: weighting, quantiles, event scoring"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why do your README and portfolio disagree?",
+      "script": "They describe two runs. The README documents an earlier configuration: 12 hour input windows, a 70 15 15 split without gaps, early stopping at epoch 31, and 1 hour RMSE 0.691. The final report and the portfolio describe the later run with 24 hour windows, year long gaps and early stopping at 39, giving 0.738. The README wasn't updated, and its split counts don't even match its years. I quote the later, stricter run. The lesson is one config and one script that writes the table every document uses.",
+      "keypoints": [
+        "Two runs, two configurations",
+        "README: 12 hour windows, no gaps, 0.691",
+        "Portfolio: 24 hour windows, year gaps, 0.738",
+        "README counts inconsistent",
+        "Fix: single source of truth"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How would you deploy it?",
+      "script": "OMNI2 is cleaned and already propagated to Earth, and live data isn't. I'd take real time solar wind from NOAA's L1 feeds, propagate and average it hourly exactly as in training, and monitor its distribution against the training data. The harder problem is that our strongest inputs, ap and the electrojet indices, aren't in those feeds, which I found building a live space weather dashboard. So either ingest them with their real delays modelled in training, or retrain on solar wind only. Then a persistence fallback, monthly backtests, and an archive of forecasts to score live.",
+      "keypoints": [
+        "Archive vs live data gap",
+        "Same propagation and averaging online",
+        "Top inputs missing from live feeds",
+        "Model the delays or retrain",
+        "Fallback, backtests, forecast archive"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Persistence would beat your model at 1 hour. Why should I care about this project?",
+      "script": "You may well be right about 1 hour, and we never checked, which is the main gap. Kp repeats over three hours, so persistence is exact two hours in three, and our ap input partly lets the model copy. What I'd defend is the setup: chronological splits with year gaps, a train only scaler, and a single model across four horizons with errors that grow the way physics says they should. What I take from it is the evaluation lesson, and I'd rerun it against persistence and without same window indices before claiming any skill.",
+      "keypoints": [
+        "Concede: persistence likely wins at 1 hour",
+        "Never computed",
+        "ap enables copying",
+        "Defend the split and multi horizon design",
+        "Rerun against persistence"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your public code doesn't run. Isn't this result unverifiable?",
+      "script": "From the repo, yes. The notebook is a scaffold: the download, loading, training and evaluation lines are commented out, and only the install cell ran. The results come from the team's working runs, written up in the report. The numbers are internally consistent, R squared and the improvement agree through the baseline, but that isn't verification. The fix is a single script on public OMNI2 data that regenerates the table, which I'd do before using this project as evidence of anything beyond the design.",
+      "keypoints": [
+        "Concede: not reproducible from repo",
+        "Scaffold with commented out code",
+        "Results from working runs",
+        "Internal consistency is not proof",
+        "Fix: one regenerating script"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "kp-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is the Multi Horizon Kp Prediction project, in one sentence, and what was built?",
+      "easy": "A course project that trained one LSTM neural network on eleven or twelve years of hourly NASA solar wind and geomagnetic data to predict the Kp storm index 1, 3, 6 and 12 hours ahead, all at once.",
+      "deep": "Data: NASA's OMNI2 hourly dataset, 2013 to 2024, reduced from 55 parameters to 15 or 16 features (IMF components, solar wind plasma, a derived electric field, and geomagnetic indices such as ap, AE, AL, AU, PC(N), Dst). Model, per the portfolio and the final report: a two layer LSTM reading a 24 hour window of 15 features and emitting four outputs (Kp at 1, 3, 6, 12 hours) in one forward pass, trained with MSE and Adam at 0.001, batch 64, early stopped at epoch 39 of 50, with StandardScaler fitted on training data only. Split: chronological, 50 / 16.6 / 16.6% with 8,761 hour gaps. Reported 1 hour test RMSE 0.738 Kp, 44.9% below a predict the mean baseline. It was a four person IST 691 team project, and the public repo's notebook is a scaffold whose data, training and evaluation lines are commented out, so the numbers come from the report and write up, not from code you can rerun.",
+      "say": "It's a team deep learning project where we trained one LSTM to forecast the Kp storm index at 1, 3, 6 and 12 hours from NASA's OMNI2 data. The 1 hour RMSE was 0.738 Kp, about 45% better than predicting the mean. The honest caveats are that the baseline is weak and the repo's notebook doesn't reproduce the run.",
+      "evidence": [
+        "portfolio: 1h RMSE = 0.738 (45% better than baseline)  |  1h MAE = 0.476  |  1h R&sup2; = 0.690  |  96,000+ hourly observations",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: # Add actual data loading code"
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "lstm",
+        "time series"
+      ]
+    },
+    {
+      "id": "kp-02",
+      "type": "why",
+      "level": 1,
+      "q": "Why forecast several horizons, and why one model instead of four?",
+      "easy": "Different operators need different warning times: satellite teams want 6 to 12 hours, grid operators a few hours, GPS users less. One model with four outputs gives all four in one pass, and the forecasts come from the same internal state instead of four models that might disagree.",
+      "deep": "The write up's argument: a multi output head shares the recurrent representation across horizons, costs one training run and one inference, and avoids incoherent sets of forecasts (for example a 3 hour value far above both the 1 and 6 hour values). The costs are real: with plain MSE summed over four outputs, the 12 hour output has the largest errors and so the largest gradients, which can pull the shared layers toward long horizon behaviour; no loss weighting per horizon is described. A single model also does not enforce monotone uncertainty or physical consistency between horizons; it only makes disagreement less likely. The committed notebook scaffold actually builds one single output model per horizon in a loop, a different design from the one reported.",
+      "evidence": [
+        "portfolio: So the model predicts all four horizons in one forward pass instead of training four separate models.",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: # model = build_lstm_model(input_shape, name=f'LSTM_Kp_{h}h')"
+      ],
+      "sources": [],
+      "tags": [
+        "multi horizon",
+        "design",
+        "multi output"
+      ]
+    },
+    {
+      "id": "kp-03",
+      "type": "define",
+      "level": 1,
+      "q": "What is the Kp index, and how does OMNI2 store it?",
+      "easy": "Kp is a planetary score of geomagnetic disturbance for each 3 hour block, from 0 (quiet) to 9 (extreme) in thirds; 5 and above is a storm. OMNI2 stores it as ten times the value with the thirds encoded, for example 33 for 3+, 40 for 4 and 57 for 6-, so the project divided by 10.",
+      "deep": "Each observatory's K index rates the largest horizontal field fluctuation in a 3 hour UT window on a quasi logarithmic 0 to 9 scale; Kp averages standardised K values from 13 mid latitude observatories. Values come in thirds (5- is 4.67, 5+ is 5.33). OMNI2 word 39 holds Kp with fill value 99. Dividing by 10 gives 3.3 for 3+ and 5.7 for 6-, which approximates 3.33 and 5.67 but not exactly: the thirds become tenths, a small systematic error of up to 0.03 Kp. The project checked the converted series had a mean near 1.6 and a max near 8.3. Because Kp is defined per 3 hour window, an hourly table repeats each value across the three hours of its window, which matters for baselines and leakage.",
+      "evidence": [
+        "repo:multi-horizon-aurora-kp-prediction/README.md: OMNI stores Kp as integers (33 = 3+, 40 = 4, 57 = 6-). Divided by 10 to convert to standard 0-9 decimal scale. Verified conversion produced realistic values (mean ~1.6, max ~8.3)."
+      ],
+      "sources": [
+        "https://spdf.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni2.text",
+        "https://www.spaceweather.gov/products/planetary-k-index",
+        "https://en.wikipedia.org/wiki/K-index"
+      ],
+      "tags": [
+        "kp",
+        "define",
+        "omni2"
+      ]
+    },
+    {
+      "id": "kp-04",
+      "type": "define",
+      "level": 1,
+      "q": "What is OMNI2, and how big was the dataset?",
+      "easy": "OMNI2 is NASA's hourly archive of near Earth solar wind conditions merged from several spacecraft, together with geomagnetic and solar indices. The project used 2013 to 2024. The portfolio and README say 96,552 hourly records over eleven years, but the stated range is twelve years, which the final report also says.",
+      "deep": "OMNI combines measurements from upstream monitors (such as ACE, Wind, DSCOVR), shifted in time to Earth, with indices (Kp, ap, AE, AL, AU, Dst, PC(N), f10.7, sunspot number) in one hourly record of 55 words, with fill values such as 99, 999, 9999.9 for missing data. Data cover the declining phase of solar cycle 24, the 2019 to 2020 minimum and the rise of cycle 25. The count disagreement is worth knowing cold: January 2013 to December 2024 is 4,383 days, or 105,192 hours, while 96,552 hours is about 11 years, so the record count and the date range cannot both be right. The README also says missing data is under 1% across all features, which is hard to square with OMNI plasma gaps and was not shown in code.",
+      "evidence": [
+        "portfolio: It covers eleven years (January 2013 to December 2024), 96,552 hourly records in total.",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - Total records: 96,552 hourly measurements"
+      ],
+      "sources": [
+        "https://spdf.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni2.text"
+      ],
+      "tags": [
+        "omni2",
+        "data",
+        "define"
+      ]
+    },
+    {
+      "id": "kp-05",
+      "type": "how",
+      "level": 2,
+      "q": "Walk through the preprocessing pipeline, including the column mapping bug.",
+      "easy": "Download the yearly OMNI2 files, join them in order, build a timestamp from year, day of year and hour, map the 55 columns to names, replace NASA's fill values with missing, convert Kp from tens to the 0 to 9 scale, split by time, then standardise using training statistics only.",
+      "deep": "From the README: (1) annual OMNI2 files concatenated with pandas, datetime from Year/Day of Year/Hour; (2) column mapping checked against NASA's format document after 'significant errors' in the first mapping, with Kp confirmed at column 38 (zero based, word 39), not 46; (3) documented fill values (9999.9, 999.9, 99.99 and so on) replaced with NaN; (4) Kp divided by 10; (5) chronological split; (6) StandardScaler on all features and the target, fitted only on training data. The mapping bug meant training on wrong columns and wrong Kp values until it was caught. The committed scaffold still shows the kind of list that causes it: 38 column names for a 55 word record, which would put 'Kp' at index 29. How NaNs were handled before windowing (dropping, interpolation, or masking) is not documented anywhere.",
+      "evidence": [
+        "repo:multi-horizon-aurora-kp-prediction/README.md: Verified that Kp appears at column 38 (not 46 as initially assumed) and correctly identified all 55 parameters.",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: 'Kp', 'R_sunspot', 'Dst', 'ap', 'f10.7', 'PC', 'AL', 'AU', 'AE'"
+      ],
+      "sources": [
+        "https://spdf.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni2.text"
+      ],
+      "tags": [
+        "preprocessing",
+        "data cleaning",
+        "bug"
+      ]
+    },
+    {
+      "id": "kp-06",
+      "type": "how",
+      "level": 1,
+      "q": "Which features were used, and how were they chosen?",
+      "easy": "About 15 of OMNI2's 55 parameters, picked by correlation with Kp and by physics: magnetic field components, solar wind speed, density, temperature and pressure, an electric field, and geomagnetic indices. ap was the strongest single correlate (r = 0.825); southward field Bz was surprisingly weak (r = -0.238).",
+      "deep": "Final report categories (16 listed): IMF (Bz GSM, By GSM, field magnitude), plasma (flow speed, proton density, proton temperature, flow pressure), derived (E field), and geomagnetic indices (ap, AE, PC(N), AL, AU, Dst, f10.7). Portfolio correlations with Kp: ap 0.825, AE 0.732, AL -0.663, AU 0.690, Bz -0.238. The README gives slightly different values (AE 0.73, AL -0.70, AU 0.66), and the model table says 15 features while the conclusions say 16, so the exact list is ambiguous. Pearson correlation measures only a linear, same time relation, so it is a weak selection tool here: it misses lagged effects and the rectified, nonlinear way Bz drives activity, and it rewards variables that are near copies of the target. The scaffold notebook lists a different set of 20, including lagged Kp.",
+      "evidence": [
+        "portfolio: The strongest predictor was ap_Index (r = 0.825), followed by auroral electrojet indices (AE r = 0.732, AL r = -0.663, AU r = 0.690). IMF_Bz_GSM correlated more weakly than expected (r = -0.238), because the dataset includes all periods rather than just storm windows.",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: The strongest predictor was ap_Index (r= 0.825), followed by auroral electrojet indices (AE: r=0.73, AL: r=-0.70, AU: r=0.66).",
+        "portfolio: From the original 55 parameters I selected 15 features, based on physics literature and correlation analysis against Kp."
+      ],
+      "sources": [],
+      "tags": [
+        "features",
+        "feature selection",
+        "correlation"
+      ]
+    },
+    {
+      "id": "kp-07",
+      "type": "why",
+      "level": 2,
+      "q": "Why did Bz correlate so weakly with Kp when physics says it drives storms?",
+      "easy": "Southward Bz opens Earth's field to the solar wind, but northward Bz does almost nothing, and the effect builds over hours. A straight line correlation at the same hour over all conditions averages those away. So a weak r says the relation is nonlinear and delayed, not that Bz is unimportant.",
+      "deep": "Coupling is half wave rectified: energy input scales with something like v Bs (Bs = -Bz when Bz < 0, else 0) or the Newell function v^(4/3) Bt^(2/3) sin^(8/3)(theta/2), both near zero for northward fields. Pearson r against signed Bz therefore mixes a strong negative slope for southward fields with a flat line for northward ones. Kp also integrates driving over its 3 hour window and the magnetosphere responds with lags of tens of minutes to hours. The write up attributes the weak r to including all periods rather than only storms, which is part of it. Better features would be rectified (Bs, v Bs), coupling functions, and lagged or windowed sums, which an LSTM can learn in principle but only if the training signal is not dominated by easier inputs like ap.",
+      "evidence": [
+        "portfolio: IMF_Bz_GSM correlated more weakly than expected (r = -0.238)"
+      ],
+      "sources": [],
+      "tags": [
+        "bz",
+        "physics",
+        "feature engineering"
+      ]
+    },
+    {
+      "id": "kp-08",
+      "type": "define",
+      "level": 2,
+      "q": "Define ap, AE, AL, AU, PC(N), Dst and f10.7.",
+      "easy": "They are other measures of space weather. ap is Kp put on a linear scale. AE, AL and AU measure the auroral electric currents at high latitude. PC(N) measures activity over the north polar cap. Dst measures the ring current that grows in big storms. f10.7 is the Sun's radio brightness, a proxy for solar activity.",
+      "deep": "ap: the 3 hourly equivalent amplitude, read from a fixed table of Kp (as K 3 maps to a 15, K 5 to 48, K 9 to 400), in nT units; OMNI word 50. AE (auroral electrojet) = AU - AL from auroral zone magnetometers: AU the strongest eastward current signature, AL the strongest westward (negative, deepens in substorms); OMNI words 42, 53, 54, hourly values from Kyoto. PC(N): polar cap index from a single near pole station, tracking the solar wind electric field. Dst: hourly ring current index from low latitude stations, strongly negative in storms (OMNI word 41). f10.7: 10.7 cm solar radio flux in solar flux units, a daily proxy for solar UV, slowly varying (word 51). Each index except f10.7 is built from ground magnetometers, the same instruments behind Kp, which is the source of the leakage worry.",
+      "evidence": [],
+      "sources": [
+        "https://spdf.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni2.text",
+        "https://en.wikipedia.org/wiki/K-index"
+      ],
+      "tags": [
+        "geomagnetic indices",
+        "define"
+      ]
+    },
+    {
+      "id": "kp-09",
+      "type": "why",
+      "level": 3,
+      "q": "Is using ap as an input leakage? Analyse it carefully.",
+      "easy": "Likely yes, for the short horizons. ap is Kp converted to a linear scale for the same 3 hour window, and an hourly table repeats each window's value for three hours. So an input ap at the latest hour already tells you the 1 hour target exactly whenever the next hour falls in the same window, which is two hours in three.",
+      "deep": "The write up's defence is that the indices are 3 hour averages of past conditions and the 24 hour lookback uses only past values. That is true and beside the point: the problem is that ap at hour t is a deterministic function of the Kp window containing t, and Kp at t + 1 lies in that same window for two of every three t. The model can learn the inverse table and copy, which would inflate 1 hour skill without any forecasting. The Pearson r of 0.825 is below 1 only because the Kp to ap table is strongly nonlinear; a rank correlation would be near 1. The fair test is to (1) drop ap and same window indices, (2) evaluate only on hours at the start of a new window, or (3) compare against persistence. The claim that AE, AL and AU are 3 hour averages does not match OMNI, where they are hourly. Including indices is common in operational models, but those models compare against persistence, which this project never did.",
+      "say": "I'd now say ap is a real leakage risk at 1 hour. It's Kp on a linear scale for the same 3 hour window, so two hours in three the input already contains the target. Our defence, that the indices are 3 hour averages of the past, doesn't address that. The fix is to drop same window indices or score against persistence.",
+      "evidence": [
+        "portfolio: I verified that the indices are 3 hour averaged values (not instantaneous), that the 24 hour lookback window uses strictly historical values to predict future Kp, and that the 1 year temporal gaps between train, validation, and test sets prevent any contamination across the splits."
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/K-index",
+        "https://spdf.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni2.text"
+      ],
+      "tags": [
+        "leakage",
+        "ap",
+        "critical analysis"
+      ]
+    },
+    {
+      "id": "kp-10",
+      "type": "why",
+      "level": 2,
+      "q": "Which leakage controls were actually in place, and what does each one prevent?",
+      "easy": "Four: splitting by time instead of randomly, leaving a one year gap between training, validation and test, fitting the scaler on training data only, and building input windows only from past hours. They stop the model from seeing the future or the test period. None of them stops same window information leaking from inputs like ap.",
+      "deep": "(1) Chronological split: a random split of overlapping 24 hour windows would put near duplicate sequences in train and test, inflating scores. (2) Gaps of 8,761 hours: windows near a boundary share hours across sets; the minimum gap needed is lookback plus horizon, 24 + 12 = 36 hours, so a year is far more than required, and it costs two years of data. (3) Scaler fit on training only: test mean and variance never reach preprocessing; scaling the target too means predictions are inverse transformed before RMSE. (4) Strictly past inputs. What is not controlled: contemporaneous index information about the target window (kp-09), and regime shift, since test years 2023 to 2024 sit near the cycle 25 maximum while training is the declining phase of cycle 24.",
+      "evidence": [
+        "portfolio: The split is chronological (50% train / 16.6% validation / 16.6% test), with 8,761 hour temporal gaps between sets to prevent leakage",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: **Critical:** Fitted scaler only on training data, then transformed validation and test data using training statistics."
+      ],
+      "sources": [],
+      "tags": [
+        "leakage",
+        "time series split",
+        "validation"
+      ]
+    },
+    {
+      "id": "kp-11",
+      "type": "how",
+      "level": 2,
+      "q": "Describe the train, validation and test split, and how the versions disagree.",
+      "easy": "The portfolio and final report: training 2013 to 2018, a one year gap, validation 2020 to 2021, another gap, test 2023 to 2024, about 50 / 16.6 / 16.6% with 8,761 hour gaps. The README describes a different split: 70 / 15 / 15% as 2013 to 2018, 2019 to 2020 and 2021 to 2024, with no year gaps.",
+      "deep": "Report V2.0 (the docx in the repo) places the years: training 2013 to 2018, validation 2020 to 2021, test 2023 to 2024, with 2019 and 2022 left out as the two 8,761 hour gaps. The README's counts do not fit its own years: 2013 to 2018 is about 52,600 hours, not 67,206, and 2021 to 2024 is about 35,000, not 14,401; the README's conclusion still mentions gaps exceeding 8,500 hours although its split has none. The scaffold notebook splits by row index at 70% and 85% with no gap. In an interview, quote the portfolio version, say the README describes an earlier configuration, and say which one produced which numbers.",
+      "evidence": [
+        "portfolio: The split is chronological (50% train / 16.6% validation / 16.6% test), with 8,761 hour temporal gaps between sets to prevent leakage",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **Training:** 2013-2018 (70% of data, 67,206 records)",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **Testing:** 2021-2024 (15% of data, 14,401 records)",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: TRAIN_RATIO = 0.7"
+      ],
+      "sources": [],
+      "tags": [
+        "time series split",
+        "consistency"
+      ]
+    },
+    {
+      "id": "kp-12",
+      "type": "why",
+      "level": 2,
+      "q": "Why a whole year of gap between sets, and what does the test period mean for the results?",
+      "easy": "A gap makes sure no input window in one set overlaps the next set; a year is far more than the 36 hours strictly needed. The test years, 2023 and 2024, are near the peak of the Sun's activity cycle, more active than most of the training years, so the test is partly a check under a shifted climate.",
+      "deep": "With 24 hour inputs and a 12 hour horizon, any sample's information spans 36 hours, so a 36 hour gap fully separates sets; the extra year mainly guards against slow autocorrelation (solar rotation recurrence at 27 days, seasonal effects) and costs about 17,500 hours of data. The solar cycle matters more: training covers the declining phase of cycle 24, validation the 2020 to 2021 minimum and early rise, and test the cycle 25 maximum, which has more storms and higher Kp variance. A higher test variance raises the mean baseline's RMSE (1.34) and so flatters percentage improvement, while rare large storms in test (the May 2024 extreme storm falls in this period, an outside fact rather than a project result) are exactly where an MSE model underpredicts.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "time series split",
+        "distribution shift",
+        "solar cycle"
+      ]
+    },
+    {
+      "id": "kp-13",
+      "type": "concept",
+      "level": 1,
+      "q": "How does an LSTM work? Give the gate equations.",
+      "easy": "An LSTM is a recurrent network that reads a sequence one step at a time and keeps a memory cell. Three gates, each a small learned switch between 0 and 1, decide what to forget, what new information to write, and what to output. That lets it keep information over many steps without the gradient vanishing.",
+      "deep": "At step t with input x_t and previous hidden state h_{t-1}: f_t = sigma(W_f [h_{t-1}, x_t] + b_f) (forget), i_t = sigma(W_i [h_{t-1}, x_t] + b_i) (input), g_t = tanh(W_g [h_{t-1}, x_t] + b_g) (candidate), o_t = sigma(W_o [h_{t-1}, x_t] + b_o) (output); c_t = f_t * c_{t-1} + i_t * g_t; h_t = o_t * tanh(c_t). The additive cell update gives a gradient path through c that is multiplied by f_t rather than by a weight matrix each step, which eases vanishing gradients (Hochreiter and Schmidhuber 1997). Parameters per layer: 4 (n_h (n_h + n_x) + n_h). Over 24 hourly steps, an LSTM can learn lagged and integrated responses such as Kp building hours after Bz turns south. Alternatives: GRU (two gates), temporal convolutions, transformers, or gradient boosting on hand built lag features.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "lstm",
+        "deep learning",
+        "concept"
+      ]
+    },
+    {
+      "id": "kp-14",
+      "type": "how",
+      "level": 1,
+      "q": "What was the model configuration in the reported run?",
+      "easy": "A two layer LSTM reading the last 24 hours of 15 features, ending in four outputs for Kp at 1, 3, 6 and 12 hours. Mean squared error loss, Adam optimiser at learning rate 0.001, batches of 64, up to 50 epochs with early stopping at epoch 39, all features standardised.",
+      "deep": "From the portfolio table (matching report V2.0): input 24 x 15, output 4, loss MSE, Adam lr 0.001, batch 64, max 50 epochs, best validation loss at epoch 39 after which validation loss plateaued while training loss kept falling. Layer widths, dropout rates and L2 strength for the final run are not stated anywhere quotable. The README describes 12 hour sequences, a maximum of 100 epochs and early stopping at epoch 31. The scaffold notebook defines a three layer stack (LSTM 128, 64, 32, Dense 16, dropout 0.2 and 0.1) with one output, batch 32, 100 epochs, patience 10 and ReduceLROnPlateau (factor 0.5, patience 5, min 1e-6). Interview answer: state the portfolio configuration and say the repo scaffold and README describe other iterations.",
+      "evidence": [
+        "portfolio: The model is a two layer LSTM:",
+        "portfolio: Input sequence length24 hours (24 timesteps x 15 features)",
+        "portfolio: Output4 predictions (Kp_1h, Kp_3h, Kp_6h, Kp_12h)",
+        "portfolio: Batch size64 sequences",
+        "portfolio: EpochsMaximum 50, early stopping at epoch 39",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **Input:** 12-hour sequences (12 timesteps × 15 features)",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **Epochs:** Maximum 100, early stopping at epoch 31",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: layers.LSTM(128, return_sequences=True, input_shape=input_shape, name='lstm_1'),"
+      ],
+      "sources": [],
+      "tags": [
+        "architecture",
+        "hyperparameters",
+        "lstm"
+      ]
+    },
+    {
+      "id": "kp-15",
+      "type": "code",
+      "level": 2,
+      "q": "Show the sequence windowing code. What subtle bug does it contain?",
+      "easy": "Each training example is a 24 hour slice of inputs paired with a target. The scaffold pairs inputs ending at hour i + 23 with Kp shifted back by h, read at index i + 24, so the '1 hour' target is really 2 hours after the last input. Whether the actual run had this off by one is unknown.",
+      "deep": "```python\nfor i in range(len(X) - sequence_length):\n    X_seq.append(X[i:i+sequence_length])\n    y_seq.append(y[i+sequence_length])\n# with y = df['Kp'].shift(-h)  ->  y[i+L] = Kp[i+L+h]\n```\nX[i:i+L] covers hours i to i+L-1, so the last input hour is i+L-1 and the target hour is i+L+h, a gap of h + 1 hours. Either use y[i+L-1] with shift(-h), or define targets on the window's last index. The off by one would understate skill slightly (every horizon is an hour longer than labelled) and, combined with the 3 hour structure of Kp, changes how often the target shares a window with the last input. Shapes: X is (samples, 24, n_features), y is (samples,) per horizon in the scaffold or (samples, 4) in the multi output version. Memory: 24 x 15 floats per sample, about 1.4 KB in float32, so roughly 50,000 training windows (half of about 100,000 hours) take about 70 MB if materialised.",
+      "evidence": [
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: y_seq.append(y[i+sequence_length])",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: # df[f'Kp_target_{h}h'] = df['Kp'].shift(-h)",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: SEQUENCE_LENGTH = 24  # Use past 24 hours to predict future"
+      ],
+      "sources": [],
+      "tags": [
+        "windowing",
+        "off by one",
+        "code"
+      ]
+    },
+    {
+      "id": "kp-16",
+      "type": "how",
+      "level": 2,
+      "q": "How was overfitting found and controlled? Define early stopping.",
+      "easy": "The first model memorised: training loss 0.232 against validation loss 0.818. Adding 30% dropout, then 50%, then L2 weight penalties, then early stopping brought validation loss down step by step. Early stopping halts training when validation loss stops improving and keeps the best weights.",
+      "deep": "README sequence of validation losses: 0.818 (none), 0.75 (30% dropout), 0.67 (50% dropout), 0.59 (plus L2), final 0.574 with early stopping; the final report gives a different final value for the same step, another unreconciled number. Losses are MSE on standardised Kp, so 0.574 corresponds to an RMSE of about 0.76 standard deviations. Dropout randomly zeroes activations during training, an implicit ensemble; for LSTMs, recurrent dropout on the hidden to hidden path is the variant that regularises the recurrence. L2 adds lambda sum w^2 to the loss, shrinking weights. Early stopping monitors val_loss with a patience (10 in the scaffold) and restore_best_weights; the scaffold also halves the learning rate after 5 flat epochs. Tuning these on the validation set is fine as long as the test set is touched once.",
+      "evidence": [
+        "repo:multi-horizon-aurora-kp-prediction/README.md: **Problem:** Initial model showed severe overfitting with training loss of 0.232 versus validation loss of 0.818, indicating memorization rather than generalization.",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: **Solution:** We performed regularization which progressed from 30% dropout (0.75 loss) to 50% dropout (0.67), then added L2 regularization (0.59) and early stopping to achieve final validation loss of 0.574, successfully controlling overfitting through combined techniques.",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: restore_best_weights=True,"
+      ],
+      "sources": [],
+      "tags": [
+        "overfitting",
+        "regularisation",
+        "early stopping"
+      ]
+    },
+    {
+      "id": "kp-17",
+      "type": "define",
+      "level": 1,
+      "q": "Define RMSE, MAE and R squared, and show how R squared and '45% better' relate here.",
+      "easy": "RMSE is the typical error with big misses weighted more; MAE is the average size of the error; R squared is the share of the target's variation the model explains. When the baseline always predicts the mean, R squared and percentage improvement in RMSE are two views of the same number.",
+      "deep": "RMSE = sqrt(mean((y - y_hat)^2)); MAE = mean(|y - y_hat|); R^2 = 1 - SS_res / SS_tot. If the baseline predicts the test mean, its RMSE is the test standard deviation sigma, so R^2 = 1 - (RMSE / sigma)^2 and improvement = 1 - RMSE / sigma. Portfolio 1 hour: 1 - 0.738/1.34 = 0.449 (44.9%) and 1 - (0.738/1.34)^2 = 0.697, close to the reported 0.690 (the gap fits a baseline mean taken from training data, or rounding of 1.34). README 1 hour: 1 - (0.691/1.333)^2 = 0.731 against a reported 0.727. So 'R^2 0.690' and '45% better' are one fact stated twice. RMSE greater than MAE (0.738 against 0.476) signals a heavy tail of large errors, the storm hours.",
+      "evidence": [
+        "portfolio: 1 hour0.7380.4760.6901.34+44.9%",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **1h:** 48.2% improvement over mean baseline (1.333 RMSE)"
+      ],
+      "sources": [],
+      "tags": [
+        "metrics",
+        "rmse",
+        "r squared"
+      ]
+    },
+    {
+      "id": "kp-18",
+      "type": "number",
+      "level": 1,
+      "q": "Recite the reported results by horizon, with the caveat.",
+      "easy": "Test RMSE in Kp units: 0.738 at 1 hour, 0.910 at 3, 1.073 at 6, 1.207 at 12, against 1.34 for always predicting the mean. That is 44.9%, 32.1%, 19.9% and 9.9% better. R squared falls from 0.690 to 0.170. These come from the report and portfolio; the repo cannot regenerate them.",
+      "deep": "MAE: 0.476, 0.655, 0.793, 0.906. R^2: 0.690, 0.528, 0.343, 0.170. Error grows smoothly with horizon, as information about future driving decays. Caveats that travel with these numbers: (1) the baseline is the mean, not persistence; (2) at 1 hour, ap and the 3 hour repetition of Kp probably supply much of the skill; (3) test years are near solar maximum; (4) one training run, no seeds or variance across runs; (5) the README reports a different run (0.691, 0.894, 1.067, 1.211). At 12 hours, R^2 0.17 means the model explains little beyond climatology, which is the honest reading of '9.9% better'.",
+      "say": "At 1 hour the test RMSE was 0.738 Kp against 1.34 for predicting the mean, rising to 1.207 at 12 hours. I'd add straight away that the mean is a weak baseline, and at 12 hours we're only about 10% better than it.",
+      "evidence": [
+        "portfolio: 1 hour0.7380.4760.6901.34+44.9%",
+        "portfolio: 3 hours0.9100.6550.5281.34+32.1%",
+        "portfolio: 6 hours1.0730.7930.3431.34+19.9%",
+        "portfolio: 12 hours1.2070.9060.1701.34+9.9%"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "metrics"
+      ]
+    },
+    {
+      "id": "kp-19",
+      "type": "number",
+      "level": 2,
+      "q": "What does the README report, and why does it differ from the portfolio?",
+      "easy": "The README reports a different run: 1 hour RMSE 0.691 (48.2% better than a 1.333 mean baseline), MAE 0.489, R squared 0.727, then 0.894, 1.067 and 1.211 at 3, 6 and 12 hours. It also reports a median absolute error of 0.312 and 69.3% of 1 hour predictions within half a Kp unit.",
+      "deep": "README extras: within plus or minus 1.0 Kp 89.1%; mean error under 0.05 Kp; improvements 48.2, 33.0, 20.0, 9.2%. Its configuration differs (12 hour sequences, up to 100 epochs, stopped at 31, 70 / 15 / 15 split ending in 2021 to 2024 test years), so the test sets differ and the numbers are not comparable to the portfolio's. The portfolio and report V2.0 agree with each other (0.738 and so on). The defensible statement: two configurations were reported, the later V2.0 run with year gaps is the one on the portfolio, and the README was not updated. Note the README's 1 hour RMSE is better and its MAE worse than V2.0's, which is consistent with different test periods rather than one model being clearly better.",
+      "evidence": [
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **1-hour ahead:** 0.691 Kp units",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **MAE:** 0.489 Kp units",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **R²:** 0.727 (explains 73% of variance)",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **Median Absolute Error:** 0.312 Kp units",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **Predictions within ±0.5 Kp:** 69.3%",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **Predictions within ±1.0 Kp:** 89.1%",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **12-hour ahead:** 1.211 Kp units"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "consistency"
+      ]
+    },
+    {
+      "id": "kp-20",
+      "type": "why",
+      "level": 1,
+      "q": "Why is predicting the mean a weak baseline, and what should the baseline have been?",
+      "easy": "Kp changes slowly and repeats for three hours at a time in hourly data, so simply predicting that the next value equals the current one (persistence) is very hard to beat at short horizons. Beating the long term average says little. Persistence and a simple linear model on recent values were never computed.",
+      "deep": "The baseline used is a constant equal to the mean, whose RMSE is about the standard deviation of Kp, 1.34. Persistence, y_hat(t + h) = Kp(t), is exact at h = 1 whenever t + 1 is in the same 3 hour window, two hours in three, so its 1 hour RMSE comes only from window changes and is likely well below 0.738; that is a hypothesis to test, not a measured result. Other standard baselines: climatology by season and solar cycle phase, a 27 day recurrence model (solar rotation), linear regression on lagged Kp and solar wind coupling, and gradient boosting on lag features. Skill should be reported as 1 - MSE_model / MSE_persistence per horizon. Without it, '45% better' cannot be read as forecasting skill.",
+      "say": "The mean is the wrong yardstick for Kp. Kp holds its value for three hours, so predicting 'same as now' is exactly right two hours in three at a 1 hour horizon. We never computed persistence, so I can't claim our 1 hour number beats it. That's the first thing I'd add.",
+      "evidence": [
+        "portfolio: 45% better RMSE than naive mean prediction, and R&sup2; of 0.690 (the model explains roughly two thirds of variance in storm intensity)"
+      ],
+      "sources": [],
+      "tags": [
+        "baselines",
+        "persistence",
+        "critical analysis"
+      ]
+    },
+    {
+      "id": "kp-21",
+      "type": "why",
+      "level": 2,
+      "q": "The write up says R squared 0.690 means the model explains two thirds of the variance 'in storm intensity'. Is that right?",
+      "easy": "Not quite. R squared here is computed over every test hour, almost all of them quiet. It says the model explains about two thirds of the hour to hour variation in Kp overall. It says nothing specific about storms, where the model is known to underpredict.",
+      "deep": "R^2 = 1 - SS_res / SS_tot over all test samples. With Kp mostly between 0 and 3, SS_tot is dominated by ordinary variation, and the model can earn a high R^2 by tracking quiet time levels and copying slowly varying inputs. The README states the storm picture directly: the model rarely predicts above 6 and predicts 5 to 6 when actual Kp is 7 to 8. A storm specific statement would need metrics computed on storm hours or events (RMSE when Kp >= 5, probability of detection, false alarm ratio). The phrase should be 'explains about two thirds of hourly Kp variance in the test years'.",
+      "evidence": [
+        "portfolio: 45% better RMSE than naive mean prediction, and R&sup2; of 0.690 (the model explains roughly two thirds of variance in storm intensity)",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - Model rarely predicts Kp > 6, even when actual values exceed this"
+      ],
+      "sources": [],
+      "tags": [
+        "metrics",
+        "write up",
+        "honesty"
+      ]
+    },
+    {
+      "id": "kp-22",
+      "type": "why",
+      "level": 2,
+      "q": "How does error change with horizon, and why?",
+      "easy": "Error rises steadily from 1 to 12 hours and the model drifts toward predicting average values. Beyond about an hour, the solar wind that will drive future activity has not yet reached the upstream spacecraft, so the inputs simply do not contain it.",
+      "deep": "RMSE 0.738, 0.910, 1.073, 1.207 and R^2 0.690, 0.528, 0.343, 0.170. Physics sets the ceiling: L1 monitors see the wind 30 to 90 minutes before Earth, so a forecast beyond about an hour must rely on persistence of the magnetospheric state (which indices like ap and Dst carry) and on slow structure (high speed streams, 27 day recurrence), not on measured upstream driving. Under MSE, when the inputs carry little information, the optimal prediction shrinks toward the conditional mean, which is why the README sees 12 hour predictions clustering around 2 to 3 and very few above 5. The report notes the 12 hour forecast smooths the peak while still showing elevated activity; that is regression to the mean and should be presented as such.",
+      "evidence": [
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - Stronger regression toward the mean (predictions cluster around 2-3 Kp)",
+        "portfolio: The 1 hour forecast tracks actual Kp closely; the 12 hour forecast smooths the peak but still indicates elevated activity."
+      ],
+      "sources": [],
+      "tags": [
+        "horizon",
+        "physics",
+        "results"
+      ]
+    },
+    {
+      "id": "kp-23",
+      "type": "why",
+      "level": 2,
+      "q": "How was class imbalance for storms handled?",
+      "easy": "It was not, explicitly. Storm hours (Kp 5 and above) are a small minority, and the model was trained as plain regression with squared error, which pulls predictions toward common quiet values. The result, stated in the README, is underprediction of big storms: actual 7 to 8 predicted as 5 to 6.",
+      "deep": "Storms are rare in hourly data (Kp >= 5 is a few percent of hours even near solar maximum), so MSE is dominated by quiet hours and the model minimises error there. No sample weighting, oversampling of storm windows, quantile or probabilistic loss, or separate classification head was used, and no storm skill metric was reported. The scaffold notebook contains detection rate and false alarm rate code for thresholds 3, 5 and 7, but it is commented out and never ran. The portfolio's evidence for storms is one 200 hour test window where all horizons caught the onset with lag and reduced magnitude. That is an anecdote; operational evaluation would use event based contingency tables over the whole test set.",
+      "evidence": [
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - Clear underestimation of extreme events (actual Kp = 7-8 predicted as 5-6)",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: #     true_events = y_true >= thresh",
+        "portfolio: All four horizons capture the storm onset, but with different lag and magnitude."
+      ],
+      "sources": [],
+      "tags": [
+        "class imbalance",
+        "storms",
+        "evaluation"
+      ]
+    },
+    {
+      "id": "kp-24",
+      "type": "case",
+      "level": 3,
+      "q": "How would you evaluate and train for storms properly?",
+      "easy": "Score storms as events with a confusion table: how many storms were caught, how many alarms were false. Weight or oversample storm hours in training, or predict a probability of Kp 5 or more directly. And always compare with persistence.",
+      "deep": "Evaluation: for thresholds 5 and 7, per horizon, report probability of detection TP/(TP+FN), false alarm ratio FP/(TP+FP), Heidke skill score and true skill statistic (POD minus false positive rate), plus reliability diagrams if probabilistic; evaluate on events (storm onset within a tolerance window) as well as hours, and report RMSE restricted to Kp >= 5. Training: weighted MSE with weights rising with Kp, focal style losses for a classification head, quantile regression (for example the 90th percentile) to give operators an upper bound, or a mixture model; oversample storm windows without crossing split boundaries. Calibration: Platt or isotonic on validation. Cross validation: blocked by year or by solar cycle phase, with storm counts reported per fold, since a single test period holds few large storms.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "storms",
+        "evaluation",
+        "class imbalance"
+      ]
+    },
+    {
+      "id": "kp-25",
+      "type": "case",
+      "level": 1,
+      "q": "Can someone reproduce the results from the repo?",
+      "easy": "No. The repo's notebook is a template: the data download, loading, training and evaluation lines are all commented out or say 'add actual code here', and only the package install cell was ever run. The numbers live in the README, a Word report and the portfolio, and two of those disagree.",
+      "deep": "aurora_complete_code.ipny.ipynb has 31 code cells; one shows an execution count (the pip install) and the rest are null. The download cell prints 'Data download complete!' after a comment saying to add the download code; loading is '# Add actual data loading code'; the split, scaling, sequence creation, model build, fit, predict and metric lines are commented out, so running it end to end would print success messages over empty results. It also pickles an unfitted StandardScaler. The file extension is misspelled ('.ipny.ipynb'). The defensible line in an interview: the experiments ran in the team's working notebooks and the public repo holds a cleaned scaffold, which is a reproducibility gap and the first thing to fix.",
+      "say": "I'd be upfront about this. The public notebook is a scaffold: the loading and training code is commented out, so you can't rerun our numbers from the repo. The results come from the team's working runs, written up in the report. Rebuilding it as a script that regenerates the table is the first thing I'd do.",
+      "evidence": [
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: # Note: Add actual download code here",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: # Add actual data loading code",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: # X_train_scaled = scaler.fit_transform(df_train[SELECTED_FEATURES])",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: pickle.dump(scaler, f)"
+      ],
+      "sources": [],
+      "tags": [
+        "reproducibility",
+        "honesty",
+        "mlops"
+      ]
+    },
+    {
+      "id": "kp-26",
+      "type": "case",
+      "level": 2,
+      "q": "List the inconsistencies between the portfolio, README and notebook.",
+      "easy": "Sequence length: 24 hours in the portfolio and notebook, 12 in the README. Epochs: up to 50 stopped at 39, versus up to 100 stopped at 31. Split: 50 / 16.6 / 16.6 with year gaps, versus 70 / 15 / 15. Results: 0.738 versus 0.691 at 1 hour. Architecture: two layer multi output in the portfolio, three layer single output per horizon in the notebook.",
+      "deep": "Also: records 96,552 over 'eleven years' (portfolio, README) against twelve years in the report, when 2013 to 2024 is 105,192 hours; features 15 (model table) against 16 (conclusions) against 20 including lagged Kp (notebook); batch 64 against 32 (notebook); a final validation loss that differs between the README (0.574) and the report; README gap claim of 'exceeding 8,500 hours' alongside a split with none; and correlations AL -0.663 and AU 0.690 (portfolio) against -0.70 and 0.66 (README). The pattern is iterations documented at different times without one source of truth. The fix is a single config file and a script whose output table is copied into every document.",
+      "evidence": [
+        "portfolio: Input sequence length24 hours (24 timesteps x 15 features)",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **Input:** 12-hour sequences (12 timesteps × 15 features)",
+        "portfolio: EpochsMaximum 50, early stopping at epoch 39",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **Epochs:** Maximum 100, early stopping at epoch 31",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: BATCH_SIZE = 32",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: layers.LSTM(32, return_sequences=False, name='lstm_3'),",
+        "repo:multi-horizon-aurora-kp-prediction/README.md: Feature analysis reduced 55 original parameters to 16 essential features"
+      ],
+      "sources": [],
+      "tags": [
+        "consistency",
+        "reproducibility"
+      ]
+    },
+    {
+      "id": "kp-27",
+      "type": "why",
+      "level": 2,
+      "q": "The notebook scaffold uses lagged Kp as inputs. Why does that matter?",
+      "easy": "Feeding past Kp into a model that predicts future Kp makes it partly a persistence model with corrections. That is legitimate for forecasting, but then the fair comparison is persistence, not the mean, and the solar wind features must be shown to add something beyond it.",
+      "deep": "SELECTED_FEATURES in the scaffold includes Kp_lag1, Kp_lag3, Kp_lag6, Kp_lag12 and Bz lags alongside current ap and Dst, plus derived clock angle, epsilon and dynamic pressure. The portfolio's 15 features list no Kp lags, but ap carries the same information (kp-09). An LSTM over a 24 hour window already sees every past hour of every input, so explicit lags are redundant with the recurrence and mainly add correlated columns. The honest ablation: persistence alone, persistence plus solar wind, and the full model, per horizon. The scaffold's epsilon line also has a physics slip: Akasofu's epsilon is proportional to v B^2 sin^4(theta/2), but the line uses v squared and sin^4 of the full angle; it is commented out, so it never affected results.",
+      "evidence": [
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: 'Kp_lag1', 'Kp_lag3', 'Kp_lag6', 'Kp_lag12',",
+        "repo:multi-horizon-aurora-kp-prediction/aurora_complete_code.ipny.ipynb: # df['epsilon'] = (df['V_flow']**2 * df['B_mag']**2 * np.sin(df['IMF_clock_angle'] * np.pi / 180)**4)"
+      ],
+      "sources": [],
+      "tags": [
+        "features",
+        "autoregression",
+        "ablation"
+      ]
+    },
+    {
+      "id": "kp-28",
+      "type": "case",
+      "level": 2,
+      "q": "This was a team project. How should you talk about it?",
+      "easy": "Say 'we' for the project and be specific about your own part. The final report lists four authors for the IST 691 Deep Learning course, and the notebook's install output shows it ran on a teammate's machine. Interviewers respect a clear account of who did what.",
+      "deep": "Prepare a sentence on your contribution (for example the data pipeline, the leakage analysis, the evaluation or the write up) and be ready to discuss the parts you did not do at the level of a careful reader. Since then, Tanay has reread the work critically: the space weather dashboard built later concludes that the model's top predictors (ap and the auroral electrojet indices) are absent from live feeds, and this deck adds the persistence baseline, same window leakage, the off by one in the scaffold, and the version drift. Leading with that critique shows growth and is safer than defending numbers you cannot regenerate.",
+      "say": "This was a four person course project, so I say 'we' and then name my part. What I'd add is what I've learned since: the baseline should have been persistence, ap probably leaks at 1 hour, and the live feeds don't carry our best predictors, which I found building the space weather dashboard.",
+      "evidence": [
+        "repo:space-weather-nowcast/index.html: That model's strongest predictors were ap and the auroral electrojet indices, which are not in these feeds, so a production version would need a source for them or a retrain on solar wind inputs alone."
+      ],
+      "sources": [],
+      "tags": [
+        "teamwork",
+        "ownership",
+        "behavioral"
+      ]
+    },
+    {
+      "id": "kp-29",
+      "type": "case",
+      "level": 3,
+      "q": "What would it take to run this model in production?",
+      "easy": "Live data instead of the archive: real time solar wind from the upstream spacecraft, propagated to Earth the way OMNI does it, plus live sources for the geomagnetic indices the model relies on. Then monitoring, retraining, and a fallback when inputs drop out.",
+      "deep": "OMNI2 is cleaned, gap marked and time shifted to Earth; live RTSW data has gaps (the nowcast run saw plasma in 1,265 of 1,435 minutes), spacecraft switches and no propagation. The features must be computed online exactly as offline (same shift, hourly averaging, fill handling) or the model sees a different distribution. ap and the provisional AE are available in near real time only with delays and revisions, so either ingest them with their latency modelled in training (as of joins on publication time) or retrain on solar wind only. Then: input drift monitors, a persistence fallback, versioned models with a rolling backtest each month, and forecast archiving so skill can be measured live.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: coverage: plasma 1265 of 1435 | field 1427 of 1437 | matched 1265 | changes 0 0 | gaps>5min 1 1",
+        "repo:space-weather-nowcast/index.html: OMNI2 is a cleaned archive, already shifted from the spacecraft to Earth, merged across missions, with gaps marked."
+      ],
+      "sources": [],
+      "tags": [
+        "production",
+        "training serving skew",
+        "mlops"
+      ]
+    },
+    {
+      "id": "kp-30",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations, stated plainly?",
+      "easy": "Weak baseline, probable same window leakage at short horizons, storms underpredicted, results that the public code cannot regenerate, and documents that disagree. Also a single test period near solar maximum and one training run.",
+      "deep": "(1) Mean baseline only, no persistence. (2) ap and repeated 3 hour Kp make the 1 hour task partly copying. (3) MSE regression underpredicts Kp 7 to 8; no storm metrics. (4) Notebook is a scaffold; no script, config or saved model in the repo. (5) README, report and portfolio give different configurations and numbers. (6) One chronological test block (2023 to 2024), one seed, no confidence intervals. (7) Feature selection by same time Pearson correlation. (8) Kp converted by dividing by 10, so thirds become tenths. (9) Hourly resolution cannot resolve sudden commencements. (10) Model relies on indices unavailable in real time without delay.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "limitations"
+      ]
+    },
+    {
+      "id": "kp-31",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next?",
+      "easy": "Rebuild it as a script that downloads OMNI2, trains and writes the results table, so every number traces to a run. Add persistence and simple baselines, remove same window indices, and score storms as events.",
+      "deep": "(1) One script plus config, fixed seeds, results table generated into the README. (2) Baselines per horizon: persistence, 27 day recurrence, linear model on lags, gradient boosting on lags. (3) Ablations: with and without ap and AE; solar wind only; evaluate on window start hours to remove the repetition effect. (4) Storm evaluation: POD, FAR, HSS at Kp 5 and 7, event based. (5) Probabilistic outputs (quantiles) and calibration. (6) Blocked cross validation across solar cycle phases. (7) Fix the Kp thirds conversion with a lookup. (8) Serve on the live feeds from the space weather nowcast with propagated, hourly averaged inputs, and archive forecasts to score them.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next steps"
+      ]
+    },
+    {
+      "id": "kp-32",
+      "type": "case",
+      "level": 3,
+      "q": "What breaks at 10x or 100x the data?",
+      "easy": "The data here is small, about 100,000 hourly rows. Ten times more (minute resolution) or a hundred times (minute data over decades, many stations) would need streaming windows instead of building every sequence in memory, and faster training.",
+      "deep": "Materialising 24 step windows duplicates each row 24 times: at 1 minute resolution with a 24 hour lookback (1,440 steps), windows would not fit in memory, so use tf.data windowing or a generator, or downsample with learned or fixed aggregation. LSTMs are sequential in time, so long sequences train slowly; temporal convolutions or transformers parallelise better, at the cost of attention memory quadratic in sequence length. Blocked validation must still respect time. For many stations or spatial outputs (aurora maps), the problem becomes a spatiotemporal model with far more parameters and a need for distributed training and careful storage (Parquet partitioned by time).",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "scale",
+        "system design"
+      ]
+    },
+    {
+      "id": "kp-33",
+      "type": "pushback",
+      "level": 1,
+      "q": "Your baseline is the mean. Persistence would crush it at 1 hour.",
+      "easy": "Very likely true, and it is the biggest gap in the evaluation. Kp repeats for three hours in hourly data, so persistence is exact two hours in three at the 1 hour horizon. The project never computed it, so the 45% figure cannot be read as forecasting skill.",
+      "deep": "Concede: the mean baseline only shows the model learned something about Kp levels. Defend what is defensible: the relative ordering across horizons is informative, and at 12 hours persistence loses most of its advantage, so the gap between model and persistence there would be the more interesting comparison. The fix is cheap: compute persistence RMSE per horizon on the same test windows and report skill against it; with ap removed as an input, the comparison becomes clean.",
+      "say": "You're right, and it's the first thing I'd fix. Kp is constant over three hours, so 'same as now' is exactly right two hours in three at a 1 hour horizon. We compared against the mean, which only shows the model learned Kp levels. I'd recompute against persistence per horizon, and I expect the 1 hour story to shrink.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "baselines"
+      ]
+    },
+    {
+      "id": "kp-34",
+      "type": "pushback",
+      "level": 2,
+      "q": "ap is Kp in disguise. Isn't this leakage?",
+      "easy": "At short horizons, probably. ap is a table conversion of Kp for the same 3 hour window, so an input at the latest hour contains the 1 hour target whenever the next hour is in the same window. The write up's defence, that indices are past 3 hour averages, does not address this.",
+      "deep": "Concede: same window information is present, and r = 0.825 understates the dependence because the Kp to ap map is nonlinear. Defend: using recent geomagnetic state is standard in operational Kp models and is not leakage of future information in the strict sense; the test is whether the model beats persistence, which it was never asked to do. Remedies: lag ap by one full window, evaluate only on window start hours, or drop same window indices and accept lower 1 hour skill.",
+      "say": "At 1 hour, yes, I think it leaks. ap is Kp on a linear scale for the same window, so the input often contains the answer. Using recent geomagnetic state is standard, but then the model has to beat persistence, and we never checked. I'd lag ap a full window and rescore.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "leakage"
+      ]
+    },
+    {
+      "id": "kp-35",
+      "type": "pushback",
+      "level": 2,
+      "q": "Your repo doesn't run. How do I know these numbers are real?",
+      "easy": "From the repo alone, you don't, and that is a fair criticism. The notebook is a scaffold with loading, training and evaluation commented out. The numbers come from the team's working runs, documented in the report and portfolio, and the README even reports a different run.",
+      "deep": "Concede: no script, no saved model, no logs, and two documents with different results. Defend: the methodology is written out in detail (split boundaries, gap sizes, scaler fitting, architecture, early stopping epoch) and the numbers are internally consistent (R^2 and improvement agree with each other through the baseline RMSE). The right response is to rebuild a reproducible pipeline and publish the generated table, which is a few days of work on public data.",
+      "say": "Fair. From the repo you can't verify them, because the public notebook is a scaffold. The numbers come from our working runs, and the README even has an earlier run's results. Internally they hang together, but that isn't proof. I'd rebuild it as one script that regenerates the table from public OMNI data.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "reproducibility"
+      ]
+    },
+    {
+      "id": "kp-36",
+      "type": "pushback",
+      "level": 2,
+      "q": "R squared of 0.17 at 12 hours is useless.",
+      "easy": "For a precise 12 hour Kp value, yes, close to useless: it is 9.9% better than the mean. What it can offer is a weak signal of elevated activity, and that claim needs storm detection metrics to stand up.",
+      "deep": "Concede: 1.207 RMSE against 1.34 for the mean, predictions clustering around 2 to 3 and very few above 5. Defend: physics caps skill beyond the L1 travel time, so a low 12 hour R^2 is expected; published models also degrade sharply. The useful framing is probabilistic: the chance of Kp >= 5 in the next 12 hours, evaluated with reliability and POD and FAR, which this project did not do.",
+      "say": "As a point forecast, it's close to useless, only about 10% better than the mean. Physics limits what's possible past the hour the wind takes from L1. I'd reframe 12 hours as a probability of a storm and score it with detection and false alarm rates, which we didn't do.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "horizon"
+      ]
+    },
+    {
+      "id": "kp-37",
+      "type": "pushback",
+      "level": 2,
+      "q": "Why an LSTM? Gradient boosting on lag features would be simpler and probably as good.",
+      "easy": "Possibly better. With about 100,000 rows and strong autoregressive structure, boosted trees on lags and coupling functions are a standard strong baseline. The LSTM was the course's focus; the project never ran that comparison, so it cannot claim the LSTM is better.",
+      "deep": "Concede: no tree baseline, no linear baseline, no ablation. Defend: an LSTM handles the 24 hour window without hand built lags, naturally gives a multi output head, and is a reasonable choice for learning delayed responses; the multi horizon design is the real contribution. The honest summary: the LSTM's value over simpler models is untested, and adding LightGBM with lag features is the comparison to run.",
+      "say": "It might be. We used an LSTM because the course was on deep learning and it handles the 24 hour window and four outputs naturally. We never ran boosted trees on lag features, so I can't claim the LSTM wins. That's one of the first comparisons I'd add.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "model choice"
+      ]
+    },
+    {
+      "id": "kp-38",
+      "type": "pushback",
+      "level": 2,
+      "q": "Your README and portfolio report different numbers. Which is true?",
+      "easy": "Both describe real runs with different settings: the README an earlier configuration (12 hour inputs, 70 / 15 / 15 split, 1 hour RMSE 0.691), the portfolio the final report's run (24 hour inputs, year gaps, 0.738). The portfolio version is the one to quote, and the README should have been updated.",
+      "deep": "Concede: version drift with no single source of truth, and the README's split counts do not match its own years. Defend: the later run made the evaluation stricter (year gaps between sets) and its 1 hour RMSE got worse, which is the expected direction when leakage across boundaries is removed; quoting the worse, stricter number is the conservative choice.",
+      "say": "Both are real runs. The README is an earlier setup with a 70 15 15 split and no gaps, and it got 0.691. The final run added year long gaps and got 0.738, which is the one I quote, since it's stricter. The README should have been updated, and that's on us.",
+      "evidence": [
+        "repo:multi-horizon-aurora-kp-prediction/README.md: - **1-hour ahead:** 0.691 Kp units",
+        "portfolio: 1h RMSE = 0.738 (45% better than baseline)"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "consistency"
+      ]
+    },
+    {
+      "id": "kp-39",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager in under a minute.",
+      "easy": "A team deep learning project forecasting a space weather storm index at four horizons, presented with its weaknesses.",
+      "deep": "Lead with the goal and result, then the critique that shows judgement.",
+      "say": "In a four person course project we trained an LSTM on NASA solar wind data to forecast the Kp storm index 1 to 12 hours ahead from one model. The 1 hour error was 0.738 Kp, 45% below predicting the average. Looking back, I'd hold it to a tougher baseline, persistence, and fix leakage from an input that mirrors Kp. I later built a live dashboard that showed what deploying it would take.",
+      "evidence": [
+        "portfolio: 1h RMSE = 0.738 (45% better than baseline)"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring manager"
+      ]
+    },
+    {
+      "id": "kp-40",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the leakage and baseline problem to a staff engineer.",
+      "easy": "Kp repeats over 3 hours, ap is Kp on another scale, and the baseline was the mean, so the 1 hour score is inflated in a way the stated controls do not catch.",
+      "deep": "Name the mechanism precisely and the experiment that would settle it.",
+      "say": "Our controls stopped future leakage: chronological split, year gaps, scaler fit on train. They didn't stop same window leakage. Hourly Kp repeats for three hours and ap is a table lookup of Kp, so at 1 hour the input holds the target two times in three. With a mean baseline, that shows up as skill. I'd score persistence and evaluate only on window start hours.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff engineer"
+      ]
+    },
+    {
+      "id": "kp-41",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain to a product manager what the 12 hour forecast is good for.",
+      "easy": "Not a number to act on; at best an early hint that activity may rise, which would need to be measured as a storm warning.",
+      "deep": "Translate R squared 0.17 into a product statement and say what would make it useful.",
+      "say": "At 12 hours the forecast is only about 10% better than guessing the average, so I wouldn't ship it as a number. It might work as an early heads up that activity could rise, but we'd have to measure how often it catches storms and how often it cries wolf before anyone relies on it.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "product"
+      ]
+    },
+    {
+      "id": "kp-42",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain to a recruiter what this project shows about you.",
+      "easy": "Deep learning on real scientific time series in a team, plus the judgement to find what was wrong with it afterwards.",
+      "deep": "Plain words, team credit, growth.",
+      "say": "It shows I can work with a team to build a deep learning model on real NASA data, from cleaning the data to evaluating it at four time horizons. It also shows I go back and question my own results. I found that our comparison point was too easy, and I've since built a live data dashboard that shows what running the model for real would need.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "OMNI2 hourly data format (NASA SPDF)",
+      "url": "https://spdf.gsfc.nasa.gov/pub/data/omni/low_res_omni/omni2.text",
+      "why": "Word numbers, fill values and encodings for Kp (word 39, Kp x 10), ap, AE, AL, AU, PC(N), Dst and f10.7."
+    },
+    {
+      "title": "Planetary K-index (NOAA SWPC)",
+      "url": "https://www.spaceweather.gov/products/planetary-k-index",
+      "why": "What Kp measures, the 3 hour windows, the observatories, and the Kp to G storm scale."
+    },
+    {
+      "title": "K-index (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/K-index",
+      "why": "K and Kp definitions, the 13 observatories, and the K to a conversion table behind ap."
+    },
+    {
+      "title": "NOAA Space Weather Scales explanation",
+      "url": "https://www.spaceweather.gov/noaa-scales-explanation",
+      "why": "Kp thresholds for G1 to G5, useful for turning Kp forecasts into storm categories."
+    }
+  ]
+}
