@@ -1,10 +1,10 @@
 {
- "generated_at": "2026-10-15T21:16:01Z",
+ "generated_at": "2026-10-15T21:28:56Z",
  "totals": {
-  "decks": 26,
+  "decks": 29,
   "planned": 29,
-  "cards": 1260,
-  "narrations": 304
+  "cards": 1348,
+  "narrations": 337
  },
  "decks": [
   {
@@ -244,7 +244,7 @@
     "narrate": 4,
     "define": 4
    },
-   "summary_easy": "Tanay rebuilt the main experiment of BEIR, a benchmark showing that neural search models trained on one dataset often lose to plain keyword search on new kinds of documents. On two scientific datasets every published number he checked came back, and a newer 2023 model beat keyword search on both. The one number that first missed led him to a library default that silently cut every document to 100 tokens; fixing it matched the paper exactly.",
+   "summary_easy": "Tanay rebuilt the main experiment of BEIR, a benchmark showing that neural search models trained on one dataset often lose to plain keyword search on new kinds of documents. On two scientific datasets every published number Tanay checked came back, and a newer 2023 model beat keyword search on both. The one number that first missed led Tanay to a library default that silently cut every document to 100 tokens; fixing it matched the paper exactly.",
    "repo": "https://github.com/TanayPratapSingh/beir-replication",
    "ready": true,
    "blurb": "Reproducing a retrieval benchmark on one laptop and finding a silent truncation bug."
@@ -537,16 +537,26 @@
   },
   {
    "id": "p-bigdata-delay",
-   "title": "Big Data Inflow Delay Research",
+   "title": "Real Time Big Data Inflow: Communication and Computation Delay",
    "group": "Portfolio",
-   "blurb": "Communication and computation delay across edge, fog, and cloud tiers.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-bigdata-delay.json",
+   "count": 30,
+   "narrations": 11,
+   "types": {
+    "concept": 7,
+    "how": 2,
+    "define": 2,
+    "formula": 3,
+    "case": 3,
+    "number": 1,
+    "compare": 2,
+    "pushback": 6,
+    "narrate": 4
+   },
+   "summary_easy": "A year long research review on where real time sensor data should be processed. Tanay reviewed twelve primary sources and argued that sending everything to the cloud is the wrong default for real time systems, proposing a tiered design that handles time critical work near the sensors and keeps the cloud for storage, batch analytics, and global state.",
+   "repo": "",
+   "ready": true,
+   "blurb": "Communication and computation delay across edge, fog, and cloud tiers."
   },
   {
    "id": "x-gravity-spy",
@@ -599,29 +609,51 @@
   },
   {
    "id": "x-proprofs",
-   "title": "ProProfs, Data and Product Analyst Intern",
+   "title": "ProProfs: Data and Product Analyst Intern",
    "group": "Experience",
-   "blurb": "Churn analysis, competitive benchmarking, and Tableau dashboards.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/x-proprofs.json",
+   "count": 30,
+   "narrations": 11,
+   "types": {
+    "concept": 3,
+    "number": 2,
+    "define": 6,
+    "formula": 1,
+    "how": 5,
+    "behavioral": 1,
+    "compare": 1,
+    "pushback": 6,
+    "case": 1,
+    "narrate": 4
+   },
+   "summary_easy": "Over two months in 2023 at ProProfs, a SaaS company in Noida, Tanay did product and customer analytics: benchmarking 100 to 150 features against Zoho and Salesforce, SWOT and ideal customer profile work, an analysis of 2,000 client records that helped the product team pick two features for the next release, and Tableau dashboards that found under used features.",
+   "repo": "",
+   "ready": true,
+   "blurb": "Churn analysis, competitive benchmarking, and Tableau dashboards."
   },
   {
    "id": "x-cybersecurity-ta",
    "title": "Cybersecurity Teaching Assistant",
    "group": "Experience",
-   "blurb": "Security labs and environments, and the bridge to AI red teaming.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/x-cybersecurity-ta.json",
+   "count": 28,
+   "narrations": 11,
+   "types": {
+    "concept": 6,
+    "number": 1,
+    "how": 2,
+    "why": 2,
+    "define": 4,
+    "compare": 2,
+    "behavioral": 1,
+    "pushback": 4,
+    "case": 2,
+    "narrate": 4
+   },
+   "summary_easy": "Tanay was the graduate teaching assistant for Syracuse's cybersecurity course in Summer 2025, building and teaching 15+ hands on labs in cryptography, network security, penetration testing, and forensics, and running the lab machines the course used. It is the security grounding behind their AI evals and red teaming work.",
+   "repo": "",
+   "ready": true,
+   "blurb": "Security labs and environments, and the bridge to AI red teaming."
   },
   {
    "id": "n-narration-course",
