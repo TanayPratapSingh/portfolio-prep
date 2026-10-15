@@ -1,0 +1,1085 @@
+{
+  "deck_id": "p-space-weather-nowcast",
+  "title": "Space Weather Nowcast",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/space-weather-nowcast",
+  "summary_easy": "A live browser page that reads nine NOAA space weather feeds, follows the solar wind from a spacecraft 1.58 million km toward the Sun to Earth, and shows how hard it pushes on Earth's magnetic shield, the storm level, and the aurora chance over Syracuse. It was built as the live input side for Tanay's Kp forecasting model. On the measured run the wind was at 360 km/s and would reach Earth 73.5 minutes after it was measured.",
+  "summary_deep": "sun/app.js polls nine services.swpc.noaa.gov endpoints at 1 to 30 minute cadences into one state object, and sun/helio.js does the logic with no DOM. Plasma and magnetic field are filtered to NOAA's active spacecraft, parsed as UTC, floored to the minute and outer joined, with gaps and source changes reported. Each sample is propagated ballistically with x_GSE from the nearest hourly ephemeris of its own spacecraft over |Vx|. The newest matched sample drives proton dynamic pressure, the Shue et al. (1998) magnetopause standoff against geosynchronous orbit, and the Newell et al. (2007) coupling function. Kp is mapped to the G scale with a rounding rule fitted to NOAA's own forecast labels, provisional 1 minute Kp revisions are counted, OVATION is read at the nearest cell, and the night side comes from an Almanac subsolar point. A two clock freshness model reports each feed's sample age against its own threshold.",
+  "sheet": {
+    "easy": "## What it is\n- A live page that follows the solar wind from a spacecraft near the L1 point (about 1.5 million km toward the Sun) to Earth, in the browser, from nine public NOAA feeds.\n- It shows the wind's push on Earth's magnetic shield, the storm level (Kp and G scale), solar flares, and the aurora chance over Syracuse.\n- Built as the live input side for Tanay's Kp forecasting model, which trained on a clean archive (OMNI2).\n\n## The nine feeds\n| Feed | Polled |\n| --- | --- |\n| Solar wind plasma, magnetic field | every minute |\n| Spacecraft positions (ephemeris) | every 30 minutes |\n| Kp 1 minute estimate | every minute |\n| Kp 3 hour, NOAA scales | every 10 minutes |\n| Kp 3 day forecast | every 30 minutes |\n| GOES X-ray flux | every minute |\n| OVATION aurora | every 5 minutes |\n\n## What it computes\n- Travel time to Earth: spacecraft distance divided by the wind's speed toward Earth.\n- Pressure of the wind on Earth's field.\n- How far out the shield's edge sits (Shue model), against satellites at 6.6 Earth radii.\n- How much energy gets in (Newell coupling).\n- Freshness of every feed.\n\n## Measured run (Oct 8, 2026, 19:38 UTC)\n- Spacecraft SOLAR1 at 1.58 million km; wind 360 km/s, 5.7 protons per cm3.\n- Pressure 1.24 nPa, shield edge 10.9 Earth radii, arrival 73.5 minutes after measurement.\n- Plasma present in 1,265 of 1,435 minutes. M6.7 flare at 15:48. NOAA forecast peak Kp 5.67 (G2).\n- Syracuse aurora chance 0%.\n\n## Lessons\n- The spec was wrong about the G scale: NOAA labels Kp 4.67 as G1 because it rounds first.\n- NOAA rewrites recent 1 minute Kp values; the page keeps the latest and counts rewrites.\n- Hidden tabs got no data until viewed; the first poll now always runs.\n\n## Limits\n- Arrival time is approximate by several minutes. Shue is a simple fit. NOAA's forecasts are not scored. Aurora ignores clouds and city light. One quiet day logged.\n",
+    "deep": "## Architecture\n- `sun/helio.js`: pure functions, no DOM, no network. `sun/app.js`: nine polls (30 s timeout, shared backoff) into one state object; handlers only mutate state; one paint job derives everything.\n- Base `services.swpc.noaa.gov/`: `json/rtsw/rtsw_wind_1m.json` (1 min), `json/rtsw/rtsw_mag_1m.json` (1 min), `json/rtsw/rtsw_ephemerides_1h.json` (30 min), `json/planetary_k_index_1m.json` (1 min), `products/noaa-planetary-k-index.json` (10 min), `products/noaa-planetary-k-index-forecast.json` (30 min), `products/noaa-scales.json` (10 min), `json/goes/primary/xrays-6-hour.json` (1 min), `json/ovation_aurora_latest.json` (5 min).\n- Freshness (sample age, fresh / late): 1 min products 10 / 30 min; ephemeris 4 / 12 h; final Kp 4 / 7 h after window end; OVATION 20 / 60 min after observation time; forecast 3 / 12 h after Last-Modified; scales 3 / 12 h.\n\n## Join\n- Only `active === true` rows; `parseUTC` appends Z to zoneless tags; floor to the minute; duplicates keep a valid row; outer join on the minute; per stream count, expected, missing, gaps over 5 min, longest gap, source changes; `matched` needs v, n, Bz, By.\n\n## Propagation\n$$\\Delta t = \\frac{x_{GSE}}{|V_x|}, \\qquad t_{arr} = t_{sample} + \\Delta t$$\n- $x_{GSE}$ from the nearest hourly ephemeris row of the plasma's own spacecraft (binary search); bulk speed if $V_x$ is missing. `arrivingNow` = nearest arrival within 5 min. `streamProgress` = $(t_{now} - t) |V_x| / x_{GSE}$ over the last 2 h.\n\n## Physics\n$$P_d\\,[\\text{nPa}] = 1.6726\\times10^{-6}\\, n\\,[\\text{cm}^{-3}]\\, v^2\\,[\\text{km/s}]^2$$\n$$r_0 = \\left(10.22 + 1.29\\tanh\\big(0.184(B_z + 8.14)\\big)\\right) P_d^{-1/6.6}\\ [R_E], \\quad \\alpha = (0.58 - 0.007B_z)(1 + 0.024\\ln P_d)$$\n$$r(\\theta) = r_0\\left(\\frac{2}{1+\\cos\\theta}\\right)^{\\alpha}$$\n$$\\frac{d\\Phi}{dt} = v^{4/3} B_T^{2/3} \\sin^{8/3}(\\theta_c/2), \\quad B_T = \\sqrt{B_y^2 + B_z^2}, \\quad \\theta_c = \\operatorname{atan2}(B_y, B_z)$$\n- Pressure balance (Chapman and Ferraro) predicts $r_0 \\propto P_d^{-1/6}$; Shue fitted 6.6. Geosynchronous orbit 6.6 $R_E$.\n- Newell 30 min trailing mean needs 15 samples (two pointer O(n) rolling mean).\n\n## Kp and G\n- Kp: 3 hour planetary index, 0 to 9 in thirds; observed, estimated, predicted labels; 1 min estimate is provisional and rewritten (latest wins, revisions counted).\n- `kpToG`: strict ($k \\ge 5$ is G1) vs noaa ($\\mathrm{round}(k + 10^{-9})$ then threshold). Fixture from NOAA's forecast file: 4.67 G1, 5 G1, 5.33 G1, 5.67 G2, 4 and 4.33 none. The test also asserts 8.67 maps to G5 under rounding, which NOAA's scale table (G4 includes 9-) contradicts.\n- Visibility by NOAA scale: G2 about 55, G3 about 50, G4 about 45, G5 about 40 degrees geomagnetic latitude.\n- Syracuse 43.04 N, 76.13 W geographic; dipole estimate about 52 degrees geomagnetic (pole 80.65 N, 72.68 W, IGRF 2020): $\\sin\\lambda_m = \\sin\\lambda\\sin\\lambda_p + \\cos\\lambda\\cos\\lambda_p\\cos(\\phi - \\phi_p)$. Not computed in code.\n\n## Sun and aurora\n- Subsolar point (Astronomical Almanac): $L = 280.460 + 0.9856474n$, $g = 357.528 + 0.9856003n$, $\\lambda = L + 1.915\\sin g + 0.020\\sin 2g$, $\\varepsilon = 23.439 - 4\\times10^{-7}n$; $\\delta = \\arcsin(\\sin\\varepsilon\\sin\\lambda)$; EoT $= L - \\alpha_{RA}$; lon $= -15(UT - 12) - $ EoT. Night = more than 90 degrees from it.\n- Sun distance $R = 1.00014 - 0.01671\\cos g - 0.00014\\cos 2g$ AU.\n- OVATION: Float32Array 360 x 181, index (lat + 90) x 360 + lon, nearest cell, 10% boundary walking north.\n- Flare class: decade letter A to X from 1e-8; multiplier truncated to one decimal; X continues past 10.\n\n## Numbers and sources\n| Number | Source |\n| --- | --- |\n| SOLAR1 active, x_GSE 1,581,830 km | runs/2026-10-08-sun.txt |\n| v 360.5 km/s, n 5.71, Bz -1.7, By 4.01, Bt 4.47 nT | run log |\n| Pd 1.241 nPa, Newell 4,214, r0 10.93 Re, alpha 0.595 | run log |\n| Delay 73.5 min from Vx -358.6 km/s | run log |\n| Plasma 1,265 of 1,435 min, field 1,427 of 1,437, matched 1,265 | run log |\n| Min r0 in 24 h 10.66 Re at Pd 1.21, Bz -4.5 | run log |\n| Kp est 2; window 1.67 vs 1 min max 2, mean 1.05; peak forecast 5.67 G2 (strict G1) | run log |\n| GOES C1.1 now, M6.7 at 15:48 UTC | run log |\n| OVATION: Syracuse 0%, boundary 64 N, max 26%; obs 19:29, fc 20:45 | run log |\n| Subsolar 6.11 S, 117.77 W, EoT 12.56 min | run log |\n| 22 tests (20 physics, 2 util) | README |\n\n## Test strategy\n- Closed forms: Pd(5, 400) = 1.338; Shue r0(2, 0) about 10.25 and curve identities; Newell due south and due north; delay 3,750 s.\n- NOAA's own labels for the G rule; flare class edges and truncation.\n- Astronomy: equinox and solstices of 2026, EoT extremes (+16.4, -14.2 min), sidereal cross check within 0.05 degree, perihelion and aphelion distance.\n- Data handling: join with gaps and a source change, derive and arrivingNow, OVATION lookups, Kp windows and chart rows, rolling mean, freshness.\n\n## Limitations\n- Ballistic timing (several minutes); Shue symmetric, no dipole tilt; proton only pressure; no forecast archive, no skill score; OVATION nearest cell, no clouds or light; G rounding unverified above 5.67; no persistence; one quiet day logged; the Kp model's top predictors (ap, AE) are absent from these feeds.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "It's a live space weather dashboard that joins nine NOAA feeds in the browser. A spacecraft 1.58 million km sunward measures the solar wind, and the page propagates each minute to Earth with the real spacecraft distance. On the measured run the wind was at 360 km/s and would arrive 73.5 minutes later. From it the page computes pressure, the magnetopause standoff, energy coupling, the storm level and the aurora chance over Syracuse.",
+      "keypoints": [
+        "Nine NOAA feeds, browser only",
+        "Per sample propagation with the real ephemeris",
+        "360 km/s, arrival 73.5 minutes after measurement",
+        "Pressure, Shue standoff, Newell coupling",
+        "Storm level and aurora for Syracuse"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "My Kp forecasting project trained an LSTM on OMNI2, a clean hourly archive that is already shifted to Earth. I wanted to build the input side it would need in production, where the data comes from several spacecraft, at different cadences, with gaps and revisions. The page polls nine NOAA endpoints: solar wind plasma and magnetic field every minute, spacecraft positions hourly, three Kp products, the storm scales, GOES X-ray flux and the OVATION aurora grid. Plasma and field are separate files that list every spacecraft, so I keep only the rows NOAA flags active, floor the time tags to the minute and outer join them. For each minute, I take that spacecraft's sunward distance from the nearest hourly ephemeris and divide by the measured velocity toward Earth. On October 8 that was 1.58 million km at about 358 km/s, so 73.5 minutes. From the newest sample I compute dynamic pressure, 1.24 nanopascals, the Shue magnetopause standoff, 10.9 Earth radii, and the Newell coupling function. Two things surprised me. My spec said Kp 4.67 is below storm level, but NOAA's own forecast file labels it G1, because NOAA rounds first. I followed the file and tested both rules. And NOAA rewrites recent minutes of the 1 minute Kp, so the page keeps the latest value and counts rewrites. Limits: the propagation is ballistic, Shue ignores dipole tilt, and I can't score NOAA's forecasts because the feeds keep no archive. Next, I would store every forecast issue and score it against persistence.",
+      "keypoints": [
+        "Motivation: live input side for the Kp model",
+        "Nine feeds; active rows, minute floor, outer join",
+        "Delay = x_GSE / |Vx|, 73.5 minutes on the run",
+        "1.24 nPa, 10.9 Re, Newell coupling",
+        "G scale spec was wrong; NOAA rounds",
+        "NOAA rewrites 1 minute Kp",
+        "Limits and next step: archive and score forecasts"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story.",
+      "script": "The starting point was a gap between my Kp model and reality. It trained on OMNI2, which is hourly, cleaned, merged across missions and already propagated to Earth. Live data has none of that done, so I built the layer that does it, in the browser, from nine NOAA endpoints. Solar wind comes from the real time solar wind service as two one minute files, plasma and magnetic field, and each lists every spacecraft NOAA tracks. Exactly one is flagged active at a time. I filter to active rows, parse the zoneless time tags as UTC, because JavaScript would otherwise read them as local time, and floor them to the minute since some sources stamp seconds. Then an outer join on the minute. Plasma drops out much more than the field: on the run, plasma covered 1,265 of 1,435 minutes and field 1,427 of 1,437. An inner join would throw away field data, and an as of join would quietly mix stale density into fresh pressure, so derived quantities use only fully matched minutes. The join reports gaps over five minutes, the longest gap and any change of active spacecraft. Propagation is ballistic. Each sample gets the nearest hourly ephemeris row for its own spacecraft, found by binary search, and the delay is x_GSE over the absolute GSE x velocity. On the run that was 1,581,830 km over 358.6 km/s, 73.5 minutes. I say clearly that this is first order: tilted fronts and a spacecraft well off the Sun Earth line move arrival by several minutes, and the bow shock is met earlier than Earth's centre. From the newest matched sample I compute dynamic pressure, m_p n v squared, which is 1.6726e-6 times n times v squared in the usual units, 1.24 nanopascals. Shue's 1998 model gives the standoff: 10.22 plus 1.29 tanh of 0.184 times Bz plus 8.14, times pressure to the minus 1 over 6.6, which came out at 10.93 Earth radii, drawn against geosynchronous orbit at 6.6. The Newell coupling function, v to the four thirds times the transverse field to the two thirds times sine of half the clock angle to the eight thirds, came out at 4,214. Its 30 minute trailing mean needs 15 samples, so a gap shows as a gap. For Kp, NOAA publishes a one minute estimate, three hour values and a three day forecast with labels. My spec mapped 4.67 to below G1, but the forecast file labels 4.67 G1 and 5.67 G2, because NOAA rounds first. I captured those label pairs as a test fixture. Looking at it again, the test also asserts 8.67 maps to G5, and NOAA's scale table puts 9 minus in G4, so that extrapolation is wrong and I would replace both rules with a lookup. NOAA also rewrites recent one minute values; I keep the latest and count rewrites. The aurora card reads OVATION's one degree grid at the nearest cell and walks north to the first 10% cell, and the night side comes from a subsolar point computed with the Astronomical Almanac formulas, tested at the 2026 equinox and solstices and against a sidereal time cross check. Every feed has a freshness threshold judged on the newest sample inside the file. There are 22 tests, all against closed forms or NOAA's own labels. Limits: ballistic timing, a symmetric magnetopause, no forecast scoring, one quiet day logged, and the Kp model's strongest predictors, ap and the auroral electrojet indices, are not in these feeds at all.",
+      "keypoints": [
+        "OMNI2 versus live: the integration gap",
+        "Active rows, UTC parsing, minute floor, outer join",
+        "Coverage 1,265 of 1,435 plasma minutes",
+        "Ballistic delay per sample, 73.5 minutes, stated error",
+        "Pd 1.24 nPa, Shue r0 10.93 Re, Newell 4,214",
+        "G scale: rounding matches NOAA labels, fails at 9-",
+        "Subsolar point and OVATION lookups tested",
+        "Strongest model predictors absent from live feeds"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone without a technical background.",
+      "script": "The Sun constantly blows a wind of charged particles toward Earth. A spacecraft parked about a million and a half kilometres away, toward the Sun, measures that wind roughly an hour before it hits us. My page reads those measurements live from the US government's space weather centre, works out when each one will reach Earth, and how hard it will push on Earth's magnetic shield. It also shows whether a magnetic storm is expected and the chance of seeing the northern lights over Syracuse. On the day I measured, the wind would arrive about 73 minutes after it was measured, and the chance of aurora over Syracuse was zero. The page also says how fresh each piece of data is, so nobody mistakes old data for live data.",
+      "keypoints": [
+        "Solar wind measured an hour upstream",
+        "Page predicts arrival and push on Earth's shield",
+        "Storm level and northern lights chance",
+        "73 minutes on the measured day",
+        "Shows how fresh each data source is"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the system on the whiteboard.",
+      "script": "First I draw the Sun on the left, Earth on the right, and a dot about one percent of the way from Earth toward the Sun labelled L1, 1.58 million km. I say the spacecraft there measures the wind roughly an hour before it arrives. Second, under it, nine boxes for the NOAA feeds in three groups: solar wind (plasma, field, ephemeris), Kp (one minute, three hour, forecast, scales), and other (GOES X-ray, OVATION). I write the polling cadence on each, one minute for the fast products and up to 30 minutes for the slow ones. Third, a join box for plasma and field: active rows only, UTC, floor to minute, outer join. An arrow from the ephemeris into a propagate box: delay equals x_GSE over the absolute Vx, arrival equals sample time plus delay. Fourth, a physics box with three formulas: dynamic pressure, Shue standoff with its minus one over 6.6 exponent, and Newell coupling. I draw the magnetopause as a curve at about 11 Earth radii with a dashed circle at 6.6 for geosynchronous orbit. Fifth, a Kp lane: one minute values overwritten when NOAA revises them, forecast windows, and the G scale mapping, with a note that rounding matches NOAA's labels up to 5.67. Last, a freshness column on the right with two clocks per feed, and an arrow to the Kp model labelled 'needs ap and AE, not in these feeds'.",
+      "keypoints": [
+        "Sun, L1 and Earth geometry first",
+        "Nine feeds grouped with cadences",
+        "Join and ballistic propagation",
+        "Pressure, Shue, Newell with the 6.6 Re line",
+        "Kp lane with revisions and G mapping",
+        "Freshness and the link to the Kp model"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How do you know the propagation delay is right?",
+      "script": "I know the arithmetic is right: the test checks 1.5 million km at 400 km/s gives exactly 3,750 seconds, and the run's 73.5 minutes is 1,581,830 km over 358.6 km/s. Whether the wind really arrived then is a different question, and the page does not verify it. Ballistic timing ignores tilted fronts and the spacecraft's offset from the Sun Earth line, so errors of several minutes are normal, and the bow shock responds before Earth's centre. To validate it I would compare predicted arrivals of sharp pressure jumps with sudden commencements on ground magnetometers.",
+      "keypoints": [
+        "Arithmetic tested against a closed form",
+        "Physical accuracy not verified",
+        "Tilted fronts and spacecraft offset",
+        "Bow shock reached earlier",
+        "Validate against sudden commencements"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why use the GSE x velocity rather than the bulk speed?",
+      "script": "The delay is about distance along the Sun Earth line, so the relevant speed is the component along that line. The bulk speed includes small sideways components, so it is slightly larger: on the run 360.5 against 358.6 km/s. Dividing by the bulk speed would shorten the delay by about 0.4 minutes here. The code uses Vx when it is present and falls back to bulk speed when it is missing, and the test checks both branches. The difference is small compared with the front tilt error, but it is the correct component.",
+      "keypoints": [
+        "Delay is along the Sun Earth line",
+        "Bulk 360.5 vs Vx 358.6 km/s",
+        "About 0.4 minutes difference on the run",
+        "Fallback to bulk speed tested",
+        "Small next to front tilt error"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What happens when the active spacecraft switches?",
+      "script": "The join records the source of every minute, reports any change in the active source per stream, and flags a minute whose plasma and field came from different spacecraft. The delay always uses the ephemeris of the plasma's own spacecraft, so a switch from one halo orbit to another changes the distance correctly. The test builds a stream that switches from SOLAR1 to ACE and checks the change is reported. What the page does not do is cross calibrate the two instruments, so a step in density at a switch would pass straight into pressure. On the logged run there were no switches.",
+      "keypoints": [
+        "Source tracked per minute, changes reported",
+        "Mixed source minutes flagged",
+        "Ephemeris of the plasma's own spacecraft",
+        "Tested SOLAR1 to ACE switch",
+        "No cross calibration; no switch on the run"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Could you see aurora from Syracuse that night?",
+      "script": "Almost certainly not, and the page said so. OVATION gave Syracuse 0%, and the nearest 10% cell on its longitude was at 64 degrees north. NOAA's forecast peaked at Kp 5.67, G2, for 06:00 UTC, which is 2 am in Syracuse. Syracuse sits at roughly 52 degrees geomagnetic latitude by a dipole estimate, and NOAA's scale puts G2 visibility around 55 degrees, so at best a faint glow low on the northern horizon. The code works in geographic coordinates and doesn't compute geomagnetic latitude, which is an easy addition.",
+      "keypoints": [
+        "OVATION 0% for Syracuse",
+        "10% boundary at 64 N",
+        "Forecast peak Kp 5.67 G2 at 2 am local",
+        "About 52 degrees geomagnetic vs G2 near 55",
+        "Code uses geographic coordinates only"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "This just displays NOAA's numbers. Where is the engineering?",
+      "script": "Kp, the forecast, OVATION and the X-ray flux are NOAA's numbers, and the page labels them as such. The engineering is the integration a model needs: filtering to the active spacecraft, parsing zoneless UTC tags, an outer join on the minute with gap and source change reporting, per sample propagation using the real ephemeris, three physics models tested against closed forms, revision counting for provisional values, and per feed freshness. Building it found two real things: the G scale reading NOAA's labels imply, and NOAA rewriting recent one minute Kp values.",
+      "keypoints": [
+        "Concede: several outputs are NOAA's",
+        "Integration is the engineering",
+        "Physics tested against closed forms",
+        "Freshness and revision handling",
+        "Two findings from the data"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your G scale test asserts something NOAA contradicts.",
+      "script": "That is true. I fitted the rounding rule to labels from NOAA's forecast file, which only covered 3.67 to 5.67, and then asserted it maps 8.67 to G5. NOAA's scale table puts Kp 9 minus in G4. So my rule is right in the range I checked and wrong at the top, where it matters for extreme storms. The fix is to map the thirds notation with a lookup table taken from NOAA's scale page, keep the captured labels as one fixture, and add the 9 minus case as another.",
+      "keypoints": [
+        "Concede: 8.67 assertion unsupported",
+        "Fitted on 3.67 to 5.67 only",
+        "NOAA table: 9- is G4",
+        "Fix: thirds notation lookup",
+        "Add 9- fixture"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "sw-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is Space Weather Nowcast, in one sentence, and what does it compute?",
+      "easy": "A browser page that reads nine live NOAA space weather feeds, follows the solar wind from a spacecraft about 1.5 million km toward the Sun to Earth, works out how hard it presses on Earth's magnetic field, and shows the storm level and the aurora chance over Syracuse.",
+      "deep": "sun/app.js polls nine endpoints on services.swpc.noaa.gov at 1 to 30 minute cadences into one state object; sun/helio.js (pure, no DOM) does the work. It joins the RTSW plasma and magnetic field files on the UTC minute for the spacecraft NOAA flags active, takes that spacecraft's sunward distance x_GSE from the hourly ephemeris, and computes a ballistic delay x_GSE / |Vx| to Earth. From each joined minute it derives proton dynamic pressure, the Newell et al. (2007) coupling function, and the Shue et al. (1998) magnetopause standoff, drawn against geosynchronous orbit at 6.6 Earth radii. It also shows GOES X-ray flare classes, Kp from the 1 minute estimate beside NOAA's 3 day forecast mapped to the G scale, and NOAA's OVATION aurora probabilities on a polar map with the night side shaded from a computed subsolar point. A freshness table reports how old each feed's newest sample is.",
+      "say": "It's a live page that takes NOAA's solar wind measurements from a spacecraft upstream of Earth and follows them to Earth. On October 8 the wind was at 360 km/s and the measurement would reach Earth 73.5 minutes later. The page turns that into pressure on Earth's magnetic field, the magnetopause distance, the storm level, and the aurora chance over Syracuse.",
+      "evidence": [
+        "portfolio: The latest joined sample showed 360 km/s and 5.7 protons per cubic centimetre, giving a dynamic pressure of 1.24 nPa, a magnetopause standoff of 10.9 Earth radii, and an arrival 73.5 minutes after measurement."
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "space weather",
+        "live data"
+      ]
+    },
+    {
+      "id": "sw-02",
+      "type": "why",
+      "level": 1,
+      "q": "Why build this, and how does it connect to the Kp prediction project?",
+      "easy": "Tanay's Kp forecasting project trained an LSTM on clean hourly history from NASA's OMNI2 archive. A model like that would run in production on live feeds, which come from several spacecraft at different cadences with gaps, revisions and instrument switches. This page builds that live input side.",
+      "deep": "OMNI2 is a cleaned archive: already shifted from the spacecraft to Earth, merged across missions, with gaps marked. Live RTSW data has none of that done for you: plasma minutes go missing, the active spacecraft label can change mid stream, the ephemeris is hourly and lags the data, and propagation has to be computed before the inputs resemble the training distribution. That gap is training serving skew in its purest form. The page also surfaces a harder problem the method text admits: the Kp model's strongest predictors were ap and the auroral electrojet indices, which are not in these feeds, so a production version needs another source for them or a retrain on solar wind inputs alone.",
+      "say": "My Kp model trained on OMNI2, which is clean and already shifted to Earth. In production it would run on live feeds with gaps, instrument switches and no propagation done. This page builds that input side, and it showed me the model's best predictors aren't even in the live feeds.",
+      "evidence": [
+        "repo:space-weather-nowcast/index.html: OMNI2 is a cleaned archive, already shifted from the spacecraft to Earth, merged across missions, with gaps marked.",
+        "repo:space-weather-nowcast/index.html: That model's strongest predictors were ap and the auroral electrojet indices, which are not in these feeds, so a production version would need a source for them or a retrain on solar wind inputs alone."
+      ],
+      "sources": [],
+      "tags": [
+        "motivation",
+        "training serving skew",
+        "kp"
+      ]
+    },
+    {
+      "id": "sw-03",
+      "type": "define",
+      "level": 1,
+      "q": "What is the L1 point, and why does a spacecraft there give lead time?",
+      "easy": "L1 is a balance point about 1.5 million km from Earth toward the Sun, where a spacecraft can stay parked between the two. The solar wind passes it before it reaches Earth, so measurements there arrive roughly 30 to 85 minutes ahead, depending on wind speed.",
+      "deep": "The first Lagrange point is where the Sun's and Earth's gravity and the centripetal requirement of an orbit with Earth's period balance, about 1% of the way to the Sun. Monitors fly halo or Lissajous orbits around it, so they sit well off the Sun Earth line, and their y and z offsets are in the ephemeris. At 300 to 800 km/s, 1.5 million km takes roughly 30 to 85 minutes. The RTSW files list several spacecraft, which the feed labels ACE, IMAP and SOLAR1, and flag one row per minute as active; the page uses only active rows and shows labels exactly as written. On the run, SOLAR1 was active at x_GSE = 1,581,830 km.",
+      "evidence": [
+        "repo:space-weather-nowcast/index.html: at 300 to 800 km/s that head start is roughly 30 to 85 minutes.",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: active source: plasma SOLAR1 | field SOLAR1 | ephemeris active SOLAR1 x_gse 1581830 at 2026-10-08 19:00Z"
+      ],
+      "sources": [],
+      "tags": [
+        "l1",
+        "define",
+        "spacecraft"
+      ]
+    },
+    {
+      "id": "sw-04",
+      "type": "how",
+      "level": 1,
+      "q": "List the nine NOAA feeds and the cadence each one is polled at.",
+      "easy": "Solar wind plasma, magnetic field and spacecraft positions; the 1 minute Kp estimate, the 3 hour Kp, and NOAA's Kp forecast; NOAA's storm scales; GOES X-ray flux; and the OVATION aurora map. The 1 minute products are polled every minute, the slower ones every 5 to 30 minutes.",
+      "deep": "From the SPEC table in sun/app.js (base services.swpc.noaa.gov/): (1) json/rtsw/rtsw_wind_1m.json, plasma, every 1 min; (2) json/rtsw/rtsw_mag_1m.json, field, 1 min; (3) json/rtsw/rtsw_ephemerides_1h.json, positions, 30 min; (4) json/planetary_k_index_1m.json, 1 minute estimated Kp, 1 min; (5) products/noaa-planetary-k-index.json, 3 hour Kp, 10 min; (6) products/noaa-planetary-k-index-forecast.json, 3 day forecast with noaa_scale labels, 30 min; (7) products/noaa-scales.json, current R, S and G levels, 10 min; (8) json/goes/primary/xrays-6-hour.json, X-ray flux, 1 min; (9) json/ovation_aurora_latest.json, aurora grid, 5 min. Each poll has a 30 s timeout and the shared exponential backoff, and a handler only mutates state and invalidates one paint job. Polling faster than a product updates only spends bandwidth, which is why the hourly ephemeris is polled every 30 minutes.",
+      "evidence": [
+        "repo:space-weather-nowcast/sun/app.js: { id: 'eph', label: 'RTSW ephemerides', path: 'json/rtsw/rtsw_ephemerides_1h.json', every: 30 * MIN,",
+        "repo:space-weather-nowcast/sun/app.js: { id: 'ovation', label: 'OVATION aurora', path: 'json/ovation_aurora_latest.json', every: 5 * MIN,",
+        "repo:space-weather-nowcast/sun/app.js: every: sp.every, feed: feeds[sp.id], timeoutMs: 30e3,"
+      ],
+      "sources": [],
+      "tags": [
+        "noaa",
+        "feeds",
+        "polling"
+      ]
+    },
+    {
+      "id": "sw-05",
+      "type": "how",
+      "level": 2,
+      "q": "How does the page decide whether each feed is current?",
+      "easy": "Each feed has two clocks. One says whether the last download worked. The other says how old the newest measurement inside the file is, compared with a threshold that fits that product. A feed can download fine and still be stale.",
+      "deep": "The poll clock lives in the header badges. The sample clock is your clock minus the newest time stamp inside the file, classified by freshness(ageMs, { fresh, late }) as fresh, late, stale or unknown. Thresholds: 1 minute products fresh within 10 minutes and late within 30; ephemeris 4 and 12 hours; final 3 hour Kp 4 and 7 hours after its window's end; OVATION 20 and 60 minutes after its observation time; forecast file 3 and 12 hours after its Last-Modified header; scales file 3 and 12 hours after its current entry. Each threshold is measured against what the product actually stamps: the forecast's rows are future windows, so Last-Modified is the only honest age. A skewed client clock shifts every age equally. On the run: wind 6.5 min, field 5.5, active ephemeris 38.5, Kp 1 min 3.5, final Kp window end 98.5, forecast 1.7, X-ray 3.5, OVATION 9.5, scales 2.5.",
+      "evidence": [
+        "repo:space-weather-nowcast/index.html: 1 minute products are fresh within 10 minutes and late within 30, the hourly ephemeris within 4 and 12 hours,",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: wind 6.5 min | mag 5.5 min | eph(active) 38.5 min",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: kpfc (Last-Modified) 1.7 min | xray 3.5 min | ovation obs 9.5 min | scales 2.5 min"
+      ],
+      "sources": [],
+      "tags": [
+        "freshness",
+        "monitoring",
+        "data quality"
+      ]
+    },
+    {
+      "id": "sw-06",
+      "type": "define",
+      "level": 1,
+      "q": "Define solar wind speed, density, the IMF, Bz, Bt and the clock angle. Why does southward Bz matter?",
+      "easy": "The solar wind is a stream of charged particles from the Sun, typically 300 to 800 km/s with a few protons per cubic centimetre. It carries the Sun's magnetic field (the IMF). Bz is the north south part of that field; when it points south it links up with Earth's field and lets energy in.",
+      "deep": "Speed is the proton bulk speed (km/s), density the proton number density (cm^-3), temperature the proton temperature. The interplanetary magnetic field is measured in nT; Bx, By, Bz are its components, here in GSM coordinates, Bt is the total field magnitude, and the clock angle theta = atan2(By, Bz) is the field's direction in the y z plane, 0 due north and pi due south. Earth's dayside field points north, so a southward IMF is antiparallel to it at the magnetopause, which favours magnetic reconnection (the Dungey cycle): flux is opened on the dayside, carried over the poles and reconnected in the tail, driving storms and substorms. Northward IMF closes that door. On the run the joined sample had Bz = -1.7 nT and By = 4.01 nT, a mostly dawn dusk field tipped slightly south, and the page colours each minute's dot by Bz.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: latest joined 2026-10-08 19:32Z v 360.5 n 5.71 Bz -1.7 By 4.01 Bt 4.47"
+      ],
+      "sources": [],
+      "tags": [
+        "solar wind",
+        "imf",
+        "define"
+      ]
+    },
+    {
+      "id": "sw-07",
+      "type": "define",
+      "level": 2,
+      "q": "What are GSE and GSM coordinates, and which one does each quantity use?",
+      "easy": "Both put Earth at the origin with x pointing at the Sun. GSE fixes z to the ecliptic pole. GSM tilts z so that Earth's magnetic dipole lies in the x z plane. Positions and the delay use GSE; the field components that drive Earth's response use GSM.",
+      "deep": "Geocentric Solar Ecliptic: x toward the Sun, z perpendicular to the ecliptic, y completing the right handed set (toward dusk). Geocentric Solar Magnetospheric: same x, but the x z plane contains the dipole axis, so the frame rocks daily and seasonally relative to GSE. Coupling to the magnetosphere depends on the field relative to the dipole, so Bz and By are read as bz_gsm and by_gsm. Propagation along the Sun Earth line uses the spacecraft's x_gse and the plasma's proton_vx_gse; the two frames share x, so the delay would be the same in either. Mixing frames is a classic bug: Bz in GSE can differ from Bz in GSM by several nT when the dipole tilt is large.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "coordinates",
+        "define"
+      ]
+    },
+    {
+      "id": "sw-08",
+      "type": "how",
+      "level": 1,
+      "q": "How are the plasma and magnetic field files joined?",
+      "easy": "Both files list every spacecraft. Keep only rows flagged active, round each time stamp down to its minute, and match plasma and field by minute. A minute with only one of the two is kept, with the other half empty, so each chart can use every sample it has.",
+      "deep": "joinSolarWind(windRows, magRows): rows with active !== true are skipped; time tags are parsed as UTC and floored to the minute, because some sources stamp seconds. Duplicate minutes keep the first row unless it is invalid and a later one is valid (plasma needs proton_speed and proton_density, field needs bz_gsm and by_gsm), and duplicates are counted. Keys from both maps are unioned and sorted: an outer join. Each row records windSource, magSource and a mixed flag when they differ. Per stream it reports count, expected minutes, missing, gaps longer than 5 minutes, the longest gap, and source changes; matched counts minutes with all four of v, n, Bz, By. latestJoined walks back to the newest fully matched minute, and every derived KPI uses it. Tests check active filtering, flooring, sorting, a missing plasma minute kept with NaN, a gap of 8 minutes, and a SOLAR1 to ACE change.",
+      "evidence": [
+        "repo:space-weather-nowcast/sun/helio.js: export function joinSolarWind(windRows, magRows, { gapMs = 5 * MIN } = {}) {"
+      ],
+      "sources": [],
+      "tags": [
+        "join",
+        "time series",
+        "data integration"
+      ]
+    },
+    {
+      "id": "sw-09",
+      "type": "why",
+      "level": 2,
+      "q": "Why an outer join on the minute instead of an inner join, or an as of join?",
+      "easy": "An inner join would throw away good field data whenever plasma is missing, and plasma drops out far more often. Keeping both halves lets the field chart stay complete while anything that needs both (pressure, coupling, standoff) uses only fully matched minutes.",
+      "deep": "On the run, plasma covered 1,265 of 1,435 minutes while the field covered 1,427 of 1,437, and only the 1,265 matched minutes can feed derived quantities. An inner join would have hidden about 160 field minutes. An as of join (latest plasma at or before each field minute) would fill gaps by carrying old plasma forward and silently mix stale density with fresh field into pressure and coupling, which is exactly the kind of quiet error a nowcast must avoid. Flooring to the minute is a safe key because both products are nominally 1 minute cadences; the cost is that two samples inside one minute collapse to one, which the duplicate counter makes visible. The per row mixed flag catches a minute whose plasma and field came from different spacecraft during a switch.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: coverage: plasma 1265 of 1435 | field 1427 of 1437 | matched 1265 | changes 0 0 | gaps>5min 1 1"
+      ],
+      "sources": [],
+      "tags": [
+        "join",
+        "design",
+        "tradeoff"
+      ]
+    },
+    {
+      "id": "sw-10",
+      "type": "code",
+      "level": 2,
+      "q": "NOAA time tags carry no time zone. What goes wrong, and how does parseUTC fix it?",
+      "easy": "In JavaScript a date and time string without a zone is read as local time, so a page opened in New York would shift every sample by four or five hours. parseUTC appends a Z, meaning UTC, to any tag that lacks a zone, and turns a space separator into a T.",
+      "deep": "```js\nexport function parseUTC(s) {\n  if (typeof s !== 'string' || !s) return NaN;\n  let x = s.trim().replace(' ', 'T');\n  if (!/(Z|[+-]\\d\\d:?\\d\\d)$/i.test(x)) x += 'Z';\n  const t = Date.parse(x);\n  return Number.isFinite(t) ? t : NaN;\n}\n```\nISO 8601 date time forms without an offset are interpreted as local time by Date.parse, while date only forms are UTC, an inconsistency that bites real time code. Strings with a space instead of T are outside the ISO format and their parsing is implementation defined, so normalising to T first makes behaviour consistent across engines. The test checks the bare, Z suffixed and space separated forms all equal Date.UTC(2026, 9, 8, 18, 53), and null or junk return NaN. Every timestamp in the page (RTSW, Kp, X-ray, OVATION, scales) goes through this function.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "time zones",
+        "parsing",
+        "code"
+      ]
+    },
+    {
+      "id": "sw-11",
+      "type": "formula",
+      "level": 1,
+      "q": "How is the L1 to Earth travel time computed?",
+      "easy": "Divide the spacecraft's distance toward the Sun by how fast the wind is moving toward Earth. On October 8 that was 1,581,830 km at 358.6 km/s, about 73.5 minutes. Add the delay to the measurement time to get the arrival time.",
+      "deep": "ballisticDelay(xKm, vx, speed) = x_GSE / |Vx|, using the GSE x component of proton velocity when present and the bulk speed otherwise; arrival = t_sample + delay. derive() looks up the ephemeris of the plasma's own spacecraft at the nearest hour (nearestEphemeris, a binary search over that source's hourly rows) and stores the ephemeris age. An ephemeris is a table of a spacecraft's predicted or measured positions over time. Using the actual x rather than a constant 1.5 million km matters because halo orbits move the spacecraft by a meaningful fraction of the distance. Run: x = 1,581,830 km, Vx = -358.6 km/s, delay 4,411 s = 73.5 min; the bulk speed was 360.5 km/s. The test checks 1.5e6 km at 400 km/s gives exactly 3,750 s, with the bulk speed fallback when Vx is NaN or null.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: Pd 1.241 nPa | Newell 4214 | Shue r0 10.93 Re alpha 0.595 | delay 73.5 min (x 1581830 vx -358.6 )",
+        "repo:space-weather-nowcast/sun/helio.js: // Ballistic delay from the spacecraft to Earth, seconds: x_GSE [km] / |Vx| [km/s]."
+      ],
+      "sources": [],
+      "tags": [
+        "propagation",
+        "formula",
+        "l1"
+      ]
+    },
+    {
+      "id": "sw-12",
+      "type": "why",
+      "level": 2,
+      "q": "Where does ballistic propagation go wrong?",
+      "easy": "It assumes the wind travels straight down the Sun Earth line as flat sheets facing Earth. Real fronts are tilted and the spacecraft sits well off that line, so actual arrival can be several minutes earlier or later. It also gives the time to Earth's centre, not to the bow shock.",
+      "deep": "Errors come from: (1) phase front tilt, where a structure inclined to the Sun Earth line reaches Earth earlier or later depending on the spacecraft's y and z offset; (2) the offset itself, often over 100,000 km for a halo orbit, so the spacecraft may sample a different parcel; (3) distance to the bow shock nose (about 13 to 15 Earth radii upstream), so the magnetosphere responds a few minutes before the computed arrival; (4) evolution of the wind in transit; (5) fast wind overtaking slow wind, where the time mapping stops being one to one and two samples can map to the same arrival, so arrivingNow picks the sample whose arrival is nearest to now within 5 minutes. Better methods estimate the front normal (minimum variance analysis or cross product of fields) and propagate along it, which is what archives like OMNI do.",
+      "evidence": [
+        "repo:space-weather-nowcast/index.html: Real phase fronts are tilted, and the spacecraft sits well off the line (its y and z offsets are in the ephemeris), so actual arrival can differ by several minutes either way."
+      ],
+      "sources": [],
+      "tags": [
+        "propagation",
+        "limitations"
+      ]
+    },
+    {
+      "id": "sw-13",
+      "type": "how",
+      "level": 2,
+      "q": "How does the page find the sample reaching Earth now, and how does it draw the stream?",
+      "easy": "Every minute's measurement gets an arrival time. The one whose arrival is closest to the present, within 5 minutes, is the wind reaching Earth now. In the drawing, each of the last two hours of samples is placed by how far its own speed has carried it since it was measured.",
+      "deep": "arrivingNow(rows, now, tolMs = 5 min) scans for the minimum |arrival - now| and returns null if the best is more than 5 minutes off, which happens during a plasma gap or when the feed is stale. On the run, the sample measured at 18:24 UTC was arriving at 19:38. streamProgress(rows, now) keeps samples from the last 2 hours and computes km = (now - t) x |Vx| and progress = km / x_GSE; progress 1 is arrival. In the picture the Sun to L1 leg (Almanac Sun distance minus x_GSE) is shortened and the L1 to Earth leg stretched, dots are coloured by Bz on a diverging scale, sized by the square root of density, and spread vertically by a golden ratio sequence of their minute so the height carries no data. A dot meets the Shue magnetopause at its height (shueAtRho, 50 bisection steps) and slides along it.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: arriving now: sample 2026-10-08 18:24Z arrival 2026-10-08 19:38Z"
+      ],
+      "sources": [],
+      "tags": [
+        "propagation",
+        "visualisation"
+      ]
+    },
+    {
+      "id": "sw-14",
+      "type": "formula",
+      "level": 1,
+      "q": "What is dynamic pressure, and where does the constant 1.6726e-6 come from?",
+      "easy": "Dynamic pressure is how hard the moving wind pushes, like wind on a sail: mass density times speed squared. With density in protons per cubic centimetre and speed in km/s, multiplying by 1.6726e-6 gives nanopascals. On October 8 it was 1.24 nPa.",
+      "deep": "Pd = m_p n v^2. With m_p = 1.6726e-27 kg, n in cm^-3 (times 1e6 to get m^-3), v in km/s (times 1e3, squared gives 1e6), and Pa to nPa (times 1e9): 1.6726e-27 x 1e6 x 1e6 x 1e9 = 1.6726e-6. So Pd [nPa] = 1.6726e-6 x n x v^2. Check: n = 5, v = 400 gives 1.338 nPa, which the test asserts. Run: 1.6726e-6 x 5.71 x 360.5^2 = 1.241 nPa. Alpha particles (helium nuclei) add a few percent of the mass flux and are often included with a factor near 1.16 to 1.2 in other work, but their columns are empty in these files, so this is proton only pressure and slightly low. Typical quiet values are 1 to 3 nPa; storm compressions reach tens of nPa.",
+      "evidence": [
+        "repo:space-weather-nowcast/sun/helio.js: export const PD_COEFF = 1.6726e-6;",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: Pd 1.241 nPa",
+        "repo:space-weather-nowcast/tests/sun.test.mjs: test('dynamic pressure for n = 5 cm^-3, v = 400 km/s is 1.338 nPa', () => {"
+      ],
+      "sources": [],
+      "tags": [
+        "dynamic pressure",
+        "formula",
+        "units"
+      ]
+    },
+    {
+      "id": "sw-15",
+      "type": "formula",
+      "level": 1,
+      "q": "State the Shue et al. (1998) magnetopause model and explain each term.",
+      "easy": "The magnetopause is the boundary where Earth's magnetic field holds off the solar wind. Shue's model gives its distance toward the Sun, r0, from the wind's pressure and Bz: more pressure pushes it in, southward Bz erodes it. A second number, alpha, says how much the flanks flare out.",
+      "deep": "r0 = (10.22 + 1.29 tanh(0.184 (Bz + 8.14))) Pd^(-1/6.6) Earth radii; alpha = (0.58 - 0.007 Bz)(1 + 0.024 ln Pd); r(theta) = r0 (2 / (1 + cos theta))^alpha, theta measured from the Sun Earth line. The Pd^(-1/6.6) term is close to pressure balance theory: a dipole's magnetic pressure falls as r^-6, so balancing it against ram pressure gives r0 proportional to Pd^(-1/6) (Chapman and Ferraro); the fit found 6.6. The tanh term lowers r0 smoothly as Bz turns south (reconnection removes dayside flux) and saturates for strong Bz either way. alpha grows for southward Bz, so the tail flares more. Run: Pd 1.241, Bz -1.7 gives r0 = 10.93 Re and alpha = 0.595; the test checks Pd 2, Bz 0 gives about 10.25 Re, that r(0) = r0 and r(pi/2) = r0 2^alpha, and that Pd 20 with Bz -10 pushes r0 inside 6.6 Re.",
+      "evidence": [
+        "repo:space-weather-nowcast/sun/helio.js: return (10.22 + 1.29 * Math.tanh(0.184 * (bz + 8.14))) * Math.pow(pd, -1 / 6.6);",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: Shue r0 10.93 Re alpha 0.595"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Magnetopause"
+      ],
+      "tags": [
+        "shue",
+        "magnetopause",
+        "formula"
+      ]
+    },
+    {
+      "id": "sw-16",
+      "type": "why",
+      "level": 2,
+      "q": "What does the Shue model ignore, and why is 6.6 Earth radii drawn beside it?",
+      "easy": "It is a curve fitted to past spacecraft crossings, symmetric around the Sun Earth line, and it ignores the tilt of Earth's magnetic axis. 6.6 Earth radii is where geostationary satellites orbit; if the standoff drops inside it, satellites near local noon are outside the shield, in the solar wind.",
+      "deep": "Limits: empirical (no physics simulation), axisymmetric, no dipole tilt or dawn dusk asymmetry, no cusp indentations, and fitted mostly to moderate conditions, though the 1998 version added extreme events. It also uses the latest L1 sample, which reaches Earth one delay later, so the drawn magnetopause is about an hour early unless read with that in mind. Geosynchronous orbit at 6.6 Re is the operational threshold: magnetopause crossings expose satellites to unshielded plasma and can disturb charging and attitude systems. On the run r0 was 10.9 Re and the 24 hour minimum was 10.66 Re at 19:19 UTC (Pd 1.21, Bz -4.5), comfortable margins for a quiet day.",
+      "evidence": [
+        "repo:space-weather-nowcast/index.html: If r0 falls below 6.6 Re, geosynchronous satellites near local noon are outside the model magnetopause.",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: min r0 24h 10.66 at 2026-10-08 19:19Z Pd 1.21 Bz -4.5"
+      ],
+      "sources": [],
+      "tags": [
+        "shue",
+        "limitations",
+        "geosynchronous"
+      ]
+    },
+    {
+      "id": "sw-17",
+      "type": "formula",
+      "level": 2,
+      "q": "What is the Newell coupling function, and why does it use sin to the 8/3 of half the clock angle?",
+      "easy": "It is a single number for how much energy the solar wind is pushing into Earth's magnetic field right now. It grows with speed and field strength and is zero when the field points due north, largest when it points due south.",
+      "deep": "dPhi/dt = v^(4/3) Bt^(2/3) sin^(8/3)(theta/2), with Bt = sqrt(By^2 + Bz^2) (transverse field in GSM) and theta = atan2(By, Bz). Newell et al. (2007) fitted this form against ten measures of magnetospheric activity; it is proportional to the rate magnetic flux is opened at the dayside magnetopause. sin(theta/2) is 0 at theta = 0 (north) and 1 at pi (south), and the high 8/3 power makes the function sharply selective for southward fields while still giving By dominated fields some coupling. Units are (km/s)^(4/3) nT^(2/3). Note Bt here excludes Bx, so it differs from the logged total field 4.47 nT. Run: v 360.5, By 4.01, Bz -1.7 gives 4,214. Tests: due south equals v^(4/3) Bt^(2/3), due north is 0, and flipping the sign of By changes nothing.",
+      "evidence": [
+        "repo:space-weather-nowcast/sun/helio.js: return Math.pow(Math.abs(v), 4 / 3) * Math.pow(bt, 2 / 3) * Math.pow(s, 8 / 3);",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: Newell 4214"
+      ],
+      "sources": [],
+      "tags": [
+        "newell",
+        "coupling",
+        "formula"
+      ]
+    },
+    {
+      "id": "sw-18",
+      "type": "how",
+      "level": 2,
+      "q": "How is the 30 minute Newell mean computed, and why require 15 samples?",
+      "easy": "It is a trailing average over the previous 30 minutes. If fewer than 15 good samples fall in the window, the point is left blank so a data gap shows as a gap instead of a misleading average of a few minutes.",
+      "deep": "rollingMean(rows, key, windowMs, minN) keeps a running sum and count with two pointers: add row i if valid, then advance lo while rows[lo].t <= rows[i].t - windowMs, subtracting valid values. Each row is visited at most twice, so it is O(n) instead of O(n w). A point gets sum/n only when n >= minN; the Newell chart uses a 30 minute window with minN = 15, half the expected minutes. Trailing (not centred) means no future data leaks into the value, which matters because the page labels it a predictor that acts on Earth one travel time later. The test checks a point with too few samples is NaN and the later means are exact.",
+      "evidence": [
+        "repo:space-weather-nowcast/index.html: The 30 minute mean is trailing and needs at least 15 samples in its window."
+      ],
+      "sources": [],
+      "tags": [
+        "rolling window",
+        "algorithms",
+        "code"
+      ]
+    },
+    {
+      "id": "sw-19",
+      "type": "define",
+      "level": 1,
+      "q": "What is Kp, and what are the observed, estimated and predicted labels?",
+      "easy": "Kp is a planet wide score of how disturbed Earth's magnetic field is over a 3 hour block, from 0 (quiet) to 9 (extreme), in thirds. 5 and above is a geomagnetic storm. NOAA labels each block observed, estimated or predicted, and also publishes a provisional estimate every minute.",
+      "deep": "Each observatory's K index is an integer 0 to 9 from the largest horizontal field fluctuation in a 3 hour UT window, on a quasi logarithmic scale normalised to its latitude. The official planetary Kp is the mean standardised K from 13 observatories between about 44 and 60 degrees geomagnetic latitude; SWPC's real time estimate uses a smaller set of ground magnetometers. Values come in thirds: 4.67 is written 5-, 5.33 is 5+. The forecast product labels windows observed (definitive), estimated (real time), predicted (forecast). The 1 minute estimated Kp is a nowcast and NOAA rewrites its newest minutes. On the run, the 1 minute estimate was 2, and the last 3 hour window was Kp 1.33 from 7 stations.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: Kp est now 2 at 2026-10-08 19:35Z G strict 0 G noaa 0",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: kp1m 3.5 min | kp3h (window end) 98.5 min Kp 1.33 stations 7"
+      ],
+      "sources": [
+        "https://www.spaceweather.gov/products/planetary-k-index"
+      ],
+      "tags": [
+        "kp",
+        "define"
+      ]
+    },
+    {
+      "id": "sw-20",
+      "type": "concept",
+      "level": 1,
+      "q": "How does the page map Kp to NOAA's G scale, and why are there two rules?",
+      "easy": "G1 to G5 are NOAA's storm levels for Kp 5 to 9. Kp comes in thirds, so 4.67 (written 5-) could be read as below 5 or as rounding to 5. The page rounds to the nearest whole number first, because that reproduces the labels in NOAA's own forecast file, and keeps the strict threshold as a tested alternative.",
+      "deep": "kpToG(kp, rule): 'strict' thresholds the raw value (k >= 5 is G1, >= 6 G2, >= 7 G3, >= 8 G4, >= 9 G5), so 4.67 is G0 and 5.67 is G1. 'noaa' first does Math.round(kp + 1e-9), so 4.67 becomes 5 (G1) and 5.67 becomes 6 (G2). The tiny epsilon guards float values like 4.4999999 sitting under a half. G_RULE = 'noaa' in app.js. The test captures (kp, noaa_scale) pairs from products/noaa-planetary-k-index-forecast.json on 2026-10-08 at 18:57 UTC: 4 and 4.33 unlabelled, 4.67 G1, 5 G1, 5.33 G1, 5.67 G2, 3.67 unlabelled, and requires the 'noaa' rule to reproduce every one. On the run, the forecast peak of 5.67 was G2 under the NOAA rule and G1 under the strict rule.",
+      "evidence": [
+        "repo:space-weather-nowcast/sun/helio.js: const k = rule === 'noaa' ? Math.round(kp + 1e-9) : kp;",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: peak forecast ahead 2026-10-09 06:00Z 5.67 predicted NOAA label G2 G noaa 2 G strict 1"
+      ],
+      "sources": [
+        "https://www.spaceweather.gov/noaa-scales-explanation"
+      ],
+      "tags": [
+        "g scale",
+        "kp",
+        "concept"
+      ]
+    },
+    {
+      "id": "sw-21",
+      "type": "pushback",
+      "level": 3,
+      "q": "Your 'noaa' rounding rule maps Kp 8.67 to G5. Is that what NOAA does?",
+      "easy": "Probably not. NOAA's published scale table puts 'Kp = 8, including a 9-' in G4, and 9- is 8.67. The rounding rule was verified only against forecast labels up to 5.67, and the test extrapolates it to 8.67 as G5. So the code and NOAA's documentation disagree at the top of the scale.",
+      "deep": "The rule round(Kp) then threshold reproduces every (kp, label) pair captured from the forecast file, but those pairs only cover 3.67 to 5.67. The suite also asserts kpToG(8.67, 'noaa') = 5, which no captured label supports. NOAA's scales page lists G4 as Kp 8 including 9-, and G5 as Kp 9, so at 8.67 the strict rule (G4) agrees with NOAA's table and the rounding rule (G5) does not. The likely truth is that NOAA's labels treat the minus third specially at 5- (counted as G1 in the file) and at 9- (counted as G4 in the table), which neither single rule captures. The fix is a lookup keyed on the thirds notation, validated against more captured labels, and a test pinned to NOAA's table at 9-. This affects only extreme storms, but those are the ones where the label matters most.",
+      "say": "Fair catch. My rounding rule matches every label I captured from NOAA's file, but those only go up to 5.67. NOAA's scale table puts 9 minus in G4, and my rule calls it G5, so the rule is wrong at the top end. I'd replace both rules with a lookup on the thirds notation and pin a test to NOAA's table.",
+      "evidence": [
+        "repo:space-weather-nowcast/tests/sun.test.mjs: assert.equal(H.kpToG(8.67, 'noaa'), 5);",
+        "repo:space-weather-nowcast/tests/sun.test.mjs: const pairs = [[4, null], [4.33, null], [4.67, 'G1'], [5, 'G1'], [5.33, 'G1'], [5.67, 'G2'], [3.67, null]];"
+      ],
+      "sources": [
+        "https://www.spaceweather.gov/noaa-scales-explanation"
+      ],
+      "tags": [
+        "g scale",
+        "bug",
+        "pushback"
+      ]
+    },
+    {
+      "id": "sw-22",
+      "type": "how",
+      "level": 2,
+      "q": "NOAA rewrites recent minutes of the 1 minute Kp. How does the page handle that?",
+      "easy": "The page keeps a map from minute to value. When a newer download has a different value for a minute it already holds, it replaces it and counts a revision. So a window's maximum can go down as well as up, and the card says how many minutes were rewritten.",
+      "deep": "handlers.kp1m loops over rows; for each minute t with estimated_kp, if S.k1m already holds a different value, it increments S.kpRev.n and records { t, from, to }, then sets the new value. Entries older than one day are dropped; the file itself carries about 6 hours. While the page was being built, minutes first published as 2.67 were rewritten to 1.33 a few minutes later. Treating the latest value as truth is the right default for a provisional product, but it means any statistic over recent minutes is provisional too; the comparison card shows the window's running max and mean of the 1 minute estimate (on the run, max 2 and mean 1.05 over 96 minutes) beside NOAA's 1.67 for the same window. A production system would keep every version with its fetch time instead of overwriting.",
+      "evidence": [
+        "repo:space-weather-nowcast/index.html: while this page was being built, minutes first published as 2.67 were rewritten to 1.33 a few minutes later",
+        "repo:space-weather-nowcast/sun/app.js: if (old !== undefined && old !== kp) { S.kpRev.n++; S.kpRev.last = { t, from: old, to: kp }; }",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: forecast current window 2026-10-08 18:00Z kp 1.67 (estimated) | 1 min so far: max 2 mean 1.05 n 96"
+      ],
+      "sources": [],
+      "tags": [
+        "revisions",
+        "kp",
+        "data quality"
+      ]
+    },
+    {
+      "id": "sw-23",
+      "type": "why",
+      "level": 2,
+      "q": "Why does the page not report a skill score for NOAA's Kp forecast?",
+      "easy": "Scoring a forecast needs the forecasts NOAA made in the past, and these feeds only carry the current one. So the page makes a narrow comparison instead: NOAA's value for the current 3 hour window against the max and mean of the 1 minute estimate so far in that window.",
+      "deep": "A skill score (for example mean absolute error or a Heidke score against persistence) requires pairs of (forecast issued at time t for window w, observed value for w). products/noaa-planetary-k-index-forecast.json is overwritten on each issue and has no archive of prior issues, so the page cannot build those pairs. Polling it and storing each issue over weeks would allow scoring, but the page keeps no persistent state. kpWindows turns rows into [t0, t0 + 3 h) windows with type and label; windowAt finds the current one; windowStats gives n, max and mean of the 1 minute values inside it; kpChartRows builds step series per type so observed, estimated and predicted steps join without gaps. Claiming skill from one window would be inventing a metric.",
+      "evidence": [
+        "portfolio: Past forecasts are not scored. The feeds carry no archive of NOAA's earlier predictions, so the page compares the current window's forecast with the live estimate rather than claiming a skill score."
+      ],
+      "sources": [],
+      "tags": [
+        "forecast verification",
+        "honesty",
+        "kp"
+      ]
+    },
+    {
+      "id": "sw-24",
+      "type": "define",
+      "level": 1,
+      "q": "What is a nowcast versus a forecast, and which parts of this page are which?",
+      "easy": "A nowcast estimates the current state from the latest measurements; a forecast predicts a future state. The page is mostly a nowcast. The L1 data gives a short look ahead of about an hour, NOAA's OVATION gives aurora roughly 30 to 90 minutes ahead, and the 3 day Kp outlook is NOAA's forecast, shown but not produced by the page.",
+      "deep": "Nowcasts here: the 1 minute estimated Kp (provisional, from real time magnetometers), the NOAA scales' current levels, current X-ray class, and every quantity computed from the latest L1 sample. The L1 to Earth propagation is a physics based look ahead: it predicts conditions at Earth one travel time later by assuming the measured wind persists unchanged in transit, so pressure, standoff and coupling shown now act on Earth about 73 minutes later. OVATION is a model forecast with lead time set by the L1 travel time; the file states an observation time and a forecast time (19:29 and 20:45 on the run, 76 minutes apart). The Kp forecast is NOAA's 3 day product. Beyond about an hour, prediction needs models of the Sun and heliosphere, not L1 data.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: OVATION obs 2026-10-08 19:29Z fc 2026-10-08 20:45Z"
+      ],
+      "sources": [
+        "https://www.spaceweather.gov/products/aurora-30-minute-forecast"
+      ],
+      "tags": [
+        "nowcast",
+        "forecast",
+        "define"
+      ]
+    },
+    {
+      "id": "sw-25",
+      "type": "concept",
+      "level": 1,
+      "q": "How does Kp relate to how far south the aurora reaches?",
+      "easy": "As Kp rises, the auroral oval expands toward the equator. NOAA's scale page gives rough visibility by storm level: G2 (Kp 6) to about 55 degrees geomagnetic latitude, G3 (Kp 7) about 50, G4 (Kp 8) about 45, G5 (Kp 9) about 40. Aurora low on the northern horizon can be seen from farther south than the oval itself.",
+      "deep": "The oval sits around 65 to 70 degrees geomagnetic latitude in quiet times. Stronger driving (southward Bz, high speed) loads more open flux into the tail, enlarging the polar cap and pushing the oval's equatorward edge to lower latitudes, and Kp, built from mid latitude magnetometers, tracks that disturbance. The relation is statistical and uses geomagnetic latitude, not geographic. SWPC notes aurora can be seen up to about 1,000 km from the visible oval when it is bright, which is why a place south of the oval can still see a glow low on the horizon. OVATION replaces the Kp rule of thumb with a model driven by L1 solar wind, giving probability on a 1 degree geographic grid; if solar wind input is missing it falls back on Kp.",
+      "evidence": [],
+      "sources": [
+        "https://www.spaceweather.gov/noaa-scales-explanation",
+        "https://www.spaceweather.gov/products/aurora-30-minute-forecast"
+      ],
+      "tags": [
+        "aurora",
+        "kp",
+        "concept"
+      ]
+    },
+    {
+      "id": "sw-26",
+      "type": "concept",
+      "level": 2,
+      "q": "What is Syracuse's geomagnetic latitude, and does the code use it?",
+      "easy": "The code does not compute it. It stores Syracuse in geographic coordinates (43.04 N, 76.13 W) and reads OVATION's geographic grid. With a dipole approximation and the 2020 geomagnetic pole near 80.65 N, 72.68 W, Syracuse sits at about 52 degrees geomagnetic latitude, between the G2 and G3 visibility lines.",
+      "deep": "Geomagnetic (dipole) latitude: sin(lat_m) = sin(lat) sin(lat_p) + cos(lat) cos(lat_p) cos(lon - lon_p), where (lat_p, lon_p) is the north geomagnetic pole. With lat 43.04, lon -76.13, pole 80.65 N, 72.68 W: 0.6826 x 0.9867 + 0.7308 x 0.1625 x cos(3.45 deg) is about 0.792, so lat_m is about 52.4 degrees (an estimate computed for this card, not a project result). Because the pole is tilted toward North America, Syracuse is about 9 degrees further 'north' magnetically than geographically. By NOAA's table, aurora overhead would need roughly G3 (Kp 7, about 50 degrees), and G2 (about 55 degrees) gives at best a low horizon glow. On the run, NOAA's forecast peaked at Kp 5.67 (G2) for 06:00 UTC, 2 am in Syracuse, OVATION gave Syracuse 0%, and the southernmost 10% cell on its longitude was 64 N. Adding a geomagnetic latitude field (via IGRF or AACGM) is an easy next step.",
+      "evidence": [
+        "repo:space-weather-nowcast/sun/app.js: syr: { name: 'Syracuse NY', lat: 43.04, lon: -76.13 },",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: OVATION obs 2026-10-08 19:29Z fc 2026-10-08 20:45Z | Syracuse p 0 | 10% boundary at 76.13 W 64 | max 26"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Geomagnetic_pole",
+        "https://www.spaceweather.gov/noaa-scales-explanation"
+      ],
+      "tags": [
+        "geomagnetic latitude",
+        "aurora",
+        "syracuse"
+      ]
+    },
+    {
+      "id": "sw-27",
+      "type": "how",
+      "level": 2,
+      "q": "How does the page read the OVATION aurora grid?",
+      "easy": "NOAA's OVATION file is a list of longitude, latitude and probability on a one degree grid. The page loads it into a flat array, reads the nearest cell for a chosen place, and finds the southernmost latitude along that place's longitude where the chance reaches 10%.",
+      "deep": "ovationGrid(json) fills a Float32Array of 360 x 181 with NaN, then writes p at index (lat + 90) x 360 + lon for each [lon 0..359, lat -90..90, p] triple, counting cells and the max, and parses 'Observation Time' and 'Forecast Time'. ovationAt rounds lat and lon to the nearest cell (lonTo360 maps -76.13 to 284). auroraBoundary walks north from the equator at that longitude and returns the first latitude with p >= 10. Lookups are O(1); the boundary walk is O(91). Tests: 360 x 181 cells, forecast minus observation 75 minutes in the fixture, Syracuse reads 0, an 8% cell at 60 N does not count so the boundary is 61. On the run: Syracuse 0%, boundary 64 N at its longitude, grid max 26%, Reykjavik 13%, Tromso 24%. OVATION probability assumes viewing chance scales with auroral intensity, and cloud, moonlight and city light are not modelled.",
+      "evidence": [
+        "repo:space-weather-nowcast/sun/helio.js: const grid = new Float32Array(360 * 181).fill(NaN);",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt:    Reykjavik 13 63",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt:    Tromso 24 63"
+      ],
+      "sources": [
+        "https://www.spaceweather.gov/products/aurora-30-minute-forecast"
+      ],
+      "tags": [
+        "ovation",
+        "aurora",
+        "data structures"
+      ]
+    },
+    {
+      "id": "sw-28",
+      "type": "how",
+      "level": 2,
+      "q": "How is the night side shaded on the aurora map?",
+      "easy": "The page computes where the Sun is directly overhead (the subsolar point) from low precision formulas in the Astronomical Almanac. Everything more than 90 degrees from that point is night. On the run the Sun was overhead at 6.11 S, 117.77 W.",
+      "deep": "subsolarPoint(date): days from J2000 n; mean longitude L = 280.460 + 0.9856474 n; mean anomaly g = 357.528 + 0.9856003 n; ecliptic longitude lambda = L + 1.915 sin g + 0.020 sin 2g; obliquity eps = 23.439 - 0.0000004 n; declination = asin(sin eps sin lambda); right ascension = atan2(cos eps sin lambda, cos lambda). Equation of time (EoT) = L - RA in degrees (4 minutes per degree), the gap between clock noon and solar noon. Subsolar longitude = -15 (UT - 12) - EoT. A sidereal time route (RA - GMST) gives the same longitude and is kept as a cross check. The Almanac quotes about 0.01 degree accuracy for 1950 to 2050. The terminator is geometric, with no refraction or twilight, so it is a slightly generous night. Run: subsolar 6.11 S, 117.77 W, EoT +12.56 minutes, which fits early October.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: subsolar -6.11 -117.77 EoT 12.56 min",
+        "repo:space-weather-nowcast/sun/helio.js: const lon = wrap180(-15 * (utH - 12) - eotDeg);"
+      ],
+      "sources": [],
+      "tags": [
+        "astronomy",
+        "subsolar point",
+        "algorithms"
+      ]
+    },
+    {
+      "id": "sw-29",
+      "type": "define",
+      "level": 2,
+      "q": "How are GOES X-ray flare classes defined, and how does the code compute them?",
+      "easy": "Flares are graded by peak X-ray brightness in the 0.1 to 0.8 nm band. Each letter is a factor of ten: A, B, C, M, X from 1e-8 to 1e-4 watts per square metre. The number is the multiple of the letter's base, so 3.2e-5 is M3.2.",
+      "deep": "flareClass(flux): level by decade (A below 1e-7, B below 1e-6, C below 1e-5, M below 1e-4, otherwise X), multiplier = floor(flux / base x 10 + 1e-6) / 10, truncated rather than rounded so 9.99e-6 is C9.9 and never C10.0, and X continues past 10 (1.23e-3 is X12.3). A decade edge belongs to the upper class (1e-6 is C1.0). The handler groups rows by time, keeping the 0.1 to 0.8 nm 'long' channel with its satellite number and the 0.05 to 0.4 nm 'short' channel with NOAA's electron contamination flag (read under the key spelled electron_contaminaton in the file). Flares drive the R (radio blackout) scale, separate from G. Run: C1.1 at 19:35 from GOES-18, and an M6.7 earlier at 15:48 UTC.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: GOES class now C1.1 1.138e-6 at 2026-10-08 19:35Z sat 18 | max M6.7 at 2026-10-08 15:48Z",
+        "repo:space-weather-nowcast/sun/app.js: else if (r.energy === '0.05-0.4nm') { o.short = f; o.ec = r.electron_contaminaton === true; }"
+      ],
+      "sources": [],
+      "tags": [
+        "goes",
+        "flares",
+        "define"
+      ]
+    },
+    {
+      "id": "sw-30",
+      "type": "number",
+      "level": 1,
+      "q": "What did the measured run on October 8, 2026 show for the solar wind?",
+      "easy": "At 19:38 UTC, the active spacecraft (labelled SOLAR1) was 1.58 million km sunward. The newest joined sample showed 360 km/s and 5.7 protons per cubic centimetre, giving a pressure of 1.24 nPa, a magnetopause 10.9 Earth radii out, and an arrival 73.5 minutes after measurement.",
+      "deep": "From runs/2026-10-08-sun.txt: latest joined minute 19:32 UTC, v 360.5 km/s, n 5.71 cm^-3, Bz -1.7 nT, By 4.01 nT, total field 4.47 nT; Pd 1.241 nPa; Newell 4,214; Shue r0 10.93 Re, alpha 0.595; delay 73.5 min from x_GSE 1,581,830 km and Vx -358.6 km/s. This is a node run of the same helio.js code over all nine feeds at one instant, so it is one snapshot of a quiet day, not a statistic. Caveats that travel with the delay: ballistic propagation, tilted fronts, a spacecraft off the Sun Earth line and the bow shock a few minutes upstream make 73.5 minutes uncertain by several minutes.",
+      "say": "On the run, the wind was at 360 km/s with 5.7 protons per cubic centimetre. That gives 1.24 nanopascals of pressure and a magnetopause about 10.9 Earth radii out. The measurement would reach Earth 73.5 minutes later, give or take several minutes because the propagation is ballistic.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: latest joined 2026-10-08 19:32Z v 360.5 n 5.71 Bz -1.7 By 4.01 Bt 4.47",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: Pd 1.241 nPa | Newell 4214 | Shue r0 10.93 Re alpha 0.595 | delay 73.5 min (x 1581830 vx -358.6 )",
+        "portfolio: A node run of the same code at 19:38 UTC on October 8, 2026 found the spacecraft labelled SOLAR1 active at 1.58 million km sunward."
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "solar wind"
+      ]
+    },
+    {
+      "id": "sw-31",
+      "type": "number",
+      "level": 2,
+      "q": "How complete was the solar wind data on the run?",
+      "easy": "Plasma covered 1,265 of the previous 1,435 minutes; the magnetic field covered 1,427 of 1,437. Only the 1,265 minutes with both could feed pressure, coupling and the magnetopause. Each stream had one gap longer than 5 minutes, and the active spacecraft did not change.",
+      "deep": "Coverage line: plasma 1265 of 1435, field 1427 of 1437, matched 1265, source changes 0 and 0, gaps longer than 5 minutes 1 and 1. Plasma coverage of about 88% against field coverage of about 99% is typical: plasma instruments have more dropouts and quality rejections than magnetometers. Every matched plasma minute also had field, so matched equals the plasma count. The join's outer design means the field chart kept its extra 162 minutes. Note expected minutes differ (1,435 vs 1,437) because each stream's expected count runs from its own first to last sample.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: coverage: plasma 1265 of 1435 | field 1427 of 1437 | matched 1265 | changes 0 0 | gaps>5min 1 1",
+        "portfolio: Plasma covered 1,265 of the previous 1,435 minutes."
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "coverage",
+        "data quality"
+      ]
+    },
+    {
+      "id": "sw-32",
+      "type": "number",
+      "level": 2,
+      "q": "What did the Kp feeds say on the run?",
+      "easy": "The 1 minute estimate was Kp 2, quiet. NOAA's value for the current 3 hour window was 1.67 (estimated), against a running max of 2 and mean of 1.05 from the 1 minute estimate. NOAA's forecast peaked at Kp 5.67, labelled G2, for 06:00 UTC on October 9.",
+      "deep": "Log: Kp est now 2 at 19:35, G0 under both rules; current window 18:00 UTC, kp 1.67 estimated, 96 one minute values so far with max 2 and mean 1.05; peak forecast ahead 06:00 UTC October 9, 5.67 predicted, NOAA label G2, G2 under the rounding rule and G1 under the strict rule; last final window Kp 1.33 from 7 stations. The 5.67 is NOAA's forecast, not the page's, and the page makes no claim about whether that storm arrived. That pair (G2 vs G1) is the exact case that exposed the spec error about how fractional Kp maps to G.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: Kp est now 2 at 2026-10-08 19:35Z G strict 0 G noaa 0",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: forecast current window 2026-10-08 18:00Z kp 1.67 (estimated) | 1 min so far: max 2 mean 1.05 n 96",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: peak forecast ahead 2026-10-09 06:00Z 5.67 predicted NOAA label G2 G noaa 2 G strict 1"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "kp"
+      ]
+    },
+    {
+      "id": "sw-33",
+      "type": "number",
+      "level": 2,
+      "q": "What did the X-ray and aurora feeds show on the run?",
+      "easy": "The Sun was at C1.1 at 19:35 UTC, and the 6 hour GOES record held an M6.7 flare at 15:48 UTC. OVATION gave Syracuse 0% chance of aurora overhead, and the nearest 10% probability along Syracuse's longitude was at 64 N.",
+      "deep": "GOES: C1.1 (1.138e-6 W/m^2) from GOES-18, max M6.7 at 15:48 UTC in the 6 hour file. OVATION: observation 19:29, forecast 20:45 UTC; Syracuse 0%; southernmost 10% cell at 76.13 W was 64 N; grid max 26%; Fairbanks 1% with no 10% cell on its longitude; Reykjavik 13% (boundary 63 N); Tromso 24% (63 N); Edinburgh 0% (64 N). An M class flare does not by itself mean aurora: geomagnetic storms come from coronal mass ejections or fast streams reaching Earth days later, and whether a CME was launched is not in these feeds.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: GOES class now C1.1 1.138e-6 at 2026-10-08 19:35Z sat 18 | max M6.7 at 2026-10-08 15:48Z",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: OVATION obs 2026-10-08 19:29Z fc 2026-10-08 20:45Z | Syracuse p 0 | 10% boundary at 76.13 W 64 | max 26",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt:    Fairbanks 1 NaN"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "flares",
+        "aurora"
+      ]
+    },
+    {
+      "id": "sw-34",
+      "type": "why",
+      "level": 1,
+      "q": "Your spec was wrong about the G scale. What happened?",
+      "easy": "The spec said Kp 4.67 counts as below G1, a strict threshold at 5. NOAA's own forecast file labels 4.67 as G1 and 5.67 as G2, because NOAA rounds Kp to the nearest whole number first. The page now follows NOAA, keeps both rules, and tests both.",
+      "deep": "The discovery came from reading the data rather than the documentation: the forecast file carries a noaa_scale label beside each Kp, and on October 8 the file labelled 5.67 as G2, where the strict rule says G1. The correct response was to treat NOAA's labels as ground truth for what NOAA publishes, capture the (kp, label) pairs as a fixture, and require the implementation to reproduce them, while keeping the strict rule because some users read the scale that way and the method section explains the choice. The same test also asserts 8.67 maps to G5 under rounding, which NOAA's own scale table contradicts (it lists 9- under G4), so the lesson is only half applied: validate against the source's labels everywhere you assert, not just where you captured them.",
+      "say": "My spec said 4.67 is below G1. NOAA's own forecast file labels 4.67 as G1 and 5.67 as G2, because NOAA rounds first. So I followed the file, kept both rules and tested both. Looking again, my test extends the rounding rule to 8.67 without a label to check it, and NOAA's table disagrees there.",
+      "evidence": [
+        "portfolio: My spec was wrong about the G scale. I had specified that Kp 4.67 counts as below G1. NOAA's own forecast file labels 4.67 as G1 and 5.67 as G2, because NOAA rounds Kp to the nearest whole number before mapping."
+      ],
+      "sources": [
+        "https://www.spaceweather.gov/noaa-scales-explanation"
+      ],
+      "tags": [
+        "g scale",
+        "story",
+        "lesson"
+      ]
+    },
+    {
+      "id": "sw-35",
+      "type": "why",
+      "level": 2,
+      "q": "What was the hidden tab bug, and what is the fix?",
+      "easy": "Polling paused while the tab was hidden to save bandwidth. A page opened in a background tab therefore had no data until someone looked at it. Now the first poll always runs, and only later polls wait for the tab to be visible.",
+      "deep": "poll() in assets/ui.js tracks started and returns early only when document.hidden && started, so the initial fetch for all nine feeds runs immediately; a visibilitychange listener fires a poll as soon as the tab is shown. Painting is separate: one requestAnimationFrame scheduler with per job minimum intervals, stopped while paused, while handlers keep ingesting. Two things make this bug easy to miss: developers test in a focused tab, and browsers throttle timers in background tabs anyway, so the symptom looks like a slow network. The fix keeps the bandwidth saving for long idle tabs while removing the empty first impression.",
+      "evidence": [
+        "portfolio: Polling pauses while a tab is hidden to save bandwidth, which meant a page opened in a background tab showed nothing until it was viewed. The first poll now always runs, and later ones wait for the tab to be visible.",
+        "repo:space-weather-nowcast/assets/ui.js: // Poll a JSON endpoint on a fixed cadence. The first poll always runs, so a page"
+      ],
+      "sources": [],
+      "tags": [
+        "browser",
+        "bug",
+        "polling"
+      ]
+    },
+    {
+      "id": "sw-36",
+      "type": "how",
+      "level": 2,
+      "q": "What does the test suite check, and against what references?",
+      "easy": "22 tests on node's built in runner, nothing to install: 20 for the space weather module and 2 for shared formatting. Physics formulas are checked against closed forms and hand computed values, the G scale against NOAA's own labels, and the Sun's position against known equinox and solstice dates.",
+      "deep": "tests/sun.test.mjs: parseUTC forms; dynamic pressure 1.338 nPa at n 5, v 400; Shue r0 about 10.25 Re at Pd 2, Bz 0 plus curve identities; Newell due south, due north zero, By symmetry, clock angle convention; ballistic delay 3,750 s with fallbacks; flare classes including edges and truncation; G scale strict and NOAA rules; subsolar latitude at the 2026 March equinox (within 0.05 degree of 0) and June solstice (within 0.02 of 23.44) and the December mirror; equation of time extremes (+16.4 minutes early November, -14.2 mid February, within 0.5) and agreement with the sidereal route within 0.05 degree; join with active filtering, gaps and a source change; derive and arrivingNow; OVATION lookups; Kp windows, stats and chart rows; rolling mean; freshness; Sun distance near perihelion and aphelion; stream progress; Shue point at a given rho. CI runs node 22 and 24 with no install step.",
+      "evidence": [
+        "repo:space-weather-nowcast/README.md: 22 tests on node 22 or newer, nothing to install; two of them cover the shared duration formatting."
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "ci",
+        "node:test"
+      ]
+    },
+    {
+      "id": "sw-37",
+      "type": "how",
+      "level": 2,
+      "q": "How is the code organised, and why do handlers never paint?",
+      "easy": "All the physics and data logic lives in sun/helio.js with no page code, so tests import it directly. sun/app.js only fetches, stores raw data in one state object, and marks a single paint job dirty. The paint job derives every number from the state.",
+      "deep": "Nine polls write S.raw, S.k1m, S.win, S.xray, S.ov and so on through a handlers table; a handler that throws marks its feed 'unexpected shape' instead of breaking the page. recomputeSW reruns the join and derive() whenever plasma, field or ephemeris arrive, because any of the three changes the joined rows. One mainJob paints KPIs, footers, charts and drawings; the aurora map has its own job. Separating ingestion from painting means nine feeds arriving at different times cause one repaint per frame at most, and painting can pause without losing data. The location choice is kept in localStorage inside a try, since storage can be blocked. The map uses d3-geo with an orthographic north polar view centred on the selected place's meridian, and topojson-client for Natural Earth land, pinned on jsDelivr; every number is computed even if the CDN fails.",
+      "evidence": [
+        "repo:space-weather-nowcast/sun/app.js: // Data handlers only mutate state and invalidate; nothing paints in a handler."
+      ],
+      "sources": [],
+      "tags": [
+        "architecture",
+        "frontend"
+      ]
+    },
+    {
+      "id": "sw-38",
+      "type": "case",
+      "level": 2,
+      "q": "Where does the portfolio write up differ from what the code and logs show?",
+      "easy": "Four places. It says 20 tests; the README says 22. It pairs 360 km/s with the 73.5 minute arrival, but the delay used the sunward velocity component, 358.6 km/s. '1.58 million km away' is the sunward x distance, not the full distance. And 'nine feeds joined on time' really means plasma and field are joined on the minute while the other seven are aligned by nearest hour, time window or file stamp.",
+      "deep": "(1) tests/sun.test.mjs has 20 tests and tests/util.test.mjs 2; quote '22 tests, 20 on the physics module'. (2) ballisticDelay divides x_GSE by |Vx|; the log shows vx -358.6 against bulk speed 360.5, and 1,581,830 / 358.6 is 73.5 minutes while dividing by 360.5 would give about 73.1. The write up says it divides 'by the measured solar wind velocity', which is right if velocity means the x component. (3) x_gse is the sunward coordinate; a halo orbit adds y and z offsets, so the straight line distance is larger. (4) Only joinSolarWind is a time join; ephemeris is nearest hour, Kp is matched by 3 hour window, OVATION and scales are single snapshots. None changes a conclusion, but each is the precise version to say when an engineer has the repo open.",
+      "say": "A few phrases in my write up are looser than the code. The arrival time uses the sunward velocity component, 358.6 km/s, not the 360 bulk speed I quote beside it. The 1.58 million km is the sunward coordinate. And the repo has 22 tests, two of them for shared formatting.",
+      "evidence": [
+        "portfolio: 9 NOAA feeds joined on time  |  run Oct 8 2026, 19:38 UTC: solar wind at 360 km/s, reaching Earth 73.5 min after it was measured 1.58 million km away  |  magnetopause at 10.9 Earth radii  |  M6.7 flare in the X-ray record  |  20 tests",
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: delay 73.5 min (x 1581830 vx -358.6 )",
+        "repo:space-weather-nowcast/README.md: 22 tests on node 22 or newer, nothing to install; two of them cover the shared duration formatting."
+      ],
+      "sources": [],
+      "tags": [
+        "consistency",
+        "write up",
+        "honesty"
+      ]
+    },
+    {
+      "id": "sw-39",
+      "type": "case",
+      "level": 2,
+      "q": "What are the honest limitations?",
+      "easy": "Ballistic propagation is only approximate. The Shue model is a symmetric empirical fit. NOAA's past forecasts cannot be scored from these feeds. OVATION is read at the nearest one degree cell, and clouds and light pollution are ignored.",
+      "deep": "(1) Arrival uncertain by several minutes (tilted fronts, off line spacecraft, bow shock upstream, evolution in transit). (2) Shue: no dipole tilt, no asymmetry, uses the L1 sample about an hour before it acts. (3) No forecast archive, so no skill score. (4) OVATION nearest cell; geographic location only, no geomagnetic latitude computed; no cloud, moon or city light. (5) Proton only dynamic pressure (alpha columns empty). (6) The G scale rounding rule is unverified above 5.67 and conflicts with NOAA's table at 9-. (7) No persistence: revision counts and history reset on reload, and the 1 minute Kp map keeps one day. (8) One snapshot run on a quiet day; no storm time behaviour has been logged.",
+      "evidence": [
+        "portfolio: Ballistic propagation is approximate. Solar wind fronts are tilted, so the real arrival can differ by several minutes."
+      ],
+      "sources": [],
+      "tags": [
+        "limitations"
+      ]
+    },
+    {
+      "id": "sw-40",
+      "type": "case",
+      "level": 3,
+      "q": "What would it take to feed this into the Kp prediction model in production?",
+      "easy": "Store the live inputs over time, propagate and resample them the way the training archive was built, check they match the training distribution, and find a source for the model's strongest inputs, which these feeds do not carry.",
+      "deep": "Steps: (1) persist every fetch with its fetch time (append only), keeping revisions, so features can be rebuilt as of any moment and training uses the same as of view; (2) reproduce OMNI style processing: propagate to the bow shock nose, average to hourly, apply the same gap rules, so online features match offline ones; (3) monitor drift between live and archive distributions (speed, density, Bz quantiles); (4) handle spacecraft switches, which shift calibration; (5) solve the missing predictors: the Kp model's strongest inputs were ap and the auroral electrojet indices, which are derived from ground magnetometers and are effectively current state, so either ingest a real time source or retrain on solar wind only, accepting lower skill; (6) define fallbacks when plasma drops out, since the run showed about 12% of minutes missing. Without step 2 the model would see a different input distribution than it was trained on.",
+      "evidence": [
+        "repo:space-weather-nowcast/index.html: That model's strongest predictors were ap and the auroral electrojet indices, which are not in these feeds, so a production version would need a source for them or a retrain on solar wind inputs alone."
+      ],
+      "sources": [],
+      "tags": [
+        "production",
+        "training serving skew",
+        "mlops"
+      ]
+    },
+    {
+      "id": "sw-41",
+      "type": "case",
+      "level": 3,
+      "q": "What breaks at 10x and 100x scale?",
+      "easy": "One browser tab polling nine files is fine. If thousands of people opened it, NOAA would see thousands of identical requests a minute; at that point the right design is one server that polls once, stores history, and serves everyone.",
+      "deep": "10x in data (longer history, more spacecraft, higher cadence): the in memory arrays and O(n) joins still work, but repainting full 24 hour charts every minute gets heavy; incremental appends and downsampling help. 100x in users: every client polling services.swpc.noaa.gov is wasteful and impolite to a public service; a backend should poll once, normalise and version the data, and push updates to clients over server sent events or a CDN cached JSON. 100x in history: a time series store keyed by (feed, minute, fetch time) to keep revisions, plus precomputed rollups. Forecast scoring becomes possible once issues are archived. Alerting (r0 below 6.6 Re, G3 forecast for Syracuse) needs a server anyway, because a closed tab cannot alert.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "scale",
+        "system design"
+      ]
+    },
+    {
+      "id": "sw-42",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next?",
+      "easy": "Archive NOAA's forecasts so they can be scored. Add geomagnetic latitude for locations. Improve propagation for tilted fronts. And log a real storm day.",
+      "deep": "(1) A small backend that stores every forecast issue and every 1 minute Kp version, then scores the forecast against later estimated and observed Kp with persistence as the baseline. (2) Compute geomagnetic latitude (AACGM or IGRF dipole) for each place and show the NOAA visibility lines against it. (3) Replace the G rules with a thirds notation lookup validated against NOAA's table and more captured labels. (4) Propagation along an estimated front normal, compared with ballistic arrival using ground magnetometer sudden commencements as truth. (5) Include alpha particles when the columns are populated. (6) Run the page through a geomagnetic storm and log how coverage, revisions and freshness behave under stress, since every logged number so far comes from a quiet day.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "next steps"
+      ]
+    },
+    {
+      "id": "sw-43",
+      "type": "pushback",
+      "level": 2,
+      "q": "Ballistic propagation is crude. Why not a proper model?",
+      "easy": "For an hour ahead of a single point at Earth, ballistic timing is the standard first order method and its error, several minutes, is stated on the page. Better methods need front orientation estimates, and a full heliospheric model answers a different question, days ahead from the Sun.",
+      "deep": "Concede: tilted fronts and spacecraft offsets cause errors of several minutes, and OMNI style processing does better. Defend: the page uses the real ephemeris distance and the measured x velocity per sample, not constants; it marks the sample arriving now with a 5 minute tolerance; and it says plainly that the delay is to Earth's centre and the bow shock is met earlier. A model like WSA-Enlil propagates from the Sun over days and is not the tool for the last 1.5 million km. Next step would be front normal propagation, validated against sudden commencements.",
+      "say": "It is first order, and the page says arrival can be off by several minutes. It does use the real spacecraft distance and each minute's own velocity, which already beats a constant one hour shift. If I improved it, I'd estimate the front orientation and check arrivals against sudden commencements on ground magnetometers.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "propagation"
+      ]
+    },
+    {
+      "id": "sw-44",
+      "type": "pushback",
+      "level": 2,
+      "q": "Shue 1998 is an old empirical fit. Why use it?",
+      "easy": "It is still the most widely used simple magnetopause model, it takes exactly the two inputs available live (pressure and Bz), and it has a closed form that runs instantly in a browser. Its limits, symmetry and no dipole tilt, are written on the page.",
+      "deep": "Concede: newer models add dipole tilt, asymmetry and cusp indentations, and an MHD simulation would be more faithful. Defend: the page's job is a live standoff estimate against the 6.6 Re geosynchronous line, where Shue's r0 is a standard reference; the formula is tested against its closed form and its identities; and the Pd^(-1/6.6) scaling agrees with pressure balance theory. A newer model would change r0 by fractions of an Earth radius on a quiet day like the logged one (10.9 Re), which matters less than getting the inputs and timing right.",
+      "say": "Shue is the standard simple model, and it needs only pressure and Bz, which are exactly what I have live. It's closed form, so it runs in a browser and is easy to test. The page says it ignores dipole tilt. On a quiet day with the edge near 11 Earth radii, the model choice matters less than the inputs and timing.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "shue"
+      ]
+    },
+    {
+      "id": "sw-45",
+      "type": "pushback",
+      "level": 2,
+      "q": "NOAA already publishes all of this. What did you add?",
+      "easy": "NOAA publishes the raw feeds and its own products; the joining, propagation, derived physics and freshness checks are this page's work. Pressure, the magnetopause standoff, coupling and the per sample arrival time are computed here, and each feed's age is judged against its own threshold.",
+      "deep": "Concede: Kp, the forecast, OVATION, X-ray flux and the scales are NOAA's numbers, displayed rather than produced. Defend: the integration layer is the point, because it is what a model needs in production: active spacecraft filtering, minute joins with gap and source change reporting, ephemeris based delay per sample, provisional value revision counting, and sample age monitoring. Building it surfaced two real findings: the G scale reading NOAA's labels imply, and NOAA rewriting recent 1 minute Kp values.",
+      "say": "NOAA gives me the raw feeds and some products. What I built is the integration: picking the active spacecraft, joining plasma and field by minute, propagating each sample with the real spacecraft distance, and checking every feed's freshness. That's the layer a model would need, and building it is how I found NOAA rewriting recent Kp minutes.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "value"
+      ]
+    },
+    {
+      "id": "sw-46",
+      "type": "pushback",
+      "level": 2,
+      "q": "Rounding Kp to match one file is overfitting to a single snapshot.",
+      "easy": "Partly fair. The rule was fitted to seven label pairs from one capture, all between 3.67 and 5.67. It explains every label seen, and NOAA's scale table supports it at 5-, but the table contradicts it at 9-, so it is not a validated general rule.",
+      "deep": "Concede: one capture, a narrow range, and an untested extrapolation that the test then asserts (8.67 as G5). Defend: the choice was evidence based rather than guessed, both readings are implemented and tested, and the method text explains the difference so a reader can see which one is in use. The right fix is a lookup on the thirds notation checked against NOAA's scale table and more captured labels across storm levels.",
+      "say": "Partly fair. I fitted it to seven label pairs from one capture, and they only go up to 5.67. It explains everything I saw, but NOAA's table puts 9 minus in G4 and my rule says G5. The fix is a lookup on the thirds notation, checked against the table.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "g scale"
+      ]
+    },
+    {
+      "id": "sw-47",
+      "type": "pushback",
+      "level": 2,
+      "q": "One run on a quiet day proves nothing about a nowcast.",
+      "easy": "Agreed that it is one snapshot, and the write up presents it as one. It shows the pipeline producing correct, internally consistent numbers from real feeds; behaviour during a storm, when the page matters most, has not been logged.",
+      "deep": "Concede: Kp 2, r0 near 11 Re, no source switch, no storm. Defend: every derived value in the log can be recomputed by hand from the logged inputs (1.6726e-6 x 5.71 x 360.5^2 = 1.241 nPa; 1,581,830 / 358.6 s = 73.5 minutes), the formulas are tested against closed forms, and the join and revision logic are tested on synthetic gaps and source changes. The missing evidence is a storm day, with high speed, strongly southward Bz, possible spacecraft switches and rapid Kp revisions, and that is on the next list.",
+      "say": "Yes, it's one snapshot on a quiet day, and I present it that way. What it shows is the pipeline giving consistent numbers I can recompute by hand from the logged inputs. What it doesn't show is storm behaviour, which is when a nowcast matters, so logging a storm day is next.",
+      "evidence": [
+        "repo:space-weather-nowcast/runs/2026-10-08-sun.txt: run at 2026-10-08T19:38:30.561Z"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "evidence"
+      ]
+    },
+    {
+      "id": "sw-48",
+      "type": "pushback",
+      "level": 3,
+      "q": "Why not just hit NOAA every minute from a server instead of from each browser?",
+      "easy": "For a portfolio dashboard with a handful of viewers, browser polling needs no infrastructure and the feeds are public, cached and small. With real traffic it would be the wrong design, and a single poller with fan out would replace it.",
+      "deep": "Concede: per client polling multiplies load on a public service and loses history on reload. Defend: cadences are matched to each product's update rate (hourly ephemeris every 30 minutes, forecast every 30, OVATION every 5), polling stops for hidden tabs after the first fetch, failures back off exponentially, and fetches time out at 30 s. The pure helio.js module would move to a server unchanged, which is the payoff of keeping it free of DOM code.",
+      "say": "For a few viewers it's the simplest thing that works, and the cadences match how often each product changes. With real traffic I'd poll once on a server, store every version, and push to clients. The physics module has no page code, so it would move to the server unchanged.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "architecture"
+      ]
+    },
+    {
+      "id": "sw-49",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager in under a minute.",
+      "easy": "A live space weather page that integrates nine NOAA feeds into the inputs a forecasting model would need.",
+      "deep": "Problem (live inputs for a model trained on clean history), what it does, one number, one finding.",
+      "say": "I had built a Kp forecasting model on clean archive data, and I wanted to see what feeding it live would take. So I built a page that joins nine NOAA feeds, propagates solar wind from a spacecraft 1.58 million km out to Earth, and computes the physics that drives storms. On the measured run the wind would reach Earth in 73.5 minutes. Building it showed me the model's best predictors aren't in the live feeds at all.",
+      "evidence": [
+        "portfolio: found the spacecraft labelled SOLAR1 active at 1.58 million km sunward"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring manager"
+      ]
+    },
+    {
+      "id": "sw-50",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain the data integration to a staff engineer.",
+      "easy": "Active row filtering, minute flooring, outer join, ephemeris lookup by binary search, latest value wins for revised minutes, and per feed sample age monitoring.",
+      "deep": "Cover join keys, why outer, propagation per sample, revision handling, and the two clock freshness model.",
+      "say": "Plasma and field come in separate files that list every spacecraft, so I keep only active rows, floor time tags to the minute and outer join them, which keeps field data when plasma drops out. Each sample gets the nearest hourly ephemeris of its own spacecraft and a delay of x over Vx. Kp minutes that NOAA rewrites are overwritten and counted. Freshness is judged on the newest sample inside each file, not on whether the fetch worked.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff engineer"
+      ]
+    },
+    {
+      "id": "sw-51",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain to a product manager why the page shows data freshness so prominently.",
+      "easy": "A live dashboard that silently shows old data is worse than one that shows nothing, so each feed's sample age is a first class display.",
+      "deep": "Frame it as trust: a download can succeed while the data inside is hours old.",
+      "say": "A feed can download fine and still contain hour old data, and a space weather page that looks live but isn't can mislead someone checking for aurora tonight. So every feed shows two things: did the last fetch work, and how old is the newest measurement inside it. Each has its own threshold, because the ephemeris updates hourly while the wind updates every minute.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "product"
+      ]
+    },
+    {
+      "id": "sw-52",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain to a recruiter what this project shows about you.",
+      "easy": "It shows multi source data integration, physics models implemented and tested from the papers, and honesty about what the data can and cannot claim.",
+      "deep": "Plain words: joins live data, implements science, checks its work, admits limits.",
+      "say": "It shows I can take several messy live data sources and turn them into numbers people can trust. I implemented published physics models, tested them against known answers, and found a place where my own spec disagreed with how NOAA labels storms. I also say what the page can't do, like scoring NOAA's forecasts, because the data to do that isn't there.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "Planetary K-index (NOAA SWPC)",
+      "url": "https://www.spaceweather.gov/products/planetary-k-index",
+      "why": "What Kp measures, the 3 hour windows, the observatories behind it, and the Kp to G mapping."
+    },
+    {
+      "title": "NOAA Space Weather Scales explanation",
+      "url": "https://www.spaceweather.gov/noaa-scales-explanation",
+      "why": "G1 to G5 Kp thresholds (G4 includes 9-) and the geomagnetic latitudes where aurora is seen at each level."
+    },
+    {
+      "title": "Aurora 30 minute forecast (NOAA SWPC)",
+      "url": "https://www.spaceweather.gov/products/aurora-30-minute-forecast",
+      "why": "What OVATION is, its 30 to 90 minute lead time set by L1 travel time, and how probability is defined."
+    },
+    {
+      "title": "Magnetopause (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Magnetopause",
+      "why": "Typical standoff distances and the pressure balance argument behind the sixth root scaling that Shue's fit refines."
+    },
+    {
+      "title": "Geomagnetic pole (Wikipedia)",
+      "url": "https://en.wikipedia.org/wiki/Geomagnetic_pole",
+      "why": "Coordinates of the north geomagnetic pole used to estimate Syracuse's geomagnetic latitude."
+    }
+  ]
+}
