@@ -1,0 +1,2252 @@
+
+
+==================== PROJECT 0: Wikipedia Edit Stream: Streaming Algorithms with Their Error Measured Live
+META: Streaming Algorithms / Live Data / Oct 2026
+BADGE: HyperLogLog 986.9 vs exact 983 (+0.4%) / 0 Space-Saving violations / live SSE, about 30 events/s
+TAGS: JavaScript, Server Sent Events, HyperLogLog, Count-Min Sketch, Space-Saving, MurmurHash3, Stream Processing, Canvas, node:test
+REPO: "https://github.com/TanayPratapSingh/wikipedia-edit-stream"
+9,909 real edits in a 297 second run (Oct 8 2026)  |  HyperLogLog 986.9 vs 983 exact distinct editors (+0.4%, one sigma bound 1.6%)  |  Space-Saving: 0 bound violations  |  Count-Min: 12 of 12 within its error bound  |  24 tests
+The edit river on October 8, 2026. Each dot is one real edit in a row for its wiki, blue for people and orange for bots, drifting left as it ages; rings are new pages.
+
+
+## Why This Matters
+
+Streaming sketches are usually taught with their error bounds and then trusted. HyperLogLog promises a distinct count within about 1.6% from 4 KB of state. Count-Min promises it never undercounts, and rarely overcounts by more than a small, known share of all events (εN, with probability 1 - δ). Space-Saving promises that every page popular enough to matter (above N/k edits, for k counters) is in its table, with a known error on every count. I wanted to watch those promises hold on real traffic instead of taking them on faith, so this dashboard runs each sketch beside an exact counter on the same events and plots the difference as it happens.
+
+
+
+## The Data
+
+Wikimedia publishes every change to every one of its wikis as a server sent events stream. The browser connects to it directly, with no server of mine in between. In my runs it carried 26 to 36 events a second across about 100 wikis, roughly a quarter of them from bots. If the connection drops, the browser reconnects with Last-Event-ID, which carries the stream's Kafka offsets, so it resumes where it stopped; events are deduplicated on their id in case the resume overlaps.
+
+
+
+## The Sketches
+
+HyperLogLog hashes each editor name with MurmurHash3, checked against published test vectors and SMHasher's verification value, into 4,096 one byte registers. While there are fewer than about 10,000 distinct editors it estimates from the share of empty registers (linear counting), and above that it switches to the harmonic mean estimator from the original paper. Count-Min counts events per wiki in 4 rows of 1,024 columns with the standard update, so the textbook bound applies as stated. Space-Saving tracks the most edited pages with 200 counters, each carrying its own error term, so every row shows a guaranteed lower bound and an upper bound, with the exact count drawn as a tick between them.
+
+
+
+## Measured on Real Data
+
+A node script ran the same sketch code against the live stream for 297 seconds on October 8, 2026: 9,909 events at 33.3 a second. HyperLogLog estimated 986.9 distinct editors against an exact 983, an error of +0.4% against a one sigma bound of 1.6%. Two shorter runs gave -0.3% and -1.2%. Space-Saving showed no violations of its bounds, and Count-Min kept all 12 of the busiest wikis within εN with no undercounts. The run logs are in the repository next to the code.
+
+
+
+## Engineering Decisions
+
+Binning by event time. Binning throughput by arrival flagged delivery clumps as bursts: 3 and 2 false bursts in two of the runs, against none when the same rule ran on event time bins. The chart bins by event time and closes a second 2 seconds after the newest event passes it, and the footer still reports what the arrival rule would have flagged.
+
+A rate bug in the feed monitor. The status pill read 23 messages a second while a separate counter saw 33, because events arriving less than a millisecond apart carried almost no weight in the smoothed rate. Pooling arrivals into 50 ms windows fixed it, in the shared code all four dashboards use.
+
+Privacy. Editor names and IP addresses are hashed for counting and never displayed, and titles of user pages are hidden.
+
+
+
+## Honest Limitations
+
+
+  
+- Count-Min barely collides here. About 100 wikis in 1,024 columns rarely share a cell, so the bound is shown but hardly stressed. The card says so beside the number.
+  
+- A short visit exercises only the small range path of HyperLogLog. It switches to the raw estimator at about 10,240 distinct editors, which takes a long session to reach.
+  
+- Exact counting is affordable at this rate. That is what makes the comparison possible. The sketches earn their keep at volumes where it is not.
+  
+- The resume path is lightly tested. Wikimedia dropped the stream once during browser testing, and the page reconnected with Last-Event-ID without a duplicate, but no logged run has exercised it.
+
+
+  
+
+## What This Project Demonstrates
+
+  Three classic streaming algorithms implemented from their papers, tested against their own guarantees, and run on a real public stream in the browser, with their error measured continuously against ground truth.
+
+
+
+==================== PROJECT 1: Order Book Microstructure: A Checksum Verified Live Book with Order Flow Analytics
+META: Market Microstructure / Live Data / Oct 2026
+BADGE: 46,892 of 46,892 checksums verified / OFI R&sup2; 0.54 at 1 s / live WebSocket, depth 100
+TAGS: JavaScript, WebSocket, Order Book, CRC32, Order Flow Imbalance, OLS Regression, Realized Volatility, Canvas Heatmap, node:test
+REPO: "https://github.com/TanayPratapSingh/orderbook-microstructure"
+330 second run on BTC/USD (Oct 8 2026): 46,892 of 46,892 book checksums verified, 0 resyncs  |  OFI regression at 1 s: β = 1.10 USD per BTC, R&sup2; = 0.54, n = 300  |  lag p50 89 ms  |  16 tests
+The BTC/USD book on October 8, 2026. Darker blue means more bitcoin waiting at that price; the best bid and ask run across it and every trade is a bubble sized by amount.
+
+
+## Why This Matters
+
+Every trading system starts from a local copy of the order book, built from a snapshot and a stream of deltas, and the classic failure is silent drift. Miss or misapply one update and every number computed from the book is quietly wrong. Kraken publishes a checksum (CRC32) of the top of its book with every update, so drift does not have to be silent. This dashboard rebuilds the book in the browser, verifies it against that checksum on every message, resyncs automatically on a mismatch, and only then computes microstructure statistics from it.
+
+
+
+## The Book
+
+The page subscribes to Kraken's public WebSocket at a depth of 100 levels and keeps each side as a sorted array with binary search updates. After each update it truncates both sides back to the subscribed depth, because the exchange stops sending changes for levels that fall out of range. Price and size precision are read from the exchange's instrument channel rather than hardcoded. That matters because the checksum is computed over formatted strings: printing 0.0157 instead of 0.01570000 changes the string and fails every check.
+
+
+
+## What It Computes
+
+Order flow imbalance measures whether buyers or sellers are pressing harder at the best prices. Following Cont, Kukanov and Stoikov (2014), each change at the top of the book adds or subtracts size, summed per second, and the page fits a straight line between that and the price change over the same second (ordinary least squares), live, with the slope's standard error. Microprice weights the midpoint by how much size waits on each side. Realized volatility is computed from mid returns at both 1 second and 10 second sampling over the same five minutes, annualized. A liquidity heatmap shows resting size by price over the last four minutes with every trade drawn over it, painted from raw pixel buffers so it keeps up with the feed.
+
+
+
+## Measured on Real Data
+
+A node script ran the same book code against the live feed for 330 seconds on October 8, 2026: 47,595 messages, of which 46,891 were book updates, about 142 a second. All 46,892 checksums (the snapshot and every update) matched, with no resyncs. The OFI regression over the last 300 seconds gave a slope of 1.10 USD per BTC of net flow, standard error 0.059, with R&sup2; = 0.54. An earlier 330 second run verified 44,534 of 44,534, and a run switching between BTC, ETH and SOL verified 10,214 of 10,214. To exercise the resync path, a deliberately corrupted update failed its checksum and the book recovered from a fresh snapshot; that case is also in the test suite.
+
+
+
+## A Result That Went the Other Way
+
+Microstructure noise usually makes finely sampled realized volatility read higher than coarsely sampled. In both long runs it went the other way: 27.0% annualized at 1 second against 31.9% at 10 seconds in the final run. The 10 second figure rests on only 30 returns, so its sampling error is about 13%, and the page compares the gap with that error instead of always calling it noise. It labels the gap as within sampling error, as noise, or as prices moving in short runs, depending on what the numbers support.
+
+
+
+## Honest Limitations
+
+
+  
+- One venue, 100 levels. The book is Kraken's alone, and liquidity beyond the subscribed depth is invisible.
+  
+- Taker side as reported. Trade direction is the exchange's label, not inferred.
+  
+- Clock offset in latency. Lag is arrival time minus the exchange timestamp, so it includes any offset between the two clocks.
+  
+- Background tabs. Browsers throttle timers in hidden tabs, so heatmap columns sampled while the tab is hidden are sparse.
+  
+- Not investment advice. This is analytics on public market data.
+
+
+  
+
+## What This Project Demonstrates
+
+  Stateful stream processing with an integrity check on every message and automatic recovery, and quantitative finance statistics computed on top of a book that is known to be correct, all in the browser at more than a hundred messages a second.
+
+
+
+==================== PROJECT 2: Live Earthquake Statistics: Gutenberg-Richter, Omori, and a Catalog That Revises Itself
+META: Statistical Seismology / Live Data / Oct 2026
+BADGE: California b = 0.73 [0.66, 0.85] / 7 catalog revisions caught in 45 min / live USGS polling
+TAGS: JavaScript, Statistical Seismology, Maximum Likelihood, Bootstrap, Gutenberg-Richter, Omori-Utsu, Revision Tracking, d3-geo, node:test
+REPO: "https://github.com/TanayPratapSingh/live-earthquake-statistics"
+1,949 events in the week feed (USGS, Oct 8 2026)  |  California b = 0.73 ± 0.03, bootstrap [0.66, 0.85]  |  45 min of polling: 9 new events, 7 revisions, mean magnitude change 0.19  |  27 tests
+The week's earthquakes on October 8, 2026, colored by depth, with rings rippling out from the last hour's events and the latest M 2.5 or larger called out.
+
+
+## Why This Matters
+
+An earthquake catalog keeps changing after the fact. Automatic solutions get reviewed, magnitudes move, events merge under a new id, and a few are deleted. Every statistic computed from a live feed inherits those changes, so this dashboard does two jobs at once: it computes the classic statistics of seismology from the past week of USGS data, and it keeps a log of everything the catalog revised while the page was open.
+
+
+
+## The Statistics
+
+How much rarer is each bigger quake? The Gutenberg-Richter law says the number of earthquakes drops tenfold for every unit of magnitude when the b-value is 1, which is close to what most regions show. The page finds the magnitude above which the catalog is complete (maximum curvature plus the 0.2 correction of Woessner and Wiemer, 2005), estimates b by maximum likelihood (Aki 1965, with Utsu's binning correction), and reports both the Shi and Bolt (1982) uncertainty and a bootstrap interval from 200 resamples that re-estimates the completeness magnitude each time.
+
+How fast do aftershocks fade? For the largest sequence in the window, aftershocks are gathered with Gardner-Knopoff distance and time windows and fitted to the Omori-Utsu law by maximum likelihood (Ogata 1983), with a profile likelihood range on the decay exponent p. With fewer than 30 aftershocks the page draws the sequence without a fit.
+
+Unusual hours. Each hour's count is compared with a Poisson rate from the previous day, and hours with a tail probability below 0.001 are flagged.
+
+
+
+## Measured on Real Data
+
+The week feed fetched at 19:09 UTC on October 8, 2026 held 1,949 events, of which 1,905 were earthquakes; the rest were explosions, quarry blasts and ice quakes, which are left out of every statistic. For California, b came out at 0.73 ± 0.03 with a bootstrap interval of [0.66, 0.85] above a completeness magnitude of 0.9, and Alaska gave 0.72 [0.61, 0.84]. Across all events pooled together, b was 0.34. That number says more about mixing magnitude scales and networks than about the Earth, and the page says so beside it. No sequence that week reached 30 aftershocks, so there was no Omori fit on live data; an injected synthetic sequence of 200 aftershocks with p = 1.1 came back at p = 1.08.
+
+Polling for 45 minutes from 19:19 UTC recorded 9 new events and 7 revisions. Six magnitudes changed, by 0.19 on average, including an Alaska event that moved from 1.6 to 1.9. One event changed its preferred id from the Alaska network's to the USGS national one, and the merge logs that as a revision instead of a deletion plus a new event.
+
+
+
+## A Test That Failed for the Right Reason
+
+My first b-value test failed. Its synthetic catalog had a true b of 1, and the 95% bootstrap interval came out [1.015, 1.070], missing it. A 95% interval should miss about one time in twenty, and across 300 synthetic catalogs this one covered the true value 93.7% of the time. The single catalog test now uses a different seed, and a separate test requires at least 16 of 20 catalogs to cover the true value.
+
+
+
+## Honest Limitations
+
+
+  
+- Mixed magnitude scales. The feed combines ml, md, mb and moment magnitudes from many networks, so pooled b-values are not physical estimates.
+  
+- One week is short. Aftershock fits are only possible after a sizeable mainshock, which most weeks do not have inside a region.
+  
+- Deletions are untested on live data. None occurred in 55 minutes of polling, so the deletion logic has only been exercised on synthetic feeds.
+  
+- Coarse coastlines. The 1:110 million land outlines are rough for Hawaii and Puerto Rico.
+
+
+  
+
+## What This Project Demonstrates
+
+  Statistical seismology implemented from the papers and tested for calibration, together with the data engineering a mutable public feed needs: merging, revision tracking, id changes and deletions.
+
+
+
+==================== PROJECT 3: Space Weather Nowcast: Solar Wind from L1 to the Aurora over Syracuse
+META: Space Physics / Live Data / Oct 2026
+BADGE: 9 NOAA feeds joined on time / L1 to Earth delay from the spacecraft ephemeris / Shue magnetopause, live
+TAGS: JavaScript, Data Integration, Time Series Joins, Space Weather, Shue Model, Newell Coupling, d3-geo, Freshness Monitoring, node:test
+REPO: "https://github.com/TanayPratapSingh/space-weather-nowcast"
+9 NOAA feeds joined on time  |  run Oct 8 2026, 19:38 UTC: solar wind at 360 km/s, reaching Earth 73.5 min after it was measured 1.58 million km away  |  magnetopause at 10.9 Earth radii  |  M6.7 flare in the X-ray record  |  20 tests
+The solar wind on October 8, 2026. Each dot is one minute of wind measured at L1, placed by its own speed on the way to Earth; orange means the field points south, which lets energy in. Not to scale.
+
+
+## Why This Matters
+
+My Kp forecasting project trained an LSTM on hourly solar wind history from NASA's OMNI2 dataset. Clean history is the easy part. A model like that would run in production on the live feeds, which arrive from several spacecraft, at different cadences, with gaps, revisions and switches between instruments. This dashboard builds that input side. It joins NOAA's real time feeds, propagates the measurements to Earth, turns them into the quantities that drive geomagnetic activity, and shows how fresh each input is.
+
+
+
+## From L1 to Earth
+
+Spacecraft near the L1 point measure the solar wind about an hour before it reaches Earth. The page joins the plasma and magnetic field feeds on time for whichever spacecraft NOAA marks active, reads that spacecraft's actual position from the hourly ephemeris, and divides its distance by the measured solar wind velocity to get a ballistic delay. Every solar wind chart marks the sample whose plasma is reaching Earth now.
+
+
+
+## What It Computes
+
+Dynamic pressure from density and speed; the Newell et al. (2007) coupling function, which combines speed, field strength and clock angle into a single predictor of how much energy enters the magnetosphere; and how far the edge of Earth's magnetic field sits on the Sun side (the magnetopause standoff, from the Shue et al. 1998 model), drawn live against the orbit of geosynchronous satellites at 6.6 Earth radii. It also shows GOES X-ray flux with flare classes, Kp from the 1 minute estimate alongside NOAA's 3 day forecast and the G scale, and NOAA's OVATION aurora forecast on a polar map with the night side shaded from the computed subsolar point.
+
+
+
+## Measured on Real Data
+
+A node run of the same code at 19:38 UTC on October 8, 2026 found the spacecraft labelled SOLAR1 active at 1.58 million km sunward. The latest joined sample showed 360 km/s and 5.7 protons per cubic centimetre, giving a dynamic pressure of 1.24 nPa, a magnetopause standoff of 10.9 Earth radii, and an arrival 73.5 minutes after measurement. Plasma covered 1,265 of the previous 1,435 minutes. The GOES record held an M6.7 flare at 15:48 UTC, and NOAA's forecast peaked at Kp 5.67 (G2) for 06:00 UTC on October 9.
+
+
+
+## Things the Feeds Taught Me
+
+My spec was wrong about the G scale. I had specified that Kp 4.67 counts as below G1. NOAA's own forecast file labels 4.67 as G1 and 5.67 as G2, because NOAA rounds Kp to the nearest whole number before mapping. The page follows NOAA, both rules are implemented and tested, and the method section explains the choice.
+
+NOAA rewrites recent minutes. Between two versions of the 1 minute Kp file fetched seconds apart, recent minutes changed value. The page keeps the latest version of each minute and counts revisions, so a window's maximum can go down as well as up.
+
+Hidden tabs. Polling pauses while a tab is hidden to save bandwidth, which meant a page opened in a background tab showed nothing until it was viewed. The first poll now always runs, and later ones wait for the tab to be visible.
+
+
+
+## Honest Limitations
+
+
+  
+- Ballistic propagation is approximate. Solar wind fronts are tilted, so the real arrival can differ by several minutes.
+  
+- The Shue model is symmetric and ignores dipole tilt; it is an empirical fit, not a simulation.
+  
+- Past forecasts are not scored. The feeds carry no archive of NOAA's earlier predictions, so the page compares the current window's forecast with the live estimate rather than claiming a skill score.
+  
+- Aurora at the nearest grid cell. OVATION is read at one degree resolution, and cloud and light pollution are not modelled.
+
+
+  
+
+## What This Project Demonstrates
+
+  Multi source integration with time alignment, gap handling and freshness monitoring, physical models implemented from the papers and tested against reference values, and the production input side of a forecasting model I built earlier.
+
+
+
+==================== PROJECT 4: Replicating Dr. GRPO: Accuracy Held, the Length Claims Came Out Reversed
+META: Reinforcement Learning / Reproducibility / Sep 2026
+BADGE: 51.6% vs 51.2% on MATH500 / both length claims reversed / 1 seed, 100 steps
+TAGS: Reinforcement Learning, GRPO, PyTorch, LoRA, vLLM, Qwen2.5, MLX, Bootstrap Intervals, Reproducibility
+REPO: "https://github.com/TanayPratapSingh/drgrpo-replication"
+MATH500: Dr. GRPO 51.6% vs GRPO 51.2%, paired +0.4 points [-3.4, +4.0]  |  Dr. GRPO 99 tokens longer per step [77, 123]  |  wrong answers 680 vs 545 tokens  |  1 seed, 100 steps, 500 paired eval problems  |  every number traces to runs/kaggle/
+
+
+
+## Why This Matters
+
+GRPO is the objective behind DeepSeek-R1-Zero, and Liu et al. 2025 argue it has two biases built in. It averages each response's loss over that response's own length, so a long wrong answer is penalised less per token than a short one. It also scales each question's advantages by the standard deviation of the group's rewards. Dr. GRPO deletes both terms. The paper reports three things: response length keeps growing under GRPO but not under Dr. GRPO, Dr. GRPO's wrong answers are substantially shorter, and accuracy does not suffer.
+
+I rebuilt the comparison on the paper's own Figure 5 setup, at the scale a free GPU allows, to see which of the three claims survive.
+
+
+
+
+## The Setup
+
+Qwen2.5-1.5B base, the R1 template, MATH training questions, and a binary reward for a correct answer inside the answer tag. The grader is the authors' own code, vendored unmodified, and the training and eval data are their published files. Each step samples 8 responses for each of 16 questions, 128 in all, and both arms train on the same 16 questions at every step. The two run configs differ in exactly two flags: std_norm and length_norm are on for GRPO and off for Dr. GRPO.
+
+The model is 1.5B rather than 0.5B because the 0.5B base could not produce the strict answer format on MATH, which leaves GRPO with no reward to learn from. 1.5B is also the model in the paper's figure.
+
+
+
+
+## What Reproduced and What Did Not
+
+Every comparison is paired: the same questions in training and the same 500 MATH500 problems in evaluation. Brackets are 95% bootstrap intervals.
+
+
+  Paper's claimThis replicationVerdict
+  
+    Length grows more under GRPODr. GRPO was 99 tokens longer per step [77, 123], and 239 longer over the last third of training [217, 262]. Length trend: GRPO -0.2 tokens per step, Dr. GRPO +3.0reversed
+    Dr. GRPO's wrong answers are shorterLonger: 680 against 545 tokens. On the 199 problems both arms got wrong, Dr. GRPO ran 120 tokens longer [80, 160]reversed
+    Dr. GRPO keeps accuracy51.6% against 51.2%, paired difference +0.4 points [-3.4, +4.0]holds
+  
+
+
+  
+  Figure 1. Training response length on the same 16 questions per step, as a 5 step rolling mean. The arms track each other for the first 50 steps. After that GRPO shortens and partly recovers while Dr. GRPO keeps growing.
+
+
+  
+  Figure 2. GRPO minus Dr. GRPO, per step. Above zero is what the paper predicts. From about step 50 the difference runs below zero and stays there.
+
+
+  
+  Figure 3. Final eval on 500 MATH500 problems with greedy decoding. Dr. GRPO is longer on correct and wrong answers alike.
+
+
+
+
+## Half the Mechanism Shows Up
+
+The paper's argument has two sides: GRPO should make correct answers shorter and wrong answers longer. The first side appears clearly, with GRPO's correct answers at 262 tokens against 399 for Dr. GRPO. The second does not.
+
+Truncation does not explain the gap. 55 of 500 final responses hit the 1024 token cap in each arm, and during training the arms truncated a similar share, 8.2 and 9.2 of 128 responses per step.
+
+
+
+
+## What Is Not Identical To The Paper
+
+Every deviation applies to both arms equally, and neither term under test depends on any of them. They still bound how far the result generalises.
+
+
+  PaperHereWhy
+  
+    Trainingfull fine tuningLoRA, rank 64 on all 7 projectionsfree GPUs have 15 GB
+    Learning rate1e-65e-5LoRA conventionally runs 10x to 100x higher
+    Generation budget3000 tokens1024memory and time
+    Stepsseveral hundred100time
+    Rollout8 sequential updates per 1024 responses1 on policy update per 128 responseslaptop scale batch
+    Hardware8x A100, bf16Kaggle 2x T4, fp16budget
+    Seeds31stopped at seed 0 by choice
+  
+
+
+
+
+## Checked Before It Was Trusted
+
+
+  
+- The per token gradient is exactly -A/|o| under GRPO and -A/budget under Dr. GRPO, tested in both the MLX and the PyTorch version of the loss.
+  
+- The PyTorch and MLX losses agree to 1e-6 on identical inputs.
+  
+- Merged weights reproduce the LoRA model's outputs before the sampler uses them.
+  
+- During training, the sampler's and the learner's log probabilities for the same tokens never differed by more than 0.004 nats in a step, so the policy being sampled was the policy being trained.
+
+
+
+
+## Limitations
+
+
+  
+- One seed. The bootstrap intervals cover variation across steps and problems, not across seeds. Two runs with identical settings drift apart after the first update, because the fp16 backward pass on a GPU is not bit reproducible. The paper used three seeds. This is the biggest gap, and it is why the result reads as "not reproduced here" rather than "refuted".
+  
+- Short and small. 100 LoRA steps at a 1024 token budget. The paper's effect could need longer training, full fine tuning, or room to grow past 1024 tokens.
+  
+- The mean hides structure. Both arms reach the same accuracy by different routes, and GRPO's length collapse between steps 55 and 80 is unexplained.
+
+
+
+
+## Engineering Notes
+
+The experiment started on an Apple M5 laptop in MLX and moved to Kaggle when the laptop became unusable during runs. Problems found along the way, each fixed in its own commit:
+
+
+  
+- A Metal GPU timeout, caused by macOS paging out GPU buffers under memory pressure, fixed by wiring the working set.
+  
+- vLLM on a T4 ran at 350 tokens per second. The cause was per request sampling seeds, not LoRA, and removing them tripled throughput.
+  
+- Building all the merged weights at once ran the sampler GPU out of memory. They now stream one tensor at a time.
+  
+- PyTorch reports bf16 as supported on a T4 by emulating it, so bf16 is keyed on compute capability instead.
+
+
+
+
+## What This Project Demonstrates
+
+
+  I can rebuild an RL post training result from the paper's own model, data and grader, keep the two arms paired so the comparison means something, and report a disagreement with the paper without overstating it. Code, figures and every run artifact are at github.com/TanayPratapSingh/drgrpo-replication.
+
+
+
+==================== PROJECT 5: Tool Dependency Graph: Deriving Agent Call Order from 1,391 Tool Schemas
+META: Agent Infrastructure / Static Analysis / Sep 2026
+BADGE: 1,391 tools / 46 typed entities / 3,278 edges / 8 of 8 assertions passing
+TAGS: TypeScript, JSON Schema, Agent Tooling, Tool Orchestration, Graph Construction, Static Analysis, Cytoscape, Bun, Data Modeling
+REPO: "https://github.com/TanayPratapSingh/tool-dependency-graph"
+1,391 tools across two large toolkits  |  46 typed entities  |  3,278 edges  |  1,768 of 1,770 typed required inputs have a producer  |  every edge traces to a declared output field
+
+
+## Why This Matters
+
+Agents fail on tool calls for a boring reason. The call needs an argument the agent has no way to produce. A reply tool wants a thread_id, and nobody has one memorised: it is an opaque handle that only exists because some earlier call returned it. An agent that does not know this ordering either hallucinates the handle or asks the user for something the user cannot know either.
+
+So the useful artifact is a map of which tools have to run first, and which arguments genuinely have to come from a person. This builds that map from nothing but the tools' JSON Schemas.
+
+
+
+## Why Name Matching Fails
+
+The twenty line version matches input parameter names against output field names and draws an edge. It does not work, for three reasons that only appear at catalog scale.
+
+Generic names collide. id, name, query and state appear on hundreds of unrelated tools, so name matching wires a mail client to a source control API. Every handle is resolved to a namespaced entity instead, scoped to the service that owns the tool.
+
+A bare id means nothing. The most common shape in a real catalog is data.threads[].id. The leaf is id; the meaning lives in the parent segment. Discard the path and the single most important producer in the catalog, the thread listing, becomes invisible. Resolution runs in three tiers: the leaf name, then the nearest meaningful ancestor, then the producing tool's own object.
+
+Almost every response embeds almost every object. A workflow run response contains a full repository, so taken literally a cancel tool "produces" a repository name. True and useless. Producers are split into primary and incidental by the head noun of the tool's object phrase, and incidental ones are suppressed whenever a primary exists. English compounds are head final, which is what makes this work:
+
+
+  SlugHead nounYields
+  CREATE_A_REPOSITORY_VARIABLEvariablenot a repo
+  CREATE_AN_ORGANIZATION_REPOSITORYrepositorya repo
+  CREATE_AN_ISSUE_COMMENTcommentnot an issue
+
+All three are wrong under token matching, and the first two point in opposite directions despite both containing the word repository.
+
+
+
+## Why the Graph Is Bipartite
+
+The natural encoding is an edge from every producing tool to every consuming tool. At this scale it collapses: one entity, the repository owner, is required by hundreds of tools and produced by dozens, so that entity alone emits tens of thousands of edges and the picture says nothing.
+
+Tools and entities are both nodes instead. A listing tool produces gmail.thread_id; gmail.thread_id is required by the reply tool. Edge count drops from producers times consumers to producers plus consumers, the hub structure becomes legible, and the two hop path is exactly the answer to "what do I run first".
+
+
+
+
+## What the Numbers Say, and What They Do Not
+
+Of 2,728 required inputs across the catalog, 1,770 resolve to a typed entity, and 1,768 of those have at least one tool that can supply them. The headline is 99.9 percent, and it would be dishonest to leave it there: that is coverage of the inputs that resolved to an entity, not of all required inputs. The honest version is that 65 percent of required inputs are typed handles and almost all of those are satisfiable. The rest are content a person writes, paging knobs, enums, and 568 handle shaped parameters the registry does not cover yet.
+
+Those 568 are reported rather than hidden. They are how the entities for repository id, project id, runner id and invitation id were found in the first place: the unresolved bucket is the registry's own to do list.
+
+A slug based inference fallback was built for tools with no output schema. It fired zero times. Real output schemas covered every tool that needed one, so every edge in the graph traces to a declared field rather than a guess.
+
+
+
+## How It Is Checked
+
+Eight hand written assertions, run with one command. All eight pass now, and every one of them started out failing. Four were real bugs that only surfaced because the assertions were written against the two dependency shapes the project exists to get right, rather than against whatever the code already did:
+
+
+  
+- the bare id under threads[], which hid the most important producer in the catalog
+  
+- cross service producers leaking into a plan, so a mail tool was told to call a source control tool to find an email address
+  
+- requiredness not compounding through an optional parent, so fields inside an optional attachment object were reported as required user input
+  
+- the head noun error above, which credited a tool that creates a variable with creating a repository
+
+None of the four were visible from reading the code. They appeared the moment the output was compared against a case someone had written down in advance.
+
+
+==================== PROJECT 6: Distributed ViT on CIFAR-10: Proving a Speedup, Then Explaining Why It Vanished
+META: Distributed Training / Systems Measurement / Sep 2026
+BADGE: 98% -> 57% scaling efficiency / cause isolated / 24 measured runs
+TAGS: PyTorch, DDP, FSDP, NCCL, Mixed Precision, torch.compile, Vision Transformer, CUDA, Benchmarking, Apple MPS
+REPO: "https://github.com/TanayPratapSingh/distributed-vit-cifar10"
+2x Tesla T4, NCCL  |  DDP in fp32: 1.96x at 98% efficiency  |  identical config in fp16: 1.15x at 57%  |  cause isolated to a 4 vCPU host  |  24 measured runs across 3 hardware groups
+
+          
+
+## Why This Matters
+
+          
+            Almost every distributed training result you read is unfalsifiable. A repository reports a 1.9x speedup on two GPUs and there is no way to tell whether the two rank job computed the same gradient as the one rank job, whether the baseline was tuned as carefully as the treatment, or whether the number came from a machine doing something else at the time. A speedup you cannot verify is only a claim. This project was built so that every claim it makes is checkable, and its main finding is a regression in its own scaling.
+          
+
+
+          
+
+## What Gets Measured, and Against What
+
+          
+            Three hardware groups: an Apple M5 laptop with one GPU, multi process gloo over that laptop's 10 CPU cores, and 2x Tesla T4 on Kaggle with NCCL. Speedup is only ever computed inside one group, because a ratio between a T4 and an M5 is arithmetic, not a measurement. A rank scaling baseline must differ from its run in exactly one property: the rank count. Precision, compilation, gradient accumulation, dataloader worker count, epoch count and dataset fraction all have to match, and the reporting layer enforces that rather than trusting the author. That constraint was added after the dashboard was caught dividing a real data run by a synthetic data baseline, which silently reported 1.11x where the matched comparison is 1.15x.
+          
+
+
+          
+
+## Model and Data
+
+          
+            A vision transformer written out rather than imported, 1,806,538 parameters, patch size 4 on 32x32 inputs giving 64 tokens plus a class token. It is small on purpose, because the model must not be the bottleneck in a throughput measurement, and at this size the gradient payload for each all reduce is about 7 MB. CIFAR-10, 50,000 train and 10,000 test, 30 epochs, no pretraining.
+          
+
+          
+            The canonical dataset host was unreachable from the development network, failing with an SSL EOF before any payload arrived. The fallback deliberately does not rebuild the original pickle layout, because those files carry published md5 sums a reconstruction cannot match, and the only way to make that path appear to work would be to disable torchvision's integrity checking. Silencing a checksum to make a download look successful is how results stop being trustworthy. The mirror writes its own format instead, and every run artifact records which source it used.
+          
+
+
+          
+
+## Configuration
+
+          
+            ParameterValue
+            
+              ArchitectureViT, dim 192, depth 6, heads 3, MLP ratio 2.0
+              RegularizationStochastic depth 0.1, label smoothing 0.1, grad clip 1.0
+              OptimizerAdamW, betas (0.9, 0.95), no decay on norms, biases, class token, position embedding
+              ScheduleLinear warmup 2 epochs, then cosine, computed per step
+              Learning rate1e-3, scaled linearly by world size
+              Batch size128 per rank
+              PrecisionSelected from compute capability, not from is_bf16_supported
+              Runtimetorch 2.10.0+cu128, NCCL on CUDA, gloo on CPU, FileStore rendezvous on macOS
+            
+          
+
+          
+
+## Correctness Before Speed
+
+          
+            DDP averages gradients across ranks, so two ranks each holding batch B must produce the same gradient as one process holding batch 2B. If that identity does not hold, every throughput number in the project describes a system training a different model than its own baseline, and the comparison is void. The suite spawns a real gloo process group and checks it to rtol=1e-4. It ships with a second test that deliberately computes the wrong thing, because a correctness test that cannot fail is decoration rather than evidence.
+          
+
+
+          
+            
+            Figure 1. The gradient equivalence test and its inverse guard, run in a real process group. The dashboard is then regenerated from 24 run artifacts.
+          
+
+          
+
+## Scaling on 2x Tesla T4
+
+          
+            RunRanksStrategyPrecisionimg/sRank speedupPeak MBTop-1
+            
+              t4-ws1-fp321singlefp321,853baseline55380.70%
+              t4-ws1-amp1singlefp163,810baseline34780.52%
+              t4-ws2-ddp-fp322DDPfp323,6371.96x (98%)56180.01%
+              t4-ws2-ddp-amp2DDPfp164,3761.15x (57%)35479.71%
+              t4-ws2-ddp-amp-compiled2DDPfp16 + compile4,706no baseline34580.09%
+              t4-ws2-ddp-amp-ga22DDPfp16, accum 24,393no baseline36180.15%
+              t4-ws2-fsdp-amp2FSDPfp162,8840.76x33879.41%
+            
+          
+          
+            Three predictions were written down before this ran, so they could be scored instead of retrofitted. FSDP was predicted to lose, and it does: 2,884 img/s against DDP's 4,376, buying 5% of peak memory for 34% of throughput. At 1,806,538 parameters there is almost nothing to shard. Mixed precision was predicted to be a large win, and it is: 2.06x at one rank with peak memory falling from 553 MB to 347 MB.
+          
+
+
+          
+
+## The Prediction That Was Wrong
+
+          
+            The third prediction said DDP would land near 1.8x rather than 2x, reasoning that a small model makes the all reduce expensive relative to compute. That is backwards. A small model means small gradient tensors, about 7 MB, which DDP overlaps with the backward pass almost entirely. In fp32 it scales at 1.96x, 98% efficiency.
+          
+
+          
+            The same DDP configuration in fp16 scales at 1.15x, 57% efficiency. Hardware, model and communication volume are identical, and the only thing that changed is that each GPU now computes roughly twice as fast. Optimising one layer moved the bottleneck rather than shortening the job, and scaling efficiency turned out not to be a property of the cluster at all.
+          
+
+
+          
+
+## Isolating the Cause
+
+          
+            Two suspects: the NCCL all reduce, and the input pipeline. Raising the dataloader worker count and watching what happens would produce a correlation, not a cause. Instead a synthetic input mode serves pre normalised tensors from a small in memory pool, removing decode, augmentation and worker processes entirely, so two ranks against one rank under it is compute plus communication with nothing else in the measurement.
+          
+
+          
+            Input path1 rank2 ranksSpeedupEfficiency
+            
+              Synthetic, no dataloader3,9567,5801.92x96%
+              Real data, 2 workers per rank3,4624,0731.18x59%
+              Real data, 8 workers per rank3,5993,9961.11x56%
+            
+          
+          
+            The collective is innocent. With no dataloader the same configuration scales at 1.92x, 96% efficiency. With real data, throughput never passes about 4,073 img/s no matter how many GPUs or workers are thrown at it. The artifacts record cpu_cores: 4. One T4 in fp16 already consumes 3,956 img/s of synthetic input, so 4 vCPUs cannot feed even one GPU comfortably, let alone two. The second T4 is not slow, it is unfed.
+          
+
+          
+            Raising workers from 2 to 8 per rank made it worse, 3,996 against 4,073, because 16 worker processes on 4 cores buy context switches and nothing else. The synthetic runs also index a small pool, so their 96% is an upper bound on what fixing the input path could achieve, not a promise.
+          
+
+
+          
+            
+            Figure 2. Median throughput across all measured runs. Synthetic input runs are marked, because the fastest bar is an instrument reading and not a training result.
+          
+
+          
+
+## Precision Advice Does Not Survive a Backend Change
+
+          
+            On the T4, enabling mixed precision is a 2.06x win. On Apple silicon the identical flag is a regression: 726 img/s against 1,061 in fp32, a 32% slowdown, because eager mode pays for a cast around every operator and the hardware is already efficient at fp32. Adding torch.compile to that same fp16 configuration reaches 2,361 img/s, 2.23x the fp32 baseline, once the casts are fused into the graph. Wall clock for the full 30 epoch run falls from 24 minutes to 11.
+          
+
+          
+            A related trap is that on a T4, torch.cuda.is_bf16_supported() returns True. The card is sm_75 and has no hardware bf16, so that True reflects emulation. Trusting it selected an emulated path for every mixed precision run, and torch inductor quietly logged that the card does not support bfloat16 natively while the benchmark carried on reporting the result as mixed precision. Precision is now selected from compute capability, and every artifact records the dtype that was actually used.
+          
+
+
+          
+
+## Accuracy as the Control
+
+          
+            Across all seven T4 configurations, top-1 spans 79.41% to 80.70%, and the three Apple silicon runs land within 0.16 points of each other. That spread is the control. These are throughput changes, so accuracy should barely move. If mixed precision or compilation had shifted it materially, the correct output would have been a bug report rather than a results table.
+          
+
+
+          
+            
+            Figure 3. Test accuracy by epoch. The curves overlay because precision and compilation change throughput, not learning. The reporting layer excludes short and synthetic runs from this view.
+          
+
+          
+
+## Nine Bugs, Kept On Purpose
+
+          
+            The defect log is the most reusable output of the build, so it ships in the repository rather than being tidied away. Four of the nine came from an API answering a slightly different question than the one being asked: is_bf16_supported counting emulation, torchvision's md5 check rejecting a legitimate mirror, MPS reporting instantaneous memory where a peak was wanted, and sys.argv[0] producing a command that could not reproduce its own run. One was a hang rather than a crash. The default TCP rendezvous is blocked on some hosts and the job waits, which reads exactly like slow training and costs hours before anyone suspects the launcher. Three were wrong numbers on the dashboard, all found by pointing a screen recorder at a page nobody had read closely.
+          
+
+          
+            That last category is why the honesty rule is now enforced rather than promised. A gate extracts every number carrying a measurement unit from the documentation and fails if it does not round, at the precision it was written with, to an artifact value or to a ratio between two artifact values on the same hardware. It found five unsupported claims the first time it ran.
+          
+
+
+          
+            
+
+## Operational Reading
+
+            
+              The same cluster, model and communication volume delivered 98% efficiency in fp32 (the 1.96x) and 57% in fp16, and the difference had nothing to do with the distributed layer. Anyone tuning NCCL in response to that drop would have spent a week in the wrong subsystem. Scaling efficiency is a property of the ratio between accelerator speed and host speed, and optimising the accelerator is what breaks it. The measurement that settles it took six short runs and one flag.
+            
+
+          
+
+==================== PROJECT 7: ZTF Transient Pipeline: Real Time Astronomical Alert Classification and Warehouse
+META: Streaming ML / Analytics Engineering / Jul 2026
+BADGE: 27,378 real ZTF alerts / multimodal CNN / dbt: 8 models, 21 tests
+TAGS: Python, Apache Kafka, Avro, TensorFlow, Multimodal CNN, dbt, DuckDB, Apache Airflow, FastAPI, Astropy
+REPO: "https://github.com/TanayPratapSingh/ztf-transient-pipeline"
+27,378 real Avro alerts (ZTF, Jul 20 2026)  |  500 scored end to end  |  dbt: 8 models, 21 tests, 32 checks passing  |  two plane architecture  |  portable DuckDB to BigQuery / Snowflake
+
+          
+
+## Why This Matters
+
+          In time domain astronomy the telescope produces far more data than any human can look at, and the overwhelming majority of it is noise. A survey astronomer or alert broker operator needs high purity transient candidates surfaced quickly, and needs to trust that the nightly numbers behind them are correct. Those are two jobs: a fast, accurate model at the front, and a tested, governed data layer behind it. I built ZTF Transient Pipeline to do both in one system. It also maps onto the three roles I am applying for: ML engineer, data engineer, and analytics engineer.
+
+
+          
+
+## The Sequel to ShopFloor
+
+          I designed this project to close the three gaps I listed as limitations in ShopFloor AI, and to do it on production shaped infrastructure. Simulated Kafka becomes real Avro alert data flowing over a real Kafka broker. A synthetic benchmark dataset becomes a public survey stream. The single node app gains a real warehouse, a dbt transformation layer, and drift monitoring.
+
+
+          
+
+## The Data
+
+          The Zwicky Transient Facility (ZTF) streams over a million optical alerts per night as Avro packets over Kafka. Each packet embeds three small image cutouts (science, template, and difference) plus a table of measured features. The pipeline downloads a night of real archived alerts and replays them through its own Dockerized Kafka broker. The payloads are genuine ZTF data; only the timing is replayed. The README says so plainly. Replaying the archive puts real data through a real broker without needing broker whitelisting on the critical path.
+
+
+          
+
+## Streaming ML Plane
+
+          fastavro deserializes the alerts, and Astropy handles the astronomical coordinate and time conventions. A multimodal classifier in TensorFlow and Keras scores each alert: a convolutional branch reads the three image cutouts, a tabular branch reads the measured features, and the two are fused to predict whether an alert is a real transient or an artifact, then a coarse class. Rather than invent an accuracy target, the model is framed against BTSbot, a published survey broker classifier that scores detections from the same image plus feature inputs. A FastAPI service exposes the scorer, and a streaming consumer writes predictions and alert metadata into the warehouse.
+
+
+          
+
+## Analytics Engineering Plane
+
+          This half is the SQL and analytics engineering work. A dbt project transforms the raw landed alerts through three layers: staging models that clean and type the raw stream, intermediate models that assemble per object lightcurves using window functions, and mart models including an incremental daily alert summary and a model monitoring rollup. The project ships with 21 data quality tests, source freshness checks, and generated lineage docs. It defaults to DuckDB so anyone can run it with zero cloud setup, and the same models port to BigQuery and Snowflake with only a profile change.
+
+
+          
+
+## Orchestration and Monitoring
+
+          An Apache Airflow DAG runs the full nightly batch end to end: download, deserialize, load, transform, and monitor. A Population Stability Index drift monitor watches the prediction distribution over time, so a shift in what the model is seeing surfaces as a number rather than a surprise. Continuous integration through GitHub Actions runs the test suite and a dbt build on every push, and a Codespaces devcontainer lets the whole thing spin up in the browser.
+
+
+          
+
+## Proven on Real Data
+
+          I ran the pipeline against a real night of the survey: 27,378 Avro alert packets extracted from July 20, 2026. Of those, 500 alerts were loaded, scored, and rebuilt through the warehouse. A full dbt build returned 8 models and 21 tests with 32 checks passing and zero errors, on real data rather than a seed sample. The repository is public at github.com/TanayPratapSingh/ztf-transient-pipeline.
+
+
+          
+
+## Honest Limitations
+
+          
+            
+- Replay, not live consumption. Nightly archive replay uses real data, but live streaming from the survey broker needs an IP whitelist, so it is kept as an optional upgrade rather than a dependency.
+            
+- Coarse labels. The classifier demonstrates the pipeline, not a science grade taxonomy. It is a systems project first.
+            
+- Trial scale compute. Everything runs single node under Docker Compose, not at production survey volume.
+            
+- Validation against broker labels. There is no spectroscopic confirmation, and the reference labels are themselves model outputs, so the benchmark is relative rather than ground truth.
+          
+
+          
+            
+
+## What This Project Demonstrates
+
+            One repository covers all three roles. For ML engineering there is a multimodal image plus tabular classifier benchmarked against BTSbot; for data engineering, a real Avro over Kafka ingestion pipeline that Airflow orchestrates nightly; for analytics engineering, a dbt transformation layer with tests, freshness checks, lineage, and warehouse portability.
+
+          
+
+==================== PROJECT 8: Groundwork: RAG Evaluation, Guardrails, and an LLM Gateway on Real Data
+META: LLM Platform Engineering / RAG Evaluation / Aug 2026
+BADGE: recall@5 0.921 / ECE 0.045 / injection recall 0.884 unseen / 113 tests, CI green
+TAGS: Python, RAG, LLM Gateway, Guardrails, Calibration (ECE), Prompt Injection, BM25, FastAPI, Docker, Kubernetes, Responsible AI, CI/CD
+REPO: "https://github.com/TanayPratapSingh/Groundwork"
+recall@5 0.921  |  ECE 0.045  |  injection recall 0.884 on an unseen attack corpus  |  correctly declines 96.2% of unanswerable questions  |  11,873 questions evaluated per run  |  113 tests, CI green
+
+
+
+## Why This Matters
+
+Getting a good answer out of an LLM feature once is the easy part. The hard part is knowing whether the answer is good, knowing when the system should refuse, proving the guardrails do not reject a tenth of your legitimate traffic, and being able to say what a change cost you. Groundwork is those four things built around a small retrieval augmented generation system, so they have something concrete to be true about.
+
+Every number in the project is measured on real, public, human labelled data. No corpus was written for the demo, no gold answers were authored to be easy, and no attack was invented to be caught. A fetch script downloads five datasets and records a SHA-256 for each in a manifest. It runs with no API key at all, on a deterministic offline reader, so every figure below is reproducible on a laptop for free.
+
+
+
+
+## Four Concerns, One Codebase
+
+
+  ConcernWhat is implemented
+  
+    LLM and RAG evaluationRetrieval metrics, SQuAD official answer metrics, abstention scored as a classifier, confidence calibration with reliability diagrams, a three way retrieval ablation, and a release gate that exits non zero
+    GuardrailsInput and output rails, each scored on a published labelled attack corpus and again on an attack corpus it has never seen
+    Secure deploymentHashed API keys with constant time comparison, a tamper evident audit hash chain, PII redaction measured per entity type, a threat model, and a hardened container
+    LLM gatewayOne chokepoint for every model call: auth, tier routing, two layer cache, per tenant budgets and rate limits, retries, graceful degradation, full cost accounting
+  
+
+
+
+
+## The Data
+
+
+  DatasetRoleSizeLicence
+  
+    SQuAD v2.0 devCorpus of 1,204 Wikipedia paragraphs, 11,873 questions, gold answer spans, and 5,945 genuinely unanswerable questions4.2 MBCC BY-SA 4.0
+    deepset/prompt-injectionsInjection rail precision and recall662CC BY 4.0
+    jackhhao/jailbreak-classificationJailbreak rail1,306See card
+    Lakera/gandalf_ignore_instructionsHeld out attacks, never trained on1,000MIT
+    ai4privacy/pii-masking-200kPII redaction recall per entity type1,000See card
+  
+
+
+
+
+## What This Project Demonstrates
+
+
+  Groundwork implements four production concerns that usually get skipped, and measures them rather than asserting them: RAG evaluation with a gate that can fail a build, guardrails with published false positive rates on corpora they have never seen, an LLM gateway that meters every call, and a documented security posture. In all four, the measurement changed the system. The full public write up and code are at github.com/TanayPratapSingh/Groundwork.
+
+
+
+==================== PROJECT 9: Replicating BEIR: Reproducing a Retrieval Benchmark and Finding a Silent Truncation Bug
+META: Information Retrieval / Reproducibility / Sep 2026
+BADGE: 6 of 6 published cells reproduced / 4 exact / silent truncation bug found and fixed
+TAGS: Python, Information Retrieval, BEIR, BM25, Dense Retrieval, sentence-transformers, DPR, TAS-B, pytrec_eval, Reciprocal Rank Fusion, Reproducibility
+REPO: "https://github.com/TanayPratapSingh/beir-replication"
+6 of 6 published cells reproduced  |  4 exact to three decimals  |  DPR on SciFact recovered from 0.260 to a published 0.318  |  12 minutes on a laptop, no GPU  |  every number traces to an artifact in runs/
+
+
+
+## Why This Matters
+
+Reading a paper tells you what the authors claim. Rebuilding it tells you whether the claim survives contact with a different machine, a different implementation and a fresh set of defaults. I rebuilt the central experiment from BEIR (Thakur et al., NeurIPS 2021 Datasets and Benchmarks) from scratch: the claim that dense retrievers trained on MS MARCO lose to a plain bag of words baseline once you move them to a domain they were not trained on.
+
+The useful part of a replication is the one cell that disagrees, because chasing it is the only way to learn something the paper did not tell you.
+
+
+
+
+## What Reproduced
+
+I used two scientific datasets from the benchmark, chosen because they are the smallest and therefore fit on a laptop: SciFact (5,183 documents, 300 queries) and NFCorpus (3,633 documents, 323 queries). Both counts match the paper exactly. The metric is nDCG@10, scored with pytrec_eval, the same trec_eval bindings the authors report with.
+
+
+  SystemSciFact publishedSciFact mineNFCorpus publishedNFCorpus mine
+  
+    BM250.6650.6770.3250.320
+    TAS-B0.6430.6430.3190.319
+    DPR0.3180.3180.1890.188
+    bge-small (2023, not in the paper)n/a0.713n/a0.343
+    Hybrid RRF (not in the paper)n/a0.687n/a0.341
+  
+
+The paper holds for the models the paper tested. It does not survive a 2023 embedder: bge-small-en-v1.5, at 33M parameters, beats BM25 on both datasets. The authors were right in 2021 and the gap they identified has since closed. Reciprocal rank fusion over BM25 and TAS-B also beat both of its own inputs on both datasets, and took the best Recall@100 on SciFact at 0.948.
+
+
+
+
+## The Cell That Disagreed
+
+DPR on SciFact came in at 0.260 against a published 0.318. Not a rounding difference. TAS-B had already reproduced exactly on both datasets, so the loader, the metrics and the scoring were not at fault, which left something specific to how DPR sees a document.
+
+The cause is a default. The sentence-transformers port of the DPR context encoder ships with max_seq_length = 100, so every abstract was cut off after roughly its first paragraph. No error, no warning, no sign of it in the output. The tell was that searching with only the title scored 0.261 against title plus full text at 0.260. That only makes sense if the body was being discarded.
+
+
+  Context encoder token limitnDCG@10Recall@100
+  
+    100 (the shipped default)0.2760.601
+    2560.2980.687
+    3500.3150.710
+    5120.3180.727
+    published0.3180.727
+  
+
+The bug was invisible on NFCorpus, which reproduced either way. NFCorpus carries 38.2 judged documents per query against SciFact’s 1.1, so it absorbs ranking damage that SciFact exposes. Run on NFCorpus alone, this replication would have hidden the bug entirely. A benchmark with one dataset cannot tell you when you are wrong.
+
+
+
+
+## What Is Not Identical To The Paper
+
+Every reproduction deviates somewhere. Stating the deviations is the difference between a replication and a claim.
+
+
+  DeviationWhy, and what it costs
+  
+    BM25 is not AnseriniThe paper scores BM25 with Anserini, which is Lucene. That needs a Java runtime the machine did not have, so BM25 is reimplemented in Python with the same k1 of 0.9 and b of 0.4, the same Porter stemming and the same 33 word Lucene English stopword list, but one concatenated field instead of two and exact rather than quantised document lengths. This is the likely source of the only two inexact cells, +0.012 and -0.005.
+    Plain rather than capped recallThe paper reports capped Recall@100. The two agree for every SciFact query but not for every NFCorpus query.
+    bge-small is an additionA 2023 model the paper could not have tested, included to measure how far the field moved, and labelled as not in the paper wherever it appears.
+    Hybrid RRF is an additionReciprocal rank fusion with k of 60, from Cormack et al. 2009.
+  
+
+
+
+
+## What This Project Demonstrates
+
+
+  That I can take a published result, rebuild it independently, and say precisely where my numbers agree and where they do not. The six matching cells were worth less than the one that did not match, because chasing it surfaced a library default that silently discards most of every document with no error and no warning. The same failure mode is waiting in any retrieval system whose chunks are longer than an embedding model’s configured limit, which is most of them. Every number here traces to a command that was run and a JSON artifact committed under runs/. Code at github.com/TanayPratapSingh/beir-replication.
+
+
+
+==================== PROJECT 10: JMA Wireless: Standardizing Five Factory KPIs and Locating the Real Constraint
+META: Lean Six Sigma / Analytics Engineering / Jan to May 2026
+BADGE: project lead, 4 person team / 31 GB JSON to under 5 MB / ~$355K projected annualized opportunity
+TAGS: DMAIC, Power BI, DAX, Python, Pandas, openpyxl, ETL, Minitab, SIPOC, Pugh Matrix, FMEA, Control Plan
+REPO: ""
+5 KPIs standardized across 2 lines  |  31 GB of nested PLC JSON reduced to under 5 MB  |  automated line at 97.3% uptime but 46.3% schedule attainment  |  ~$355K projected annualized opportunity  |  15 week DMAIC engagement
+
+
+
+## Why This Matters
+
+JMA Wireless builds cell tower transmitters and active 5G infrastructure in Liverpool, New York. Its Jumper Department produces the radio frequency jumper cables that connect transmitters to the antennas on towers and small cells. The parts are functionally simple and precision sensitive: every connector must be terminated to tight torque and electrical specification, and every cable must pass continuity, return loss, and visual inspection before it ships.
+
+The department runs two parallel lines with completely different economics. Jumper 1.0 is manual, staffed by eight operators across two ten hour shifts. Jumper 2.0 is a fully automated cell with PLC level data capture. Before this project there was no way to compare them, because terms like Uptime and Schedule Attainment meant different things to different functions. Leadership could not draw a clean line from what happened on the floor on Tuesday to the financial plan.
+
+
+
+
+## What I Owned
+
+I was Project Lead on a four person Whitman School team running a full DMAIC engagement from January to May 2026, sponsored by JMA’s SVP of Global Operations with a named project champion and weekly on site access. I wrote the charter, SIPOC, and CTQC tree, ran the KPI definition interviews, built the Python pipeline that made the automated line’s data usable, and wrote the Control Plan that governs the dashboard after handover.
+
+
+
+
+## The Method
+
+
+  DMAIC as it was actually run, including the loops that fired. Two of them mattered. A root cause that did not survive validation went back for re analysis, and a target the data showed was unreachable went back to be revalidated rather than left red on a dashboard forever.
+
+
+
+
+  
+  Figure 1. The DMAIC path run on this engagement, including the re analysis and target validation loops
+
+
+
+
+## Standardizing the KPIs
+
+
+  The most important Define deliverable was a written, sponsor approved definition document: five KPIs, each with one agreed formula and one agreed target, confirmed by the sponsor before anything was built.
+
+
+
+  KPIFormulaTarget
+  
+    Parts per Labor HourTotal good parts / total labor hours>= 50
+    UptimeRuntime / (runtime + downtime)>= 85%
+    First Time ThroughputGood parts / total parts tested>= 95%
+    Schedule AttainmentActual parts / weekly target>= 100%
+    Culture and EngagementPulse score (60%) + weekly active dashboard users (40%)Index >= 75
+  
+
+
+  The Culture and Engagement metric is the unusual one. Both JMA and Whitman treat culture as a real lean variable, but standard manufacturing data never captures it, so I specified a five question two minute pulse survey plus a passive count of distinct named users who open the dashboard at least twice a week.
+
+
+
+
+
+## The Data Engineering Problem
+
+
+  The automated cell publishes one JSON record per test event, and each record nests an array of tests, each nesting an array of measurements, each nesting an array of channel readings. Two raw datasets of 809 and 1,000 records expanded to more than 31 GB when loaded straight into Power BI. That is unusable twice over: Power BI expands the nesting on every visual that touches the data, and nobody with less than 64 GB of RAM can open the file at all.
+
+
+
+  I built a Python pipeline with pandas and openpyxl that walks the nesting with explicit json_normalize record paths and writes one flat row per test event. It casts timestamps to datetime, channel readings to float, and pass and fail to boolean, so Power Query never has to coerce anything. It also computes cycle time in seconds as a direct input to the Uptime and Parts per Labor Hour measures. The output is under 5 MB and loads instantly.
+
+
+
+  StageAction
+  
+    ExtractLoad raw test report JSON
+    ParseWalk the nesting with explicit json_normalize record paths
+    Type castdatetime64, float64, boolean, so Power BI needs no coercion
+    CalculateDerive cycle time in seconds from start and end timestamps
+    LoadWrite a Power BI ready workbook via openpyxl
+  
+
+
+
+
+## Baseline: What the Standardized Numbers Showed
+
+
+  KPIJumper 1.0 (manual)Jumper 2.0 (automated)Target
+  
+    First Time Throughput87.9%92.5%95%
+    Uptime31.3%97.3%85%
+    Schedule Attainment139.7%46.3%100%
+    Parts per Labor Hour34.917.9450
+  
+
+
+  Parts per Labor Hour is the one number on that table that should not be read straight across. Both lines use the same scheduled labor hours denominator so the comparison is consistent, but the automated cell only needs a supervising technician for part of a shift. Measured on engaged technician minutes, the automated figure is roughly an order of magnitude higher, so the dashboard exposes both that figure and a cell specific cycles per engaged hour measure rather than letting 7.94 stand as a verdict.
+
+
+
+
+
+## The Finding That Mattered
+
+
+  The automated cell held 97.3% uptime and still delivered only 46.3% of its weekly target. Those two numbers cannot both be a machine problem. A cell that runs almost all of the time and still misses plan by more than half is input limited rather than equipment limited. The binding constraint was what entered the cell, not the cell itself.
+
+
+
+  The manual line was quietly absorbing the shortfall at 139.7% of its own target. That looks like heroics and reads well on a weekly report, but it depresses labor productivity, strains the operator pool, and masks the real demand signal going back to planning. The pattern only became visible because standardizing the definitions made the two numbers comparable.
+
+
+
+  A fishbone on that gap put the leading causes in Method, Material, and Measurement: kitting batches sized for the manual line, connector subassemblies arriving batched rather than continuously, and a weekly target set at commissioning that had never been revisited against demonstrated capability.
+
+
+
+
+
+## Where Quality and Time Actually Go
+
+
+  Two Paretos carried the Analyze phase. On quality, torque and return loss together account for roughly three quarters of all first time failures, which points at tooling and torque training on one side and connector seating on the other, not at a diffuse quality problem.
+
+
+
+
+  
+  Figure 2. FTT failure modes on Jumper 1.0. Torque and return loss are 74% of all first time failures
+
+
+
+  On time, the manual line loses more than a third of its scheduled hours waiting for material and another quarter to changeover. That is the same upstream flow problem that starves the automated cell, in a different shape.
+
+
+
+  Jumper 1.0 downtime categoryShareTypical eventPer week
+  
+    Material wait (cable, connectors)38%18 min~24
+    Setup and changeover27%32 min~9
+    Tool calibration and maintenance19%22 min~9
+    Operator absent or break overrun12%11 min~11
+    Other4%mixedmixed
+  
+
+
+
+
+## Recommendations, and the One I Piloted
+
+
+  Three recommendations came out of Improve, selected against six candidates with a Pugh matrix and sequenced on a benefit and effort grid: a fifteen minute daily standup held at a wall mounted screen showing the dashboard, a two bin continuous kitting feed so the automated cell is never starved of inputs, and a reset of the cell’s weekly target from the number set at commissioning to demonstrated capability, with a documented ramp as kitting improves.
+
+
+
+  The third one is worth defending because it looks like moving the goalposts. A target the cell cannot currently hit makes the dashboard permanently red, and a permanently red dashboard is one people stop reading. Resetting it to roughly 1,150 cables per week and ramping by about 200 per week as the kitting fix lands means the team can see progress it is actually making.
+
+
+
+  I piloted the standup for two weeks on the manual line first shift and measured it rather than asserting it worked. Median time from a KPI going red to a named owner taking the first action fell from about 4 hours to about 25 minutes, because the standup surfaced the red status instead of a supervisor finding it on a walk. Operator self reported familiarity with the five KPIs rose from 2.4 to 4.1 on a five point scale.
+
+
+
+
+
+## What the Dollar Figure Rests On
+
+
+  The headline number is a projection, not money in the bank. Closing the automated line’s schedule attainment gap to plan recovers roughly 27,000 cables per year with no added labor. At an assumed $12 contribution margin per cable that is about $324,000 a year. Retiring the manual weekly reporting cycle frees about 48 analyst hours per week, roughly $31,200 a year at an assumed $12.50 fully loaded hourly rate. Together that is about $355,000 of recurring annual opportunity.
+
+
+
+  Both of those rates are conservative assumptions the team adopted pending confirmation from JMA Finance, and the report states them in an assumptions table so any figure can be revised without re deriving the analysis. The cable recovery is a projection from demonstrated capability, not an observed post implementation result.
+
+
+
+
+
+## What I Would Do Differently
+
+
+  The Culture and Engagement metric was scoped late and is the one KPI with no baseline value; the instrument is built and wired into the dashboard but the first administration slipped past the engagement. I also did not write unit tests for the Python pipeline. It produces correct output today, but the only thing standing between a schema change upstream and a silently wrong dashboard is an analyst noticing, and a small set of assertions would have removed that dependency before handover.
+
+
+
+
+
+## Sustainment
+
+
+  The dashboard ships with a Control Plan rather than a handshake: a named refresh owner and cadence, an FMEA on the dashboard itself covering the ways a stale or broken feed could mislead a supervisor, and a tiered escalation framework that triggers on red KPI status so a red light has a defined next action instead of being ambient.
+
+
+
+
+
+## What This Project Demonstrates
+
+
+  The engineering and the judgement both had to be right. The pipeline work was real (31 GB of nested PLC JSON is not a dataset you can wish into Power BI), but the finding that mattered came from definitions, not code: once Uptime and Schedule Attainment meant the same thing on both lines, 97.3% uptime against 46.3% attainment located the constraint upstream of the machine everyone assumed was the problem. The standup pilot was tested and reported rather than claimed, and the projection is labelled as a projection even though a bigger number was available for the taking.
+
+
+
+==================== PROJECT 11: ShopFloor AI: Predictive Maintenance and RAG for the Factory Floor
+META: MLOps / Predictive Maintenance / Jul 2026
+BADGE: 0.85 F1 / 0.96 AUC / 7-service deployed stack
+TAGS: Python, Scikit learn, Gradient Boosting, MLflow, Apache Kafka, Apache Airflow, Docker Compose, FastAPI, Streamlit, LangChain, ChromaDB, RAG
+REPO: "https://github.com/TanayPratapSingh/shopfloor-ai"
+Gradient Boosting F1 = 0.85  |  AUC-ROC = 0.96  |  3 models tracked in MLflow  |  16 engineered features  |  7-service Docker Compose stack  |  AI4I 2020 (UCI, CC BY 4.0)
+
+          
+
+## Overview
+
+          ShopFloor AI is an end to end manufacturing platform. It predicts machine failures from sensor data with classical ML, streams real time production KPIs through Apache Kafka, and answers natural language questions over maintenance documentation with LLM powered retrieval augmented generation. The three parts run as seven containerized services rather than a notebook. The data is the AI4I 2020 Predictive Maintenance Dataset (UCI ML Repository, CC BY 4.0).
+
+
+          
+
+## Tech Stack
+
+          
+            LayerTechnologyPurpose
+            
+              StreamingApache KafkaReal time sensor ingestion and anomaly alerting
+              ML trackingMLflowExperiment logging, model comparison, registry
+              OrchestrationApache AirflowScheduled retraining with data quality gates
+              RAGLangChain + ChromaDB + OpenAI APINatural language Q&A over SOPs
+              APIFastAPIREST endpoints for predictions and queries
+              DashboardStreamlit + PlotlyKPI monitoring, failure predictor, chat, drift
+              InfrastructureDocker Compose7 containerized microservices
+              MLscikit-learnGradient Boosting / Random Forest classifiers
+            
+          
+
+          
+
+## How It Works
+
+          A Streamlit dashboard calls a FastAPI backend, which fronts three subsystems: an MLflow model registry for predictions, a ChromaDB vector store queried through LangChain and the OpenAI API for document Q&A, and a Kafka broker carrying the live sensor stream. A producer replays sensor data onto the topic and a consumer computes rolling KPIs and raises anomaly alerts. An Airflow DAG retrains the model nightly behind data quality gates.
+
+          Streamlit dashboard
+     |  HTTP
+FastAPI backend  -->  /predict  ·  /ask  ·  /health
+     |-- MLflow model registry
+     |-- ChromaDB vector DB  -->  LangChain + OpenAI  (RAG)
+     +-- Kafka broker  -->  producer (sensor stream) + consumer (rolling KPIs, alerts)
+
+Airflow (daily, 2 AM):  data-quality gate --> train --> evaluate --> promote --> RAG refresh
+
+          
+
+## Dataset
+
+          AI4I 2020 Predictive Maintenance Dataset (UCI, CC BY 4.0): 10,000 records at a 3.39% failure rate, across five independent failure modes (tool wear, heat dissipation, power, overstrain, random). Raw signals include air and process temperature, rotational speed, torque, tool wear, and a product quality variant (L 50% / M 30% / H 20%).
+
+
+          
+
+## Feature Engineering
+
+          16 features are derived from the 5 raw sensor readings so the physics of failure is explicit rather than latent. Representative examples:
+
+          
+            FeatureDerivationPurpose
+            
+              temp_diffProcess temp - Air tempHeat dissipation indicator
+              power_WTorque x (2&pi; x RPM / 60)Power failure detection
+              wear_torque_productTool wear x TorqueOverstrain indicator
+              tool_wear_ratioTool wear / 240Normalized wear proximity to failure
+            
+          
+
+          
+
+## Results
+
+          
+            ModelF1AUC-ROC
+            
+              Gradient Boosting0.85480.9591
+              Random Forest0.83870.9823
+              Logistic Regression0.30540.9455
+            
+          
+          Gradient Boosting was selected and registered in MLflow as the production model. A newly trained model must clear a 0.80 F1 threshold in the nightly pipeline before it can be promoted, so a bad batch never reaches production.
+
+
+          
+
+## Setup
+
+          The whole system runs end to end with Docker Compose behind a Makefile:
+
+          git clone https://github.com/TanayPratapSingh/shopfloor-ai
+cd shopfloor-ai
+cp .env.example .env      # add your OPENAI_API_KEY
+make setup                # install deps, download AI4I data, build images
+make train                # train 3 models, log to MLflow, register the best
+make up                   # start all 7 services
+make ingest               # load 6 SOPs into ChromaDB for RAG
+          Services come up on these ports: dashboard (:8501), API docs (:8001/docs), MLflow (:5001), Airflow (:8080). A 15-test suite (make test) and GitHub Actions CI cover data loading, feature engineering, streaming, and SOP structure.
+
+
+          
+
+## Limitations and Future Work
+
+          
+            
+- Synthetic dataset. AI4I is 10,000 synthetic records; a production deployment would integrate real MES/SCADA feeds and far larger volumes.
+            
+- Replayed streaming. The Kafka pipeline replays historical records rather than consuming a live feed; the architecture supports real connectors.
+            
+- Bundled SOPs. RAG answers depend on the 6 shipped documents; organization specific docs would improve retrieval relevance.
+            
+- Planned. SHAP explanations in the prediction API, multi model A/B testing in the DAG, WebSocket live dashboard updates, and AWS ECS deployment with S3 backed MLflow storage.
+          
+
+          
+            
+
+## What This Project Demonstrates
+
+            The interesting engineering is everything around the model. A nightly retraining schedule runs behind data quality gates, a registry separates trained models from deployed ones, a streaming layer keeps predictions current, and a RAG assistant answers from real SOPs.
+
+          
+
+==================== PROJECT 12: handoff: Supervisor Orchestration with Escalations That Have Deadlines
+META: Agent Orchestration / Human in the Loop / Sep 2026
+BADGE: 212 tests / zero dependencies / unanswered page -> safer substitute
+TAGS: Python, Agent Orchestration, Supervisor, Human in the Loop, Escalation Policy, State Machine, Audit Trail, Zero Dependencies, unittest, CI/CD
+REPO: "https://github.com/TanayPratapSingh/handoff"
+212 tests / 11 behavioural scenarios / zero dependencies / unanswered page -> safer substitute / CI green on Python 3.11 to 3.13
+
+
+
+## Why This Matters
+
+Most human in the loop is a modal dialog that blocks forever. The agent reaches something risky, calls confirm(), and waits. It does not say who is being asked, it does not say how long they have, and it has no answer at all for the case that actually happens at 3am, which is that nobody replies. An agent parked on an unanswered prompt is worse than one that never asked, because the incident is still burning and now nothing is watching it. handoff treats escalation as a routing problem with tiers, skills, load, deadlines and a written down behaviour for silence, and builds the rest of the system around that.
+
+
+
+
+## The Sequel to comms-agent
+
+comms-agent put a human in the loop gate inside an agent graph: flag the low confidence items, let a reviewer correct them, then report. That answers what happens when the reviewer shows up. handoff covers what happens when they do not, which is the case that breaks these systems in production.
+
+
+
+
+## Escalation as Policy, Not a Callback
+
+The policy is a table keyed by risk, held as data in config/policy.yaml: which tiers may approve, in what order, how many seconds the first tier gets, how many signatures are required, and what happens on expiry. Because it is data, somebody who does not read Python can review it in a pull request. Four classes of mistake are caught at load time rather than during an incident: a rule that requires approval without stating an expiry behaviour, a quorum larger than its own ladder, a ladder tier that no responder stands on, and a declared fallback that is missing, self referential, or not actually safer.
+
+
+
+
+## When Nobody Answers
+
+An irreversible failover_database is proposed. The page goes to the engineer on call who holds the infrastructure skill, with 180 seconds to answer. Nobody answers. The system neither fails over nor sits still. It runs enable_read_only instead, the substitute the failover tool itself declares. Writes are rejected and checkout degrades, but no transaction in flight is lost and a human can reverse it on arrival. The journal records that it happened because nobody answered, which is a different fact from a human deciding it was a good idea.
+
+
+
+
+## Disagreement Is a Second Trigger
+
+Risk is not the only reason to involve a person. When the log analyst sees a high error rate and the metrics analyst sees healthy latency, both confidently, the hypothesis is marked contested rather than averaged into a clean answer the system does not actually have. Any action that addresses a contested hypothesis has its effective risk raised one level, so a low risk service restart that would normally run unattended stops and asks. Uncertainty about the diagnosis and danger in the fix are different problems with the same remedy, and one mechanism means nobody has to remember to wire up a second check.
+
+
+
+
+## What It Refuses To Do
+
+The expiry behaviours are deny, safe_fallback, escalate and hold. There is deliberately no allow. Approving an action because nobody looked at it in time is not approval; it is the absence of a decision written down as though it were one. A ladder whose terminal state can be "ran it anyway" is a delay mechanism wearing the costume of a control. A test asserts that the enum member does not exist, so adding it means deleting a test whose docstring explains why it should not.
+
+
+
+
+## Honest Limitations
+
+
+
+- The cluster is simulated. It is a dataclass. Nothing in the project has talked to Kubernetes, a database, or a real pager.
+
+- Rules, not models. The five workers are deterministic with hand written thresholds, and no LLM is called anywhere. Whether the escalation layer holds up when the workers are nondeterministic is the open question this project does not answer.
+
+- No scheduler. The caller drives the deadline tick, which is what makes every deadline testable at its precise boundary. It also means a deployment needs something that calls it on a timer, and that part is not written here.
+
+- No notification channel. The journal exposes a subscribe hook where a pager would attach. Nothing attaches to it.
+
+- Static roster. Seven people in a YAML file, with no rotation schedule, timezones, or handover.
+
+
+
+
+
+## What This Project Demonstrates
+
+In handoff the supervision is the product rather than a wrapper around it. A supervisor is the only component permitted to execute. Workers are handed a registry filtered to read only tools, so they cannot reach a mutating one by name. The escalation layer has tiers, skills, load balancing, quorum, deadlines and a declared behaviour for silence. There are no dependencies, so the whole suite runs on a bare interpreter in under a tenth of a second. During the build the suite caught two design flaws, one of which was a safety path that could never actually run.
+
+
+
+==================== PROJECT 13: comms-agent: Agent Orchestration for Communications Monitoring
+META: Agent Orchestration / LLM Systems / Aug 2026
+BADGE: stateful graph / tool calling / 9 of 24 flagged, 7 corrected via HITL gate
+TAGS: Python, Agent Orchestration, State Graph, Tool Calling, LLM, Human in the Loop, Reporting
+REPO: "https://github.com/TanayPratapSingh/comms-agent"
+24 mention run / 9 flagged low-confidence / 7 corrected by human before reporting / plan -> classify -> HITL gate -> report
+
+
+
+## Why This Matters
+
+This is the automation layer that sits on top of a monitoring pipeline. Where media-pulse is the measurement system, comms-agent runs it and produces the brief. It targets three qualifications that come up together: agent orchestration with planning and tool calling, AI driven automation combined with human quality assurance, and responsible AI practice through an explicit confidence gate and an audit trail.
+
+
+
+
+## The Agent
+
+The flow runs plan, ingest, classify, a conditional review gate, human review, aggregate, and report. The gate is a conditional edge. If any mention came back below the confidence threshold, the run routes to human review; otherwise it skips straight to aggregation. So the human in the loop quality gate lives in the agent's control flow. On the sample run the agent flags 9 of 24 mentions and the reviewer, simulated in the demo, corrects 7 of them before anything is reported, so the brief is built from the corrected labels.
+
+
+
+
+## The Orchestrator
+
+Underneath is a small state graph engine with the pieces that matter in production agent frameworks: named nodes over a shared state, fixed and conditional edges, per node retries, a max step guard against infinite loops, and a complete execution trace. It uses no agent framework on purpose, and porting the same graph to a library like LangGraph is a mechanical change. Every tool call is recorded, so a run produces an auditable trace of exactly what the agent did.
+
+
+
+
+## The LLM
+
+The agent depends only on a small LLM interface. The default behind it is a deterministic mock model, which keeps runs and tests reproducible offline. Swapping in a hosted model is a one method change with no edits elsewhere, because the pipeline depends on the interface, not the provider.
+
+
+
+
+## Honest Limitations
+
+
+
+- Synthetic sample. It runs on the same fictional brand corpus as media-pulse.
+
+- Mock model. The default LLM templates the report wording; a hosted model improves the phrasing, not the pipeline.
+
+- Simulated reviewer. In the demo the human review step is backed by an oracle, where production would use a real review UI.
+
+
+
+
+
+## What This Project Demonstrates
+
+Agent orchestration built without a framework: a stateful graph with planning, tool calling, conditional routing, retries, and a human in the loop gate, wrapped around a real task and producing an auditable trace. The model handles the confident mentions, and a human handles the uncertain tail before anything reaches the report.
+
+
+
+==================== PROJECT 14: Project Mark: Designing Deterministic Analytics Traps to Stress Test Frontier Models
+META: AI Evaluation / Analytics Red Teaming / Jul 2026
+BADGE: 4 verified statistical traps / frontier-model evaluation
+TAGS: Python, Pandas, NumPy, SciPy, Statistical Inference, Causal Reasoning, Experiment Design, LLM Evaluation, Data Cleaning, Reproducibility
+REPO: ""
+5 datasets profiled  |  4 trap families built and verified  |  deterministic golden solutions reproduced to the digit  |  CC licensed multi file corpora  |  frontier models solved the clean traps
+
+          
+
+## What The Project Was
+
+          
+            The brief was unusually specific. Every submission had to be a product analytics question of the kind a technology company actually faces, analyzing how users behave inside a digital product to drive a product, growth, or monetization decision. Each had to resolve to a single deterministic recommendation that ten domain experts would independently agree on, be reconstructible entirely from the shipped files, and be hard enough that a panel of frontier models would fail it. A valid stump had a concrete bar. Across eight model responses, at least two of the first four and one of the second four had to land on a meaningfully different answer. Difficulty had to come from methodology and reasoning, never from vague wording or a trick definition.
+          
+
+
+          
+
+## The Real Constraint: Fairness Plus Difficulty At The Same Time
+
+          
+            A good task has to be fair and hard at once. Fair means the correcting fact lives somewhere in the corpus, every file opens with standard tooling, and all defensible cleanings converge on the same answer. Hard means a strong analyst, or a strong model, still gets it wrong on the first pass. The input files also had to be real and properly licensed (public domain or Creative Commons only, verified per dataset) and never model generated, with six or more files across a variety of formats and several of them load bearing. Satisfying every one of those at once, on real data, is most of the work.
+          
+
+
+          
+
+## Traps I Built And Verified
+
+          
+            Every trap below was implemented against real data and checked with code so the intended answer reproduced exactly before anything shipped. Each one pairs a headline number that is real, easy to compute, and misleading with a correcting analysis that a rushed solver skips.
+          
+
+          
+            
+- Composition shift (Simpson's paradox). A blended retention or conversion metric that declines quarter over quarter while every underlying segment is flat or improving, because the mix of segments moved. The naive read (the product is getting worse) is refuted by a segmentation the solver has to discover and join across files on a mismatched key.
+            
+- Outlier artifact in an A/B revenue test. On a real experiment dataset, one arm's revenue looked competitive, but 123 users (0.06 percent of the group) each paid a near identical anomalous amount and accounted for 89.4 percent of that arm's revenue, while the other arm had none. The correct call requires recognizing the cluster as non genuine, handling the zero inflated heavy tailed distribution properly (decompose conversion times value, use robust tests), and flipping the decision the raw averages imply.
+            
+- Confounded and circular metrics. A composite health score presented as independent corroboration that actually embeds the very metric under investigation, so citing it double counts one signal. The same family covers correlation dressed up as causation on observational data.
+            
+- Mismatched population merges. A distractor file with similar looking columns that covers a different population entirely (different platform, window, or cohort), tempting a solver to merge it in and report a figure that does not apply to the group in question.
+          
+
+          
+
+## The Final Task: An Engagement Feature Decision On Real Learning Platform Data
+
+          
+            The most fully developed task used the Open University Learning Analytics Dataset (real virtual learning environment click logs, registrations, and outcomes for tens of thousands of students, released under CC BY). The business question was which one engagement initiative to fund to raise course pass rates: a richer per session experience, or a nudge to return on more days. A shipped internal pre read recommended the per session option, backed by a real and reproducible correlation (total clicks versus passing at r = 0.56, with pass rate climbing from 0.3 percent to 91.9 percent across activity quintiles).
+          
+
+          
+            That correlation is the trap. Total activity confounds two distinct levers: how many days a student returns, and how much they do per session. Decompose clicks into active days times clicks per active day, regress both against passing, and the entire association lives in return frequency (standardized effect around 0.24, and about 0.34 with all students included). Per session intensity collapses to essentially zero once days present is controlled. The result held within every module and whether or not withdrawn students were included, so the deterministic answer is to fund return frequency, not intensity. I built two corroborating decoy artifacts pointing at the wrong lever and verified that every figure reproduced from the raw files. The task cleared the program's automated construction and determinism checks.
+          
+
+
+          
+
+## Why This Is A Happy Failure
+
+          
+            It did not stump the models. In repeated live rollouts, strong frontier models independently rebuilt the analysis from the raw files, ran the frequency versus intensity decomposition, ignored the decoy pre reads, and reached the correct answer, often quoting the exact adjusted numbers. Hardening the framing and adding more authoritative decoys did not change the outcome. The reason is structural. The move that cracks the task, decompose a composite metric and test the parts, is a reflexive step for a capable analyst, so a frontier model does it whether or not the prompt signposts it.
+          
+
+          
+            Stumping a frontier model on a clean, fair analytics problem requires a trap that sits outside a strong reasoner's default repertoire, which is a far higher bar than "a smart person would need to be careful here." I watched capable models reject a plausible but confounded headline artifact and reconstruct the correct causal story from first principles. That is a calibrated data point about where these systems are now strong, and it changed how I think about designing evaluations for them.
+          
+
+
+          
+            
+
+## What This Project Demonstrates
+
+            
+              I built adversarial, deterministic traps (Simpson's paradox, outlier and confounding artifacts, correlation versus causation, population mismatches) on real, licensed, multi file data and verified each one reproducibly. Trying, and failing, to beat frontier models fairly is what gave me a calibrated read on their capability. The less visible work was disciplined data provenance and licensing, golden solutions checked to the digit before shipping, and reporting an honest negative result.
+            
+
+          
+
+==================== PROJECT 15: media-pulse: Communications Measurement with Human-in-the-Loop QA
+META: Applied NLP / Human in the Loop / Aug 2026
+BADGE: topic acc 0.88 -> 0.96 with review / sentiment 0.50 -> 0.85 / ECE 0.156
+TAGS: Python, Scikit learn, VADER, TF-IDF, Logistic Regression, Streamlit, Calibration (ECE), Human in the Loop, Responsible AI
+REPO: "https://github.com/TanayPratapSingh/media-pulse"
+120 sample mentions / topic accuracy 0.88 -> 0.96 after review / sentiment 0.50 -> 0.85 / topic ECE 0.156 / held out test n = 48
+
+
+
+## Why This Matters
+
+media-pulse runs the full communications measurement loop in one system, ingestion through reporting, rather than a single model in a notebook. It covers the mix that communications measurement roles ask for at once: AI classification paired with human quality assurance, media and sentiment analytics, internal tooling for non technical teams, and responsible AI practice.
+
+
+
+
+## What It Does
+
+Ingestion is pluggable: a bundled sample source ships with the project and an RSS adapter shows how a live feed drops into the same schema without changing anything downstream. Each mention is scored for sentiment (VADER) and topic (a TF-IDF and logistic regression model), with a confidence attached to every prediction. It also gets message pull-through detection for pre approved key messages and a relevance score.
+
+
+
+
+## Human in the Loop
+
+Any prediction whose confidence falls below a threshold goes to a review queue instead of being trusted. A reviewer confirms or corrects it, the corrected label overwrites the model output, and every action is written to an immutable audit log. On the sample corpus this lifts held out topic accuracy from 0.88 to 0.96 and sentiment accuracy from 0.50 to 0.85, and the dashboard shows the uplift directly. Large citizen science classification pipelines use the same pattern: the model does the bulk of the work and humans adjudicate the uncertain tail.
+
+
+
+
+## Responsible AI
+
+Alongside the business metrics (coverage over time, sentiment mix, share of voice weighted by outlet reach, message pull-through), the system runs a quality review of the classifier itself: accuracy on a held out test set, expected calibration error to check that the confidence scores are honest, and an accuracy breakdown by outlet type that shows where the model is weakest.
+
+
+
+
+## Runs Anywhere
+
+A four tab Streamlit dashboard (overview, coverage, review queue, model QA) sits on top. The project falls back to bundled numpy and lexicon models when scikit-learn or VADER are not installed, so it runs offline and switches to the production models automatically once the requirements are in place.
+
+
+
+
+## Honest Limitations
+
+
+
+- Synthetic corpus. The data is a deterministic sample about a fictional brand, built to demonstrate the pipeline, not a live media feed.
+
+- Fallback models are weaker. The lexicon sentiment model used offline is less accurate than a hosted model, which is part of why the human review uplift is large.
+
+- Single node. It runs on one machine, not at production stream volume.
+
+
+
+
+
+## What This Project Demonstrates
+
+One repository covers the qualifications that appear together in communications and analytics roles: AI driven classification with human in the loop QA, media and sentiment measurement, an internal facing dashboard, an end to end data pipeline, and responsible AI practice through calibration, subgroup review by outlet type, and a full audit trail.
+
+
+
+==================== PROJECT 16: Multi Horizon Geomagnetic Kp Index Prediction
+META: Deep Learning / 2026
+BADGE: 45% better than baseline / 96K+ hourly obs
+TAGS: LSTM, TensorFlow, Keras, Time Series, NASA OMNI2, Multi Output, Regularization
+REPO: "https://github.com/TanayPratapSingh/multi-horizon-aurora-kp-prediction"
+1h RMSE = 0.738 (45% better than baseline)  |  1h MAE = 0.476  |  1h R&sup2; = 0.690  |  96,000+ hourly observations
+
+          
+
+## Why This Matters
+
+          
+            Geomagnetic storms come from solar wind disturbances interacting with Earth's magnetosphere, and they have already done real damage. The 1989 Quebec blackout cut power to six million people for nine hours. The 2003 Halloween storms damaged satellites and disrupted aviation. The economic exposure of severe storms is in the billions of dollars. Operators need lead time, ideally six to twelve hours, to safe satellites, derate transformers, and reroute aviation away from polar GPS dead zones. The Kp index (a 0 to 9 quasi logarithmic scale measured every three hours) is the standard operational trigger. A better Kp forecast at multiple horizons gives operators more lead time to act.
+          
+
+
+          
+
+## Stakeholders and Why Multi Horizon Matters
+
+          
+            Different operators need different lead times. Satellite mission controllers need 6 to 12 hour notice to plan orbital maneuvers and power down sensitive instruments. National grid operators need a few hours to derate transformers ahead of geomagnetically induced currents. GPS dependent industries (aviation, surveying, autonomous vehicles, precision agriculture) act on shorter horizons. So the model predicts all four horizons in one forward pass instead of training four separate models. Four separate forecasts might silently disagree with each other; one forward pass gives a single, internally consistent forecast across the full operational range.
+          
+
+
+          
+
+## Data
+
+          
+            The data comes from NASA's OMNI2 high resolution database, which holds hourly measurements of solar wind and interplanetary magnetic field parameters. It covers eleven years (January 2013 to December 2024), 96,552 hourly records in total. The window spans the declining phase of solar cycle 24, the 2019 to 2020 solar minimum, and the rising phase of solar cycle 25, so the model sees both quiet and active regimes.
+          
+
+          
+            From the original 55 parameters I selected 15 features, based on physics literature and correlation analysis against Kp. Feature importance fell into clear physical categories:
+          
+
+
+          
+            
+            Figure 1. Pearson correlation of selected features with Kp, grouped by IMF, solar wind, derived, and geomagnetic indices
+          
+
+          
+            The strongest predictor was ap_Index (r = 0.825), followed by auroral electrojet indices (AE r = 0.732, AL r = -0.663, AU r = 0.690). IMF_Bz_GSM correlated more weakly than expected (r = -0.238), because the dataset includes all periods rather than just storm windows.
+          
+
+
+          
+
+## Architecture
+
+          
+            The model is a two layer LSTM:
+          
+
+          
+            
+              ParameterValue
+            
+            
+              Input sequence length24 hours (24 timesteps x 15 features)
+              Output4 predictions (Kp_1h, Kp_3h, Kp_6h, Kp_12h)
+              Loss functionMean Squared Error
+              OptimizerAdam, initial learning rate 0.001
+              Batch size64 sequences
+              EpochsMaximum 50, early stopping at epoch 39
+              NormalizationStandardScaler on all features
+            
+          
+
+          
+            The split is chronological (50% train / 16.6% validation / 16.6% test), with 8,761 hour temporal gaps between sets to prevent leakage, because in a time series the sequential boundary matters. Training converged cleanly, with the best validation loss at epoch 39. After that, validation loss plateaued while training loss kept improving (the textbook overfit signature, which early stopping caught).
+          
+
+
+          
+            
+            Figure 2. Training and validation loss over epochs, with best epoch 39 marked
+          
+
+          
+
+## Results by Horizon
+
+
+          
+            
+              HorizonRMSEMAER&sup2;Baseline RMSEImprovement
+            
+            
+              1 hour0.7380.4760.6901.34+44.9%
+              3 hours0.9100.6550.5281.34+32.1%
+              6 hours1.0730.7930.3431.34+19.9%
+              12 hours1.2070.9060.1701.34+9.9%
+            
+          
+
+          
+            
+            Figure 3. RMSE of the LSTM vs the mean baseline across 1, 3, 6, and 12 hour horizons
+          
+
+          
+            Performance degrades smoothly with horizon, as it should for any forecasting system, since the signal to noise ratio falls with lead time. The 1 hour horizon is the most useful for short term tactical actions (GPS protection, immediate satellite ops). The 6 and 12 hour horizons carry less confidence but still support strategic planning.
+          
+
+
+          
+
+## Behavior During Real Storm Events
+
+          
+            The most useful diagnostic is whether the model can flag a storm coming, even imperfectly. Below is a 200 hour window from the test set covering a real storm event (red shaded zone, where actual Kp crosses the threshold of 5). All four horizons capture the storm onset, but with different lag and magnitude. The 1 hour forecast tracks actual Kp closely; the 12 hour forecast smooths the peak but still indicates elevated activity.
+          
+
+
+          
+            
+            Figure 4. Multi horizon LSTM predictions vs actual Kp over a 200 hour test window, storm period highlighted in red
+          
+
+          
+
+## Avoiding the Data Leakage Trap
+
+          
+            Geomagnetic indices like ap, AE, and AL are strongly correlated with Kp because they all derive from magnetometer measurements responding to the same underlying phenomena. That is a real leakage risk if the model accidentally uses concurrent index values to predict Kp. I verified that the indices are 3 hour averaged values (not instantaneous), that the 24 hour lookback window uses strictly historical values to predict future Kp, and that the 1 year temporal gaps between train, validation, and test sets prevent any contamination across the splits. Operational forecasting literature confirms that including these indices is standard practice rather than a methodological shortcut.
+          
+
+
+          
+            
+
+## Operational Reading
+
+            
+              The 1 hour forecast clears a useful operational bar: 45% better RMSE than naive mean prediction, and R&sup2; of 0.690 (the model explains roughly two thirds of variance in storm intensity). At longer horizons the model degrades but stays informative. One model gives the immediate alarm and a softer signal further out, instead of four separate models that might silently disagree.
+            
+
+          
+
+==================== PROJECT 17: The Perfect Lap: F1 Pit Stop Strategy Optimization
+META: Machine Learning / Jul 2025 to Dec 2025
+BADGE: 2.78-lap MAE / 250K+ records / Streamlit deployed
+TAGS: Random Forest, Python, Scikit learn, Streamlit, SHAP, Pandas, CatBoost, Extra Trees
+REPO: "https://github.com/TanayPratapSingh/the-perfect-lap"
+Test MAE = 2.78 laps  |  Test R&sup2; = 0.591  |  250,000+ records  |  45 engineered features  |  Streamlit deployed
+
+          
+
+## Why This Matters
+
+          
+            Few calls in motorsport carry more weight than pit stop timing. A miscall on lap selection can cost a team between two and five constructor championship positions over a season, which means millions of dollars in lost prize money and sponsorship value. Race engineers make these calls in the moment, with limited time, from experience and real time telemetry. The premise of this project was that if a model can predict the optimal lap accurately enough, it becomes a live sanity check that the human strategist either validates or knowingly overrides, instead of a guess they make alone.
+          
+
+
+          
+
+## Stakeholders and Value
+
+          
+            
+- Race engineers get a predicted first pit lap on race day, a baseline they can use to justify or override their intuition.
+            
+- Strategy directors get patterns across decades of races for pre season planning, such as circuit and race length outweighing driver identity.
+            
+- Broadcast analysts and fantasy F1 platforms get a predicted pit lap, and the features that drove it, to explain to viewers.
+          
+
+          
+
+## Data and Cleaning
+
+          
+            The source is the Formula 1 World Championship dataset on Kaggle (1950 to 2020), with 250,000+ records across thirteen interconnected tables (races, results, pit stops, drivers, constructors, lap times, qualifying, status codes, circuits, and more). I added a custom track_features table with tire degradation level and pit lane time loss per circuit, because these physical factors drive strategy and the raw schedule data does not capture them well. The data was filtered to post 2000 races to focus on the modern tire era, since pre 2000 strategy was driven by fuel weight rather than tire compounds. The final modeling dataset is 14,000+ driver race rows with 45 engineered features.
+          
+
+          
+            Cleaning removed invalid pit lap records (below lap 1 or above lap 40 are data entry errors), stripped drivers with more than two pit stops per race (these signal damage or weather chaos rather than normal strategy), and dropped early DNFs so the training set reflects strategic behavior rather than mechanical failures.
+          
+
+
+          
+
+## Recovering Missing Data
+
+          
+            Pit records before 2012 were sparse. Dropping every row with a missing pit lap would have shrunk the dataset from 10,000 rows to 3,000. I trained a dedicated Random Forest imputer that recovered roughly 70% of missing first pit laps using six predictors that are reliably present even in older races: driver ID, constructor ID, race year, starting grid position, total race laps, and circuit ID. Imputation MAE was about six laps on a held out validation set, which is tolerable given pit windows typically span ten to fifteen laps.
+          
+
+
+          
+
+## Models Compared
+
+          
+            I compared four tree based regressors plus a decision tree baseline, with identical splits and cross validation. I left out neural networks and SVMs on purpose, because they are computationally heavier and consistently underperform tree ensembles on tabular data with this feature mix.
+          
+
+
+          
+            
+              ModelTrain MAETest MAETrain R&sup2;Test R&sup2;Status
+            
+            
+              Random Forest1.0072.780.9430.591Selected
+              Extra Trees~02.911.0000.551Overfits
+              CatBoost2.5403.020.7020.5232nd best
+              Gradient Boosting3.2343.150.5640.487Weakest
+            
+          
+
+          
+            Random Forest reached a Test MAE of 2.78 laps and Test R&sup2; of 0.591, so on average its predicted pit lap is roughly three laps from what teams actually did. Extra Trees showed near perfect training scores but worse generalization, the classic memorization signature. Gradient Boosting struggled with the noise introduced by safety cars and weather changes, since it prefers smoother data patterns. CatBoost would normally have a categorical handling advantage, but our pipeline pre encoded categorical variables for fair comparison, which removed that edge.
+          
+
+
+          
+            
+            Figure 1. Feature importance across Random Forest, Extra Trees, Gradient Boosting, and CatBoost
+          
+
+          
+
+## What the Model Learned
+
+          
+            SHAP analysis on the Random Forest model shows that race structure features dominate the prediction. The top five contributors are total laps, planned pit stop count, year (proxying for regulation changes), round, and starting grid position. Driver and constructor identities mattered considerably less than F1 commentary tradition suggests.
+          
+
+
+          
+            
+            Figure 2. SHAP beeswarm showing direction and magnitude of each feature's impact on predicted pit lap
+          
+
+          
+            
+
+## Practical Implication
+
+            
+              Pit timing is more a property of the physical system (circuit, race length, planned stops) than of the person behind the wheel. For engineers, that means adapting strategy to circuit and race length first, team history second, driver style third.
+            
+
+          
+
+          
+
+## Deployment
+
+          
+            The final Random Forest model was serialized and packaged into a Streamlit web application (team_omega_rf_app.py). Race engineers input live race context (circuit, grid position, planned stops, weather) and the app returns a predicted first pit stop lap in real time, alongside the SHAP feature importances that drove the prediction. Serialized model artifacts (f1_random_forest_model.pkl, model_features.pkl) live in the project repository.
+          
+
+
+          
+
+## Honest Limitations
+
+          
+            
+- No live race signals. Safety car deployments, sudden weather changes, and real time tire telemetry are absent. These drive real pit decisions, so there is a genuine information gap between the static model and live race conditions.
+            
+- First stop only. The model predicts only the first pit lap, not full multi stop strategies. Later stops depend on the first, and the current approach does not capture that dependency.
+            
+- No competitor model. Real strategy reacts to opponents (undercuts, overcuts). The model encodes neither opponent positions nor gap sizes.
+            
+- Regulation drift. F1 rules change often. Patterns from early 2000s races may not apply directly to current regulations, which slightly dilutes accuracy when predicting contemporary strategy.
+          
+
+==================== PROJECT 18: Managing July Energy Demand Under a Warming Climate
+META: Predictive Modeling / Jan 2025 to May 2025
+BADGE: +25.4% peak load at +5&deg;C / 9.2% savings modeled
+TAGS: Random Forest, XGBoost, Linear Regression, Python, Climate Scenarios, Residential Energy
+REPO: "https://github.com/TanayPratapSingh/energy-usage-prediction"
+Random Forest R&sup2; = 0.48  |  RMSE = 0.500 kWh  |  +25.4% projected peak hour load at +5&deg;C  |  9.2% savings from 1&deg;C setpoint shift
+
+          
+
+## Why This Matters
+
+          
+            When July temperatures rise, residential air conditioning load swings hard upward, peak hour demand spikes, and grid operators face a choice: build more generation (slow, expensive, capital intensive) or shift demand through pricing and behavioral signals (fast, cheap, but only effective if you know what works). This project gives eSC the second tool. We forecast residential consumption under a sustained warming scenario, then quantify which interventions recover the most demand without infrastructure investment.
+          
+
+
+          
+
+## Stakeholders
+
+          
+            
+- Utility capacity planners get a modeled peak hour load under a sustained warming scenario instead of extrapolating last summer.
+            
+- Demand response program managers get a savings estimate for the simplest intervention available (a 1&deg;C cooling setpoint shift), which they can use to justify smart thermostat rollouts.
+            
+- Regulators and ratepayer advocates get evidence on how much behavioral and efficiency programs can substitute for new generation capacity.
+          
+
+          
+
+## Data
+
+          
+            Three datasets were joined on common keys: a household metadata file (square footage, occupants, wall insulation type, cooling setpoint), an hourly energy consumption file linked by bldg_id, and a weather file linked by in.county. A metadata file documented what each column means. The combined data was filtered to July to focus on peak cooling season, then merged into one record per house per hour. A reusable merge function lets the same pipeline run on other months and seasons.
+          
+
+
+          
+
+## What Drives Residential Consumption
+
+          
+            EDA established four primary drivers of July energy usage:
+          
+
+
+          
+            
+              
+              Figure 1. Energy usage increases with outdoor dry bulb temperature
+            
+            
+              
+              Figure 2. Energy usage scales near linearly with household square footage
+            
+          
+
+          
+            
+              
+              Figure 3. Energy usage by number of occupants
+            
+            
+              
+              Figure 4. Energy usage by wall insulation type
+            
+          
+
+          
+            Outdoor temperature is the dominant driver, and consumption scales near linearly with square footage. Occupant count matters but plateaus quickly. Usage varies only modestly across wall insulation types in the housing stock, which suggests envelope upgrades have lower marginal return than HVAC and setpoint interventions on this dataset.
+          
+
+
+          
+
+## Models Compared
+
+          
+            Three models were trained on five features (dry bulb temperature, square footage, occupants, cooling setpoint, hour of day):
+          
+
+
+          
+            
+              ModelRMSE (kWh)R&sup2;Notes
+            
+            
+              Linear Regression0.5830.29Cannot capture non linear temperature response
+              XGBoost0.5030.47Strong on non linear patterns, close second
+              Random Forest0.5000.48Selected for forecasting
+            
+          
+
+          
+
+## The +5&deg;C Stress Test
+
+          
+            Sustained warming scenarios were applied directly to the temperature feature and pushed through the trained model:
+          
+
+          
+            
+- Average July hour, baseline: 1.09 kWh predicted.
+            
+- Average July hour, +5&deg;C: 1.25 kWh predicted (a 14.7% increase).
+            
+- Peak hour (9 PM) baseline: 81,600 kWh aggregate across the sample.
+            
+- Peak hour (9 PM) at +5&deg;C: 102,355 kWh aggregate, a 25.4% surge.
+          
+
+          
+            
+
+## Policy Lever: 1&deg;C Setpoint Adjustment
+
+            
+              Layering a 1&deg;C cooling setpoint increase during peak hours (16:00 to 21:00) on top of the +5&deg;C warming scenario produces:
+            
+
+            
+              
+- Average usage at +5&deg;C: 1.30 kWh per hour
+              
+- Average usage with +1&deg;C setpoint adjustment: 1.18 kWh per hour
+              
+- Average savings: 0.12 kWh per hour, or 9.2% of peak hour demand
+            
+            
+              A single degree of thermostat tolerance, applied across a customer base, cuts modeled peak hour demand in the warming scenario by nearly one tenth, with no infrastructure investment.
+            
+
+          
+
+          
+
+## Recommendations to eSC
+
+          
+            
+- Time of use pricing during peak hours. Shift discretionary demand off peak through price signals rather than capacity expansion.
+            
+- Smart thermostat rollout. Thermostats can apply the 1&deg;C setpoint adjustment automatically across the customer base instead of relying on individual behavior change.
+            
+- Modern HVAC incentives. Older units carry disproportionate cooling load; replacement programs targeted at the worst performers compound the setpoint benefit.
+            
+- Passive cooling design for new builds. A long term lever that compounds over the multi decade life of the housing stock.
+          
+
+==================== PROJECT 19: Challenging "Wealth Equals Health": Education as the Hidden Lever
+META: Quantitative Data Storytelling / Jan 2025 to May 2025
+BADGE: 180+ countries / ANOVA F = 426.5 (p < 2e-16)
+TAGS: R, ggplot2, Multiple Regression, ANOVA, Bayesian Inference, Gapminder
+REPO: ""
+180+ countries  |  Period: 2000 to 2020  |  Combined BF = 1.65 x 10&#179;&#x2078;&#x2078;  |  ANOVA F = 426.5 (p < 2e-16)
+
+          
+
+## Why This Matters
+
+          
+            "Richer countries are healthier" is one of the most common framings in development work, and it has a real consequence for where money goes. Development funding tends to flow toward GDP growth as the master strategy, with health and education treated as downstream beneficiaries. The explicit goal here was evidence a community leader can use to argue for education investment in rural communities. The final report is written for an intentionally non technical audience: adults, teenagers, and children who can act on the conclusion.
+          
+
+
+          
+
+## Research Questions
+
+          
+            
+- To what extent does income influence life expectancy across countries?
+            
+- Can education serve as a more effective tool than income in reducing child mortality?
+          
+
+          
+
+## Data
+
+          
+            The data is the Gapminder global dataset, covering 180+ countries between 2000 and 2020, with these variables:
+          
+
+          
+            
+- GDP per capita as the measure of national income, log transformed to address right skew from extreme high income outliers.
+            
+- Life expectancy as the primary health outcome, ranging from roughly 40 to 85 years.
+            
+- Child mortality as the most policy responsive health metric, ranging from fewer than 5 deaths per 1,000 births in high income countries to over 150 in low income countries.
+            
+- Mean years of schooling for adults aged 25 to 34, the most reliable cross country proxy for education access, ranging from 2 to 15 years.
+          
+
+          
+
+## Exploratory Visualizations
+
+
+          
+            
+              
+              Figure 1. Log GDP vs life expectancy, all countries 2000 to 2020
+            
+            
+              
+              Figure 2. Log GDP vs child mortality, all countries 2000 to 2020
+            
+          
+
+          
+            
+            Figure 3. Mean years of schooling vs child mortality. The negative relationship is stronger and tighter than for GDP
+          
+
+          
+
+## Question 1: Does GDP Predict Life Expectancy?
+
+          
+            Linear regression of life expectancy on log GDP per capita gave a coefficient of 17.6 (p < 2e-16), a strong positive relationship. Bayesian regression returned a Bayes Factor of 5.66 x 10&#178;&#185;&#x2078; in favor of GDP as a predictor, which is overwhelming evidence. The answer to the first question is yes, GDP matters.
+          
+
+
+          
+
+## Question 2: Does Education Beat GDP for Child Mortality?
+
+          
+            Multiple regression of child mortality on both mean years of schooling and log GDP returned two significant negative coefficients:
+          
+
+          
+            
+- Mean years of schooling: estimate = -0.76, p < 2e-16
+            
+- Log GDP per capita: estimate = -74.14, p < 2e-16
+          
+          
+            Bayesian model comparison returned a combined Bayes Factor of 1.65 x 10&#178;&#x2078;&#x2078; in favor of the model that includes both predictors. That is overwhelming evidence that each predictor carries independent information about child mortality.
+          
+
+
+          
+
+## Confirmatory Tests
+
+          
+            Welch's t test compared child mortality between high education and low education country groups:
+          
+
+
+          
+            
+            Figure 4. Child mortality by education group (Welch's t test). Mean difference &#8776; 57 deaths per 1,000 births, p < 2.2e-16
+          
+
+          
+            One way ANOVA on life expectancy by GDP group (Low, Medium, High) returned F = 426.5, p < 2e-16:
+          
+
+
+          
+            
+            Figure 5. Life expectancy by GDP group (ANOVA, F = 426.5, p < 2e-16)
+          
+
+          
+            
+
+## The Practical Conclusion
+
+            
+              Income matters, but it is not the lever development funders should pull first. Education is just as strong a predictor of child mortality as GDP is, and unlike GDP, a rural community can act on it directly through school access, teacher training, and maternal literacy programs.
+            
+
+            
+              Each additional year of schooling is associated with a measurable drop in child deaths, regardless of country wealth. For a community leader, the evidence based course is to keep children (especially girls) in school through secondary education, combine schooling with practical instruction on hygiene, nutrition, vaccination, and early childhood care, and advocate for school infrastructure investment.
+            
+
+          
+
+==================== PROJECT 20: Uber Data Engineering Pipeline
+META: Data Engineering / Jul 2024 to Dec 2024
+BADGE: End-to-end GCP pipeline / star schema / BigQuery
+TAGS: GCP, BigQuery, Power BI, SQL, Python, ETL, Star Schema
+REPO: ""
+End to end cloud pipeline  |  Star schema modeling  |  Cloud Storage + Compute Engine + BigQuery  |  Interactive BI dashboard
+
+          
+
+## Objective
+
+          
+            Most data engineering exercises stop at a notebook. I wanted the full lifecycle in one project, end to end on a real cloud stack: ingestion, storage, transformation, modeling, querying, and visualization. The deliverable was the entire path from a raw data file to a stakeholder ready dashboard, rather than a single model or chart.
+          
+
+
+          
+
+## Architecture
+
+          
+            I modeled the raw NYC taxi trip data as a star schema in Lucid Charts, with fact and dimension tables and explicit primary and foreign key relationships. The infrastructure was deployed on Google Cloud Platform in three layers:
+          
+
+          
+            
+- Storage layer. Cloud Storage as the data lake for raw and intermediate Parquet files.
+            
+- Compute layer. Compute Engine VMs running Python ETL jobs that read from Cloud Storage, transform with Pandas and NumPy, and write back as cleaned Parquet.
+            
+- Analytics layer. BigQuery for SQL analytics at scale, with the cleaned data loaded as partitioned tables for efficient time range queries.
+          
+
+          
+
+## Analysis and Presentation
+
+          
+            Exploratory analysis in Jupyter surfaced patterns in trip distance distribution, fare structure, revenue concentration, and service usage across boroughs and times of day. The findings then fed an interactive Power BI dashboard with geographical heat maps, time series views, and slicers for stakeholder driven exploration.
+          
+
+
+          
+
+## Lesson
+
+          
+            Moving from local CSV files to distributed cloud storage and compute changed how I think about data work more than any individual tool did. When data lives in object storage and compute is elastic, scaling up by an order of magnitude becomes a configuration change rather than a bottleneck.
+          
+
+
+==================== PROJECT 21: Travel Itinerary Management System
+META: Database Engineering / Jan 2025 to May 2025
+BADGE: 12-entity normalized schema / full itinerary in one call
+TAGS: SQL, Data Modeling, Stored Procedures, Triggers, User Defined Functions, ERD Design, 3NF
+REPO: ""
+12 normalized entities  |  3 stored procedures  |  2 triggers  |  1 user defined function  |  Single procedure call generates full itinerary
+
+          
+
+## Why This Matters
+
+          
+            An itinerary database carries rules that have to hold on every access path: an activity cannot have negative cost, a hotel must belong to a real destination, an itinerary cost should always equal the sum of its components. Put those rules in application code and each new feature or platform reintroduces them, badly. This project puts them in the database itself, so any client (web, mobile, batch import, ad hoc SQL) gets the same guarantees automatically.
+          
+
+
+          
+
+## Stakeholders
+
+          
+            
+- Travelers creating a trip get one call that returns a complete itinerary, with the duration and cost checks already run.
+            
+- Application developers stop writing defensive code in three languages to enforce rules the database already enforces.
+            
+- Data analysts querying the database directly get consistent data, because the triggers and foreign keys also apply to rows written through direct SQL.
+          
+
+          
+
+## Entity Relationship Design
+
+          
+            The schema has twelve entities in third normal form with full referential integrity. The core entity is itinerary, which links to destinations, activities, accommodations, transportation, seasonal information, and tags through explicit foreign keys.
+          
+
+
+          
+            
+            Figure 1. Logical ERD with all 12 tables, primary keys, foreign keys, and cardinality relationships
+          
+
+          
+
+## Stored Procedures
+
+          
+            Three procedures cover the operations a travel app actually performs:
+          
+
+          
+            
+- sp_add_full_itinerary_single: Inserts a complete itinerary (activity, transport, accommodation, season info, tag) in a single atomic call. It replaces five separate inserts plus consistency checks at the application layer.
+            
+- sp_get_full_itinerary: Returns every linked detail of an itinerary by ID, with the joins done inside the database.
+            
+- sp_get_itineraries_for_destination: Lists all itineraries available under a selected destination, the most common browse query.
+          
+
+          
+
+## Triggers for Data Integrity
+
+          
+            
+- trg_check_activity_duration: Rejects any activity insert or update where duration is zero or negative. That catches UI bugs and data import errors that would otherwise silently corrupt the cost calculations downstream.
+            
+- trg_check_activity_cost: Rejects negative cost entries, which usually indicate a typo or unit conversion error rather than a genuine refund.
+          
+
+          
+
+## Function for Reusable Logic
+
+          
+            
+- ufn_estimate_total_activity_time: Returns the total time a traveler will spend on all activities in a given itinerary. Views, filters, and ranking interfaces call it, so itineraries can be sorted or filtered by total activity duration without each of them redoing the math.
+          
+
+          
+
+## User Story Worked Through End to End
+
+          
+            "As a traveler, I want to create a trip by selecting options, so I can generate a full itinerary."
+          
+
+          
+            The client passes destination, activity, transport, accommodation, season, and tag to sp_add_full_itinerary_single. The procedure inserts each child record, links them through the itinerary table, fires the duration and cost triggers, and returns the new itinerary_id. The client makes one round trip, and the database validates the whole insert and applies it atomically.
+          
+
+
+          
+            
+
+## Design Philosophy
+
+            
+              With the business rules at the data layer, the application code gets simpler and integrity holds on every read and write path. When the database itself rejects a zero duration or a negative cost, no client has to write defensive code in its own language to catch it.
+            
+
+          
+
+==================== PROJECT 22: Digit Recognition Neural Network from Scratch
+META: Deep Learning / Jan 2024 to May 2024
+BADGE: 94% MNIST accuracy / built from scratch, no frameworks
+TAGS: Python, NumPy, Neural Networks, Backpropagation, From Scratch
+REPO: ""
+94% test accuracy on MNIST  |  No ML frameworks  |  Manual forward and backward passes
+
+          
+
+## Why Build from Scratch
+
+          
+            Frameworks hide the parts of a neural network that are most useful to understand: the matrix shapes flowing forward, the gradient math flowing backward, and the way optimization changes the weights. Building all three by hand once gives you a working mental model of what the framework is doing underneath. When a production model later silently fails, you reason about gradient flow rather than swapping layers and hoping.
+          
+
+
+          
+
+## Implementation
+
+          
+            Forward propagation is explicit weighted sums and activation functions: sigmoid in the hidden layers in the first iteration, then ReLU once vanishing gradients became visible, and softmax at the output for the ten class classification. Backpropagation computes gradients with the chain rule, layer by layer, using an explicit derivative formula for each activation function. Training runs in a mini batch gradient descent loop with tunable learning rate, batch size, and network depth.
+          
+
+
+          
+
+## Tuning
+
+          
+            Hyperparameter tuning was iterative and manual, which was the point. With the learning rate too high the loss bounced, and with it too low, training stalled. A network that was too shallow could not capture digit structure, and in one that was too deep without proper initialization the gradients vanished. Working through these failures by hand is how you learn what each knob controls.
+          
+
+
+          
+
+## Result
+
+          
+            Final accuracy was 94% on the held out MNIST test set. That is not state of the art; the goal was understanding rather than benchmark chasing. The exercise made it intuitive why deeper networks, non linear activations, and proper initialization matter.
+          
+
+
+==================== PROJECT 23: Real Time Big Data Inflow: Communication and Computation Delay Analysis
+META: Research / Jan 2024 to Dec 2024
+BADGE: 40 to 60% latency reduction / 6-dimension comparison
+TAGS: IoT, Edge Computing, Fog Computing, Cloud Computing, Stream Architecture
+REPO: ""
+40 to 60% latency reduction potential  |  12+ primary sources reviewed  |  Comparative analysis across six dimensions
+
+          
+
+## Argument
+
+          
+            The implicit default in most enterprise architectures is to send everything to the cloud. For real time systems, that default is wrong. The hard design work is deciding which computations belong near the sensor (where latency is cheap but durability is fragile and storage is limited) and which belong in the data center (where storage is durable and compute is elastic but round trips cost real time).
+          
+
+
+          
+
+## Approach
+
+          
+            The paper reviews twelve primary sources on stream processing, edge deployment patterns, and latency optimization in distributed systems. Each source is summarized for its proposed architecture and headline findings. From the literature, I propose a tiered hybrid architecture that pushes time critical computation toward the edge and keeps cloud tiers for durability, batch analytics, and global state.
+          
+
+
+          
+
+## Comparative Analysis
+
+          
+            The paper compares cloud only and tiered architectures across six dimensions: scalability, reliability, bandwidth usage, privacy and security, cost effectiveness, and end to end latency. The tiered architecture wins on latency (40 to 60% reduction for appropriately partitioned workloads), bandwidth (less raw data crosses the WAN), and privacy (sensitive data can be processed locally). It pays a small price in operational complexity and consistency guarantees.
+          

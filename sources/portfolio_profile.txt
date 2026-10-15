@@ -1,0 +1,209 @@
+=== rail
+ Skip to projects 
+ 
+ Tanay Pratap Singh 
+ Graduate data science student Syracuse University 
+ I build agent and retrieval systems and the data pipelines under them,
+ then measure where they break. 
+ 
+ Projects 
+ Experience 
+ Technical skills 
+ Education 
+ 
+ 
+ 
+ If this is too boring, click here 
+ Live data dashboards 
+ LinkedIn 
+ GitHub 
+ Resume 
+ 
+ 
+ tanayyps@gmail.com 
+ 
+ Syracuse, NY Open to AI, data, ML, and analytics roles 
+ 
+
+=== experience
+ 
+ Experience 
+ 
+ Research Assistant, Gravity Spy 2.0 
+ Syracuse University , NSF funded 
+ Feb 2026 to present 
+ 
+ Classifications parsed 276,000+ 
+ Glitch subjects 25,104 
+ Auxiliary channels 8,293 
+ Spectrograms retrieved 49,000 
+ Validation AUC 0.89 
+ Calibration error 0.10 to 0.05 
+ 
+ 
+ Gravity Spy is NSF funded citizen science that supports LIGO. The science goal is causal
+ inference on detector noise: finding which auxiliary subsystems produce the transient glitches
+ that contaminate gravitational wave strain data, so detector commissioners can fix the
+ responsible hardware instead of chasing symptoms. 
+ I built the ingestion pipeline in Python with pandas and the Zooniverse Panoptes API. It parses
+ 276,000+ volunteer classifications from 23 months of observations. The engineering work was
+ reconciling five undocumented subject metadata schemas from different project iterations,
+ covering 25,104 glitch subjects and 8,293 auxiliary detector channels, and filtering roughly 38
+ science team accounts out of the volunteer population. 
+ I wrote an OpenCV workflow that pulled 49,000 spectrograms through batch API calls and converted
+ each 1200x1200 mosaic into paired 224x224 channel heatmaps sized for model input. The pipeline
+ writes three outputs: a subject level flat file with aggregated volunteer labels, a separate file
+ for subjects missing GPS metadata, and a pivot matrix of GPS time by auxiliary channel covering
+ 455 LIGO subsystems, including PEM, SUS, LSC, ISI, ASC, and CAL. 
+ I trained a two input CNN with a shared MobileNetV2 backbone in TensorFlow and Keras to predict
+ volunteer similarity labels straight from paired spectrograms. It reaches 0.89 validation AUC on
+ a held out 2,000 subject set. Calibration matters more than the AUC here, and label smoothing,
+ AdamW, and AUC based early stopping brought Expected Calibration Error from 0.10 down to 0.05. 
+ I also ran the descriptive analysis. Volunteer effort is heavily right tailed: the top ten
+ volunteers account for 50% of all classifications. On subjects classified by more than one
+ volunteer, 52% reach perfect consensus. The code is committed to the Syracuse CCDS GravitySpy
+ Classifier repository. 
+ 
+ 
+ 
+ Lean Six Sigma Project Lead 
+ JMA Wireless , Liverpool, NY 
+ Jan 2026 to May 2026 
+ 
+ Role Project lead, 4 person team 
+ KPIs standardized 5 across 2 lines 
+ Data pipeline 31 GB JSON to under 5 MB 
+ Projected annual opportunity ~$355K 
+ Pilot: red to first action 4 h to 25 min 
+ Duration 15 weeks, on site weekly 
+ 
+ 
+ JMA Wireless is a US manufacturer of cell tower transmitters and active 5G infrastructure. This
+ was a client engagement sponsored by the SVP of Global Operations, with a named project champion.
+ I led a four person team through a full DMAIC cycle in the Jumper Department, which runs one
+ manual assembly line and one fully automated cell side by side. 
+ In Define, the problem was that nobody could compare the two lines, because Uptime and Schedule
+ Attainment meant different things to different functions. I ran the definition interviews across
+ manufacturing, quality, and production supervision and wrote a sponsor approved document that
+ fixes one formula and one target for five KPIs: Parts per Labor Hour, Uptime, First Time
+ Throughput, Schedule Attainment, and a Culture and Engagement index built from a pulse survey
+ and dashboard usage. 
+ I built the pipeline that made the automated line measurable at all. The cell emits one deeply
+ nested JSON record per test event, and two raw datasets expanded past 31 GB when loaded directly
+ into Power BI, which no machine under 64 GB of RAM could even open. Using pandas
+ json_normalize with explicit record paths and openpyxl, I flattened it to one row
+ per test event, cast types so Power Query never coerces anything, derived cycle time, and got
+ the output under 5 MB with instant refresh. 
+ The main finding came out of the definitions rather than the code. Once both lines were measured
+ the same way, the automated cell showed 97.3% uptime against 46.3% of its weekly target, and
+ those two numbers cannot both describe a machine problem. A cell that runs almost all the time
+ and still misses plan by half is input limited, so the constraint was kitting and material flow
+ upstream, not the equipment everyone suspected. The manual line was absorbing the shortfall at
+ 139.7% of its own target, which hid the demand signal going back to planning. 
+ We recommended three fixes, picked from six candidates with a Pugh matrix: a daily standup at a
+ dashboard wall screen, a two bin continuous kitting feed so the cell is never starved, and a
+ reset of a commissioning era weekly target to demonstrated capability with a documented ramp. I
+ piloted the standup for two weeks and measured it. Median time from a KPI turning red to a named
+ owner acting fell from about 4 hours to about 25 minutes, and operator familiarity with the five
+ KPIs rose from 2.4 to 4.1 on a five point scale. 
+ Projected recurring value is roughly $355,000 a year: about 27,000 additional cables from the
+ automated line at no added labor, plus about 48 analyst hours a week returned from manual
+ reporting. Both figures rest on conservative rate assumptions that the team wrote down and that
+ still need JMA Finance to confirm, so they are a sized opportunity rather than a realized saving.
+ We handed over with a Control Plan that names a refresh owner, a dashboard FMEA, and tiered
+ escalation on red status. 
+ 
+ 
+ 
+ Cybersecurity Teaching Assistant 
+ Syracuse University iSchool 
+ Summer 2025 
+ 
+ Labs delivered 15+ hands on 
+ Domains Crypto, network, pentest, forensics 
+ Toolchain Wireshark, Kali, Nmap, OpenSSL, Metasploit 
+ VM stack Kali, Win 10/Server, CentOS, Metasploitable 
+ 
+ 
+ I was the graduate teaching assistant for the cybersecurity course, and I built and taught hands
+ on labs in four areas: cryptography, network security, penetration testing, and digital
+ forensics. Each lab walks students through the full attacker workflow, from OSINT reconnaissance
+ and port scanning to exploitation and post compromise enumeration, then flips to the defensive
+ reading of the same evidence. 
+ I built and maintained the multi VM lab environments the course runs on, with Kali Linux as the
+ attacker platform against Windows 10, Windows Server, CentOS, and Metasploitable targets. I kept
+ images, network configuration, and tooling reproducible so a full section could work through the
+ same exercises without environment drift derailing the lesson. 
+ The labs cover symmetric and asymmetric cryptography and hashing with OpenSSL (SHA 256,
+ SHA 512), scanning and enumeration with Nmap, traffic capture and protocol analysis with
+ Wireshark, and exploitation with Metasploit against intentionally vulnerable targets. In the
+ forensics labs, students practice evidence handling, file and metadata analysis, and writing
+ their findings up as a report. 
+ I held office hours to debug students' own attack chains, and graded labs and incident analysis
+ reports on methodology as well as the final answer, because in security the reasoning and the
+ chain of evidence matter as much as the result. Throughout the course I kept coming back to
+ scope, authorization, and responsible handling of the tools. 
+ 
+ 
+ 
+ Data and Product Analyst Intern 
+ ProProfs , Noida, India 
+ Jul 2023 to Aug 2023 
+ 
+ SaaS users analyzed 5,000+ 
+ Customer records 2,000 clients 
+ Features benchmarked 100 to 150 
+ Churn reduction 5% 
+ Rating lift 4.2 to 4.6 
+ 
+ 
+ I did product and customer analytics in Python for SaaS products serving 5,000+ users. That
+ meant SWOT analyses, benchmarking 100 to 150 features against Zoho and Salesforce, and Ideal
+ Customer Profile analyses that fed product strategy and prioritization. 
+ I analyzed customer data for 2,000 clients with Python and Excel pivot tables, looking for
+ behavior patterns, pain points, and what drove conversion. The findings let the product team
+ prioritize two features for the next release that measurably lifted trial to paid conversion. I
+ also built interactive Tableau dashboards on SQL and Excel sources that identified under used
+ features and reduced churn by 5 percent. 
+ 
+ 
+ 
+
+=== education
+ 
+ Education and certification 
+ 
+ Master of Science, Applied Data Science 
+ Syracuse University 
+ Jan 2025 to Dec 2026 · Syracuse, NY 
+ Deep learning (CNNs, LSTMs, RNNs, word embeddings, reinforcement learning), machine learning
+ (ensemble methods, SVMs, HDBSCAN, DBSCAN, GMM, hyperparameter optimization), data engineering
+ (Spark, Kafka, ksqlDB, Hive, HDFS, MapReduce), advanced databases (Neo4j with Cypher, Redis,
+ Cassandra, Apache Drill), statistical analysis, applied research methods. 
+ Bachelor of Technology, Computer Science 
+ JSSATE Noida 
+ Dec 2020 to May 2024 · Noida, India 
+ Data structures and algorithms, operating systems, computer networks, database management
+ systems, software engineering, discrete mathematics. Capstone in machine learning and
+ distributed systems. 
+ Lean Six Sigma Green Belt 
+ Syracuse University, Whitman School of Management 
+ SCM 755 · Spring 2026 
+ Full DMAIC project at JMA Wireless sponsored by the SVP of Global Operations: standardized KPI
+ framework, Python ETL pipeline, and Power BI dashboard. 
+ 
+ 
+
+=== skills
+ 
+ Technical skills 
+ 
+ Languages Python · SQL · R · C++ · Java · JavaScript · HTML5 · CSS3 · LaTeX 
+ LLM and generative AI RAG · LangChain · OpenAI API · ChromaDB · vector databases · BM25 · agent orchestration · tool calling · state graphs · LLM gateway · guardrails · prompt injection defense · jailbreak detection · LLM evaluation · calibration (ECE) · human in the loop · PII redaction · responsible AI · VADER · TF-IDF 
+ MLOps and deployment MLflow · Apache Airflow · Docker · Docker Compose · Kubernetes · GitHub Actions · CI/CD · model registry · REST APIs 
+ Deep learning LSTM · RNN · CNN · multimodal CNN · NLP · computer vision · transfer learning · MobileNetV2 · backpropagation · feature engineering · data imputation · SHAP interpretability 
+ ML and data science libraries pandas · NumPy · scikit-learn · TensorFlow · Keras · XGBoost · CatBoost · SHAP · SciPy · OpenCV · Astropy · openpyxl · Matplotlib · Seaborn · Plotly · Spark 
+ Databases and data engineering MySQL · BigQuery · DuckDB · Apache Kafka · Avro · dbt · Hadoop · Hive · HDFS · ksqlDB · MapReduce · ETL pipelines · star schema · dimensional modeling · stored procedures 
+ 
+ 
+
