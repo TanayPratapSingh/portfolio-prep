@@ -1,0 +1,1421 @@
+{
+  "deck_id": "p-distributed-vit",
+  "title": "Distributed ViT on CIFAR-10",
+  "group": "Portfolio",
+  "repo": "https://github.com/TanayPratapSingh/distributed-vit-cifar10",
+  "summary_easy": "Tanay trained a small image classification model on two GPUs and measured honestly what the second GPU bought. In full precision two GPUs were 1.96x faster than one; with mixed precision turned on, the same setup was only 1.15x faster. A controlled test showed the cause was a 4 core CPU host that could not prepare images fast enough, not the communication between GPUs.",
+  "summary_deep": "A 1,806,538 parameter ViT written from scratch (patch 4, dim 192, depth 6, heads 3) trained on CIFAR-10 with PyTorch DDP over NCCL on Kaggle's 2x Tesla T4, plus an Apple M5 MPS group and a CPU gloo group. A real gloo process group test proves 2 ranks of batch B match 1 process of 2B at rtol 1e-4, with an inverse guard. Throughput is the median of synchronised per epoch rates, and rank speedup is computed only against a 1 rank baseline matched on precision, compile, accumulation, synthetic flag, workers, epochs and subset. fp32 scaled 1.96x (98%) and fp16 1.15x (57%) with the same 7 MB fp32 gradient payload; a synthetic input mode restored 1.92x (96%), and with real data throughput stalled near 4,073 img/s on a 4 vCPU host, so the bottleneck is the CPU input pipeline. Side results: AMP 2.06x per T4, FSDP 0.66x of DDP, fp16 alone 0.68x on MPS but 2.23x with torch.compile, accuracy flat at 79.41% to 80.70%. A gate checks every unit bearing number in the docs against run artifacts.",
+  "sheet": {
+    "easy": "## What it is\nA small vision transformer (1.8M parameters) trained on CIFAR-10 across two Tesla T4 GPUs with PyTorch DDP, built so that every speedup claim can be checked.\n\n## Headline (2x Tesla T4, Kaggle, 30 epochs)\n| Precision | 1 GPU img/s | 2 GPU img/s | Speedup | Efficiency |\n|---|---|---|---|---|\n| fp32 | 1,853 | 3,637 | 1.96x | 98% |\n| fp16 | 3,810 | 4,376 | 1.15x | 57% |\n\n## The story in four steps\n1. **Prove correctness first.** Two GPUs with batch B must give the same gradient as one process with batch 2B. A test checks it, and a second test proves the check can fail.\n2. **Measure.** fp32 scaled at 98%. The same setup in fp16 scaled at 57%.\n3. **Isolate.** Feeding ready made tensors from memory (no image decoding) restored 1.92x, 96%. So GPU communication was fine.\n4. **Explain.** The Kaggle machine has 4 CPU cores. One fast fp16 GPU already eats nearly all the images those cores can prepare, so the second GPU waits.\n\n## Other results\n- Mixed precision on one T4: 2.06x faster, peak memory 553 MB to 347 MB.\n- FSDP was 0.66x of DDP: nothing worth sharding at 1.8M parameters.\n- Apple M5: fp16 alone was 32% slower; with torch.compile it was 2.23x faster.\n- Accuracy stayed 79.41% to 80.70% on the T4s: speed changes did not change learning.\n- More data loader workers made it worse (16 workers on 4 cores).\n\n## Bugs worth telling\n- A rendezvous hang that looked like slow training.\n- PyTorch said the T4 supports bf16; it only emulates it.\n- The dashboard once divided by the wrong baseline (1.11x instead of 1.15x).\n- Refused to disable a checksum to make a mirror download load.\n\n## Caveats\nTwo GPUs, one machine, one run per setting. The fix (GPU side augmentation or more CPU cores) is not yet tested. The synthetic 96% is an upper bound.\n\n## Next\nRemove the CPU ceiling and confirm scaling recovers; a bigger model for FSDP; more than two GPUs.\n",
+    "deep": "## Architecture (src/dvit/model.py)\n| Piece | Spec | Params |\n|---|---|---|\n| Patch embed | Conv2d(3, 192, k=4, s=4): 64 tokens of 192 | 9,408 |\n| Class token | (1, 1, 192), trunc normal 0.02 | 192 |\n| Position embedding | (1, 65, 192), learned, trunc normal 0.02 | 12,480 |\n| 6 encoder blocks | pre norm; MHA 3 heads x 64; MLP 192 to 384 to 192, GELU; DropPath linspace(0, 0.1, 6) | 6 x 297,024 = 1,782,144 |\n| Final LN + head | LayerNorm(192), Linear(192, 10) on token 0 | 384 + 1,930 |\n| **Total** | | **1,806,538** |\n\nPatch math: $N=(32/4)^2=64$, sequence $65$, patch vector $4\\cdot4\\cdot3=48$. Attention: $\\mathrm{softmax}(QK^\\top/\\sqrt{64})V$.\nGradient payload: $1{,}806{,}538\\times4\\,\\mathrm{B}=7{,}226{,}152\\,\\mathrm{B}\\approx6.9$ MiB, fp32 in both arms because autocast leaves parameters fp32.\n\n## Training config\n| Knob | Value |\n|---|---|\n| Optimiser | AdamW, betas (0.9, 0.95), wd 0.05 on ndim of 2 or more; none on norms, biases, cls, pos |\n| LR | 1e-3 x world size (linear rule); warmup 2 epochs, cosine to 0, per step |\n| Batch | 128 per rank (256 at 2 ranks, 512 with accumulation 2) |\n| Regularisation | label smoothing 0.1, DropPath up to 0.1, dropout 0, clip 1.0 |\n| Data | CIFAR-10 50k/10k; RandomCrop(32, pad 4), flip, Normalize(0.4914, 0.4822, 0.4465 / 0.2470, 0.2435, 0.2616) |\n| Loader | 2 workers per rank on Kaggle, pin_memory, persistent workers, DistributedSampler(drop_last=True), set_epoch each epoch |\n| Precision | from compute capability: sm_80+ bf16 no scaler; sm_75 fp16 + GradScaler; MPS fp16; CPU bf16 |\n| Stack | torch 2.10.0+cu128, NCCL, torchrun on Kaggle; FileStore launcher on macOS |\n\nLR schedule: $\\eta(t)=\\eta_{max}t/W$ for $t<W$, else $\\eta_{max}\\tfrac12(1+\\cos(\\pi\\min(1,\\frac{t-W}{T-W})))$, $W=2S$, $S=390$ at 1 rank, $195$ at 2 ranks.\nLabel smoothing: $q=(1-0.1)\\,\\mathrm{onehot}(y)+0.1/10$. AdamW: $\\theta\\leftarrow\\theta-\\eta(\\hat m/(\\sqrt{\\hat v}+\\epsilon)+\\lambda\\theta)$.\nGradScaler defaults: init scale 65,536, growth 2.0 every 2,000 clean steps, backoff 0.5, skip step on inf or NaN.\n\n## DDP and the collective\n- Construction broadcasts rank 0 state; Reducer buckets gradients (cap 25 MiB) in reverse order; one hook per parameter; async all reduce per ready bucket; `gradient_as_bucket_view=True`.\n- Ring all reduce: reduce scatter then all gather, $2(N-1)$ steps, per rank traffic $2\\frac{N-1}{N}S$, time $\\approx2(N-1)\\alpha+2\\frac{N-1}{N}S/B$. At $N=2$ the factor is 1.\n- Accumulation: non final microbatches inside `no_sync()`; loss divided by K.\n- FSDP: shard params, grads, optimiser state; all gather per unit forward and backward, reduce scatter grads; `size_based_auto_wrap_policy(min_num_params=10_000)`, module `clip_grad_norm_`, `ShardedGradScaler`.\n\n## Measurement\n- `Stopwatch`: device synchronize on enter and exit. Throughput per epoch $=\\sum_r\\text{images}_r/\\max(t_{local},\\bar t)$; run figure = median over epochs.\n- Rank speedup $=X_2/X_1$ with $X_1$ matched on hardware, precision, compile, accumulation, synthetic flag, workers, epochs, subset. Efficiency $=$ speedup$/N$.\n- Amdahl: $S(N)=1/((1-p)+p/N)$. Karp-Flatt at $N=2$: $e=2/S-1$ gives 0.019 (fp32), 0.74 (fp16 real), 0.044 (fp16 synthetic). Better model: $X(N)=\\min(Ng,H)$.\n\n## Results (every number from runs/*.json via RESULTS.md)\n**2x T4, 30 epochs, commit 33bcd11**\n| Run | img/s | Rank speedup | vs fp32 | Peak MB | Top-1 |\n|---|---|---|---|---|---|\n| t4-ws1-fp32 | 1,853 | baseline | reference | 553 | 80.70% |\n| t4-ws1-amp | 3,810 | baseline | 2.06x | 347 | 80.52% |\n| t4-ws2-ddp-fp32 | 3,637 | 1.96x (98%) | 1.96x | 561 | 80.01% |\n| t4-ws2-ddp-amp | 4,376 | 1.15x (57%) | 2.36x | 354 | 79.71% |\n| t4-ws2-ddp-amp-compiled | 4,706 | no baseline | 2.54x | 345 | 80.09% |\n| t4-ws2-ddp-amp-ga2 | 4,393 | no baseline | 2.37x | 361 | 80.15% |\n| t4-ws2-fsdp-amp | 2,884 | 0.76x (38%) | 1.56x | 338 | 79.41% |\n\nFSDP against DDP at 2 ranks: 0.66x, 5% memory saving for 34% throughput loss. Compile on top of DDP plus amp: 1.08x. Accumulation 2: 1.004x.\n\n**Isolation, 6 epochs, fp16, commit 2e788b1**\n| Input | 1 rank | 2 ranks | Speedup | Efficiency |\n|---|---|---|---|---|\n| Synthetic, no dataloader | 3,956 | 7,580 | 1.92x | 96% |\n| Real, 2 workers per rank | 3,462 | 4,073 | 1.18x | 59% |\n| Real, 8 workers per rank | 3,599 | 3,996 | 1.11x | 56% |\n\nHost: `cpu_cores: 4`. Input cost at 1 rank 12%, at 2 ranks 46%.\n\n**Apple M5, 30 epochs:** fp32 1,061 img/s (80.61%, 24.3 min); fp16 726 (0.68x, 80.77%, 31.6 min); fp16 + compile 2,361 (2.23x, 80.72%, 10.6 min).\n**gloo CPU, 3 epochs, 10% data, batch 64 per rank, 4 threads per rank:** 552, 694 (1.26x, 63%), 879 (1.59x, 40%). Contended rerun 146, 288, 343 discarded to runs/invalid.\n\n## Tests (tests/)\n- `test_ddp_equivalence`: 2 rank gloo DDP vs 1 process, rtol 1e-4, atol 1e-6, probe dim 48 depth 2; inverse: half batch must differ.\n- `test_grad_accum`: 4 x 4 accumulation equals batch 16; unscaled accumulation equals 4x.\n- `test_backend`: nccl for cuda, gloo for cpu, MPS refusal; dtype by capability (6, 7 fp16 + scaler; 8, 9, 10 bf16).\n- `test_data`: disjoint shards, set_epoch reshuffles, drop_last equal step counts.\n- `test_schedule`, `test_model`, `test_synthetic` (512 pool, same seed same tensors), `test_verify_claims` (every check paired with its inverse; percent sign regression).\n- `make gate` = pytest + `dvit.verify_claims`.\n\n## Bug log (RESULTS.md section 6)\n1 SSL EOF on canonical host; 2 md5 rejects rebuilt pickles (own npz, never disable the check); 3 TCPStore hang (FileStore launcher); 4 MPS memory not a peak; 5 docstring 2.7M parameters; 6 FSDP under clipping; 7 gloo under contention; 8 is_bf16_supported counts emulation; 9 dashboard baseline mismatch (1.11x vs 1.15x).\n\n## Limitations\n2 ranks, single node, one run per config, two suites with different absolute levels, synthetic pool upper bound, fix untested, FSDP at 1.8M parameters is arithmetic, MPS memory unavailable, no profiler traces, no link benchmark.\n\n## Glossary\nDDP, FSDP, NCCL, gloo, process group, rank, local rank, world size, rendezvous (TCPStore, FileStore), all reduce, reduce scatter, all gather, bucket, `no_sync`, gradient accumulation, autocast, GradScaler, fp16, bf16, compute capability (sm_75), emulation, torch.compile and inductor, MPS, vCPU, context switch, DataLoader worker, pin memory, DistributedSampler, scaling efficiency, rank speedup, strong and weak scaling, Amdahl, Karp-Flatt, allocator high water mark, md5, top-1, stochastic depth, label smoothing, AdamW, cosine schedule, warmup, linear scaling rule. Each has a card in this deck.\n"
+  },
+  "narration": [
+    {
+      "kind": "pitch_30s",
+      "prompt": "Interviewer: what is this project?",
+      "script": "I built a distributed training benchmark for a small vision transformer, with one rule: every speedup claim has to be checkable. On two Tesla T4s, DDP in fp32 scaled at 98% efficiency. The identical setup in fp16 dropped to 57%. I built a synthetic input mode that removes the dataloader, and scaling came back to 96%. So the all reduce was innocent. The Kaggle host has 4 vCPUs, and it couldn't prepare images fast enough to feed two fast GPUs.",
+      "keypoints": [
+        "States the checkability rule",
+        "fp32 98% against fp16 57% on identical hardware",
+        "Synthetic input restored 96%",
+        "Names the cause: a 4 vCPU host, not NCCL"
+      ]
+    },
+    {
+      "kind": "walkthrough_2min",
+      "prompt": "Walk me through it.",
+      "script": "Most multi GPU speedups you read can't be checked. You can't tell if the two GPU job trained the same model, or if the baseline was set up the same way. I wanted every claim in this project to be checkable.\n\nThe model is a vision transformer I wrote out by hand, with 1.8 million parameters. It uses 4 pixel patches on CIFAR-10, and I kept it small so the model would never be the bottleneck. Before measuring speed, I proved correctness. A test spawns a real gloo process group and checks that two ranks with batch B produce the same gradient as one process with batch 2B. A second test computes the wrong thing on purpose, so the first one can't pass trivially.\n\nThen I ran on two Tesla T4s on Kaggle with NCCL. Every baseline matches its run on everything except the rank count, and the reporting code enforces that. In fp32, DDP scaled at 1.96x. That's 98% efficiency. In fp16, the same setup scaled at only 1.15x.\n\nI had two suspects: the all reduce and the input pipeline. Instead of tweaking worker counts, I added a synthetic input mode that serves tensors from memory. Under it, two GPUs scaled at 1.92x. So communication was fine. The host has 4 vCPUs, and one fp16 T4 already eats nearly everything those cores can prepare. Adding workers made it worse.\n\nAlong the way I hit nine bugs and kept them all in the repo. The worst was a rendezvous hang that looked exactly like slow training. Another was PyTorch reporting bf16 support on a T4 that only emulates it.\n\nNext, I'd confirm the diagnosis by moving augmentation onto the GPU, or by running on a host with more cores.",
+      "keypoints": [
+        "Problem: unverifiable speedups",
+        "Model sized not to be the bottleneck",
+        "Gradient equivalence test plus inverse guard",
+        "Matched baselines enforced in code",
+        "fp32 1.96x against fp16 1.15x",
+        "Synthetic ablation 1.92x, 4 vCPU host, more workers worse",
+        "At least one concrete bug",
+        "Next step: remove the host ceiling"
+      ]
+    },
+    {
+      "kind": "deep_dive_5min",
+      "prompt": "Give me the full technical story, as if I were a staff engineer.",
+      "script": "I'll start with the model, because it explains the systems behaviour. It's a ViT I wrote out in about 120 lines. A strided convolution turns each 4 by 4 patch into a 192 dimensional token, so a 32 pixel image becomes 64 tokens plus a class token. There are six pre norm blocks with three heads and an MLP ratio of 2. That comes to 1,806,538 parameters. In fp32 the gradient is about 7 megabytes. Autocast doesn't change that, because parameters and gradients stay fp32.\n\nCorrectness came before any timing. DDP averages gradients, so two ranks each holding batch B must match one process holding 2B. The test spawns two gloo processes over a FileStore, seeds identical weights, shards a fixed batch, and compares flattened gradients at a relative tolerance of 1e-4. Dropout and stochastic depth are off in the probe, because random masks would differ. The inverse test computes the gradient on half the batch and asserts it does not match. Gradient accumulation has the same pair of tests, and the non final microbatches run inside no_sync so DDP skips their all reduce.\n\nMeasurement. Each epoch is timed with a device synchronize at both ends. Images are summed across ranks, and the run reports the median epoch. The median drops the compile epoch, which ran at 837 images a second. A rank speedup baseline has to match on precision, compile, accumulation, worker count, synthetic flag, epochs and data fraction. I added the last four after my own dashboard divided a real data run by a synthetic baseline and printed the wrong ratio.\n\nResults on two T4s. In fp32, two GPUs reached 98% efficiency. In fp16 the same setup reached 57%. Mixed precision on one T4 was a 2.06x win, so each GPU had doubled its appetite while the payload stayed fixed.\n\nIsolation. I had two suspects, NCCL and the input pipeline. A synthetic mode serves pre normalised tensors from a 512 image pool in memory. No decode, no augmentation, no workers. Under it, fp16 scaled 1.92x. With real data and 2 workers per rank, it scaled 1.18x. With 8 workers per rank it was worse, because 16 workers on 4 cores just context switch. One fp16 T4 already consumes 3,956 synthetic images a second. The host tops out around 4,073. So the second GPU is unfed.\n\nIf you run Amdahl backwards, the apparent serial fraction jumps from about 2% in fp32 to 74% in fp16. Identical code can't do that, so a fixed serial fraction is the wrong model. A shared resource is the right one. Throughput is the minimum of N times the GPU rate and the host rate.\n\nTwo caveats I'd raise before you do. First, my write up says DDP overlaps the all reduce almost entirely. At 7 megabytes it's mostly one default bucket, so the honest claim is that communication is cheap. The synthetic run bounds it at about 4%. Second, the 4,073 ceiling comes from a 6 epoch suite on a different Kaggle session. The 30 epoch suite measured every config somewhat higher. I only compare within a suite, and the code refuses to cross them.\n\nOther findings. FSDP lost to DDP at 0.66x. Its memory saving was about what sharding 29 megabytes of state over two ranks predicts. torch.cuda.is_bf16_supported returned True on the sm_75 T4, which only emulates bf16, so I now select the dtype from compute capability. On Apple MPS, fp16 autocast alone was a 32% slowdown, and torch.compile turned it into 2.23x.\n\nWhat's missing. Two ranks, one node, one run per config, and the fix is untested. Next is GPU side augmentation or a bigger host, with the expected result written down first.",
+      "keypoints": [
+        "Model sizing and why the payload is fp32 in both arms",
+        "Equivalence test, inverse guard, no_sync accumulation",
+        "Synchronised timing, median epoch, matched baseline keys",
+        "fp32 98% against fp16 57%; amp 2.06x per GPU",
+        "Synthetic 1.92x, workers sweep, 4,073 ceiling",
+        "Amdahl read backwards fails; min(Ng, H) fits",
+        "Volunteers the bucket overlap and suite mismatch caveats",
+        "FSDP 0.66x, bf16 trap, MPS compile result, limits"
+      ]
+    },
+    {
+      "kind": "nontechnical_60s",
+      "prompt": "Explain it to someone without a technical background.",
+      "script": "I trained an image recognition model on two graphics cards and measured what the second card really bought. At first it nearly doubled the speed. Then I applied a common trick that makes each card about twice as fast, and suddenly the second card added very little. Instead of guessing, I ran a test that fed the cards ready made data, skipping the step where the computer's main processor prepares each image. With that step removed, two cards were nearly twice as fast again. So the cards were fine. The machine had only four processor cores, and they couldn't prepare images quickly enough to keep two fast cards busy. The lesson is that speeding up one part of a system can just move the slowdown somewhere else, and you have to measure to find where it went.",
+      "keypoints": [
+        "Two graphics cards, what the second one bought",
+        "A speed trick made the second card nearly useless",
+        "A controlled test removed one step",
+        "The processor preparing images was the limit",
+        "Speeding up one part moves the bottleneck"
+      ]
+    },
+    {
+      "kind": "whiteboard",
+      "prompt": "Draw the system and the finding on the whiteboard.",
+      "script": "First I draw the pipeline left to right. A box for the 4 vCPU host, with worker processes doing decode, crop, flip and normalise. An arrow into two T4 boxes. A line between the T4s labelled all reduce, 7 megabytes. Inside each T4 I write forward, backward, and bucketed gradients feeding NCCL. While drawing I say the model is a 1.8 million parameter ViT with 64 patch tokens plus a class token, sized so it never becomes the bottleneck.\n\nSecond, I draw a small table: fp32 and fp16, one and two GPUs. I fill in 1,853 and 3,637 for fp32, then 3,810 and 4,376 for fp16, and circle 98% and 57%. I point out that the payload on the all reduce line didn't change between the rows.\n\nThird, I draw the isolation experiment as a switch on the host arrow, real data versus synthetic tensors from memory. I write 1.92x next to synthetic and 1.18x next to real. Then I draw a horizontal ceiling line on a throughput axis at about 4,073 images per second. I show two fp16 GPUs wanting about 7,600, poking above it, while two fp32 GPUs want about 3,700 and sit below it. That picture is throughput equals the minimum of N times the GPU rate and the host rate.\n\nLast, in a corner, I sketch the ring all reduce: two GPUs, the gradient split into chunks, reduce scatter then all gather, and the cost of 2 times N minus 1 over N times the gradient size. At N equals 2 that's one gradient's worth per GPU per step. I close by naming the fix, GPU side augmentation or more host cores, and say it's untested so far.",
+      "keypoints": [
+        "Draws host, workers, two T4s, all reduce link first",
+        "Table of 1 and 2 GPUs in fp32 and fp16 with efficiencies",
+        "Synthetic switch and the 4,073 ceiling line",
+        "min(Ng, H) as the explanatory picture",
+        "Ring all reduce sketch with the 2(N-1)/N cost",
+        "Names the untested fix"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How do you know the two GPU run trains the same model as one GPU?",
+      "script": "I tested it directly. DDP averages gradients, so two ranks each holding batch B must equal one process holding 2B. The test spawns a real gloo process group, seeds identical weights, and compares the flattened gradients at a relative tolerance of 1e-4. The probe turns off dropout and stochastic depth, because random masks would differ between runs. Then a second test computes the gradient on half the batch and asserts it doesn't match. Without that, a test that always passes would look like proof. The limit is that it runs on CPU gloo, so it checks DDP's math and my model, not NCCL itself.",
+      "keypoints": [
+        "Two ranks of B equal one process of 2B",
+        "Real gloo process group, rtol 1e-4",
+        "Dropout and DropPath off in the probe",
+        "Inverse test proves it can fail",
+        "Limit: CPU gloo, not NCCL"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "How exactly did you compute speedup and efficiency?",
+      "script": "Each epoch is timed with a device synchronize at both ends, because CUDA is asynchronous. Images are summed across ranks and divided by the epoch time, and the run reports the median epoch, which ignores the compile and warmup epoch. Speedup is the two rank throughput over a one rank run that matches on everything else: precision, compile, accumulation, workers, synthetic flag, epochs and data fraction. Efficiency is speedup divided by two. If no matching baseline exists, the dashboard prints no baseline instead of dividing by something else. Every number in the docs is then checked against the artifacts by a gate.",
+      "keypoints": [
+        "Synchronised timers",
+        "Median of per epoch throughput",
+        "Baseline matched on every field except rank count",
+        "Efficiency equals speedup over N",
+        "No baseline printed rather than a mismatched ratio"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why did more dataloader workers make it slower?",
+      "script": "Because the machine only has 4 vCPUs. At 2 workers per rank there are already 4 worker processes plus the two training processes. At 8 per rank there are 16 workers fighting over the same cores, so the extra processes mostly add context switches and cache churn. Throughput went from 4,073 down to 3,996 images a second. PyTorch even warns when workers exceed cores. The fix is less CPU work per image, either GPU side augmentation or pre decoded tensors, or simply more cores.",
+      "keypoints": [
+        "4 vCPUs on the host",
+        "16 workers plus 2 trainers oversubscribe",
+        "4,073 to 3,996 img/s",
+        "Fix is less CPU work per image or more cores"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why did FSDP lose to DDP?",
+      "script": "Because there's almost nothing to shard. Parameters, gradients and Adam state for 1.8 million parameters come to about 29 megabytes in total. FSDP adds an all gather before each unit's forward and backward plus a reduce scatter, so it moves more data per step than DDP's single all reduce. It measured 0.66x of DDP's throughput. The memory it saved was about what sharding half of that state predicts, because activations dominate peak memory here. I'd only revisit FSDP with a model whose state doesn't fit on one card.",
+      "keypoints": [
+        "About 29 MB of total state, nothing to shard",
+        "Extra all gathers and a reduce scatter per step",
+        "0.66x of DDP",
+        "Memory saving matches sharding arithmetic",
+        "Revisit only for a much larger model"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "Why was fp16 slower on the Mac GPU?",
+      "script": "In eager mode, autocast puts a cast around each eligible op, and those casts cost memory traffic and kernel launches. Apple silicon is already efficient at fp32, so the casts cost more than the fp16 math saved. fp16 alone ran 32% slower than the fp32 baseline. Adding torch.compile fused the casts into the graph and reached 2.23x the baseline. The lesson is that turning on AMP is CUDA advice. I haven't profiled the MPS kernels, so I present the mechanism as an explanation consistent with the numbers.",
+      "keypoints": [
+        "Eager autocast pays a cast per op",
+        "fp16 alone 32% slower on MPS",
+        "torch.compile fuses casts: 2.23x",
+        "AMP advice does not transfer across backends",
+        "Mechanism not profiled"
+      ]
+    },
+    {
+      "kind": "followup",
+      "prompt": "What would you do to get fp16 scaling back?",
+      "script": "Remove the host ceiling and check that scaling recovers. The cheapest version moves random crop, flip and normalise onto the GPU, operating on uint8 batches, so each worker only does a memory copy. The other version runs the same suite on a host with 16 or more cores. Before running, I'd write down the prediction: close to the synthetic 1.92x but below it, because real data is less cache friendly than a 512 image pool. I'd also add a timer around the dataloader's next call, so data wait time is measured on every step.",
+      "keypoints": [
+        "GPU side augmentation on uint8 batches",
+        "Or a 16 plus core host",
+        "Written prediction: near but below 1.92x",
+        "Per step data wait timer"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Isn't this just NCCL being slow over PCIe?",
+      "script": "That was my first suspect too, so I tested it instead of arguing it. The same NCCL path, model and 7 megabyte payload scaled at 98% in fp32. Then I removed the dataloader with a synthetic input mode, and fp16 scaled at 1.92x. That bounds communication at about 4% of the step. With real data, throughput stalled near 4,073 images a second no matter how many GPUs or workers I added, which is the signature of a shared upstream resource. What I didn't do is benchmark the link with nccl-tests, so I can't quote its bandwidth.",
+      "keypoints": [
+        "Concedes no direct link benchmark",
+        "fp32 98% on the same NCCL path",
+        "Synthetic 1.92x bounds comm at about 4%",
+        "Plateau near 4,073 points upstream"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Two T4s on Kaggle isn't distributed training.",
+      "script": "It's the smallest distributed setup there is, and I say so. Two ranks, one node, no NVLink, one run per configuration. But the code is generic in world size, and what transfers is the method: a gradient equivalence proof, baselines matched on everything except rank count, and an ablation that identified the cause. The finding also gets worse with scale. Each GPU generation gets faster relative to the CPU feeding it, so an 8 GPU node hits the host ceiling sooner. Next on my list is more than two ranks and a model big enough for FSDP.",
+      "keypoints": [
+        "Concedes scale honestly",
+        "Code is generic in world size",
+        "Method transfers: proof, matched baselines, ablation",
+        "Finding worsens with more GPUs per host"
+      ]
+    },
+    {
+      "kind": "pushback",
+      "prompt": "Your synthetic data test is a toy.",
+      "script": "It's an instrument, and I report it as one. It removes exactly the CPU input path: no decode, no augmentation, no workers. I wrote the reading rule into the config before running it. Near 2x convicts the dataloader, near 1.15x convicts the collective. It came back at 1.92x. I do concede it's friendlier than real data, because it cycles a 512 image pool that stays in cache. So I call 96% an upper bound on what fixing the input path could achieve. Proving the fix needs GPU side augmentation or a bigger host.",
+      "keypoints": [
+        "Removes exactly one component",
+        "Reading rule written in advance",
+        "1.92x, far from 1.15x",
+        "96% is an upper bound because of the 512 pool"
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "id": "vit-01",
+      "type": "concept",
+      "level": 1,
+      "q": "What is this project, in two sentences?",
+      "easy": "Tanay trained a small vision transformer on CIFAR-10 across two GPUs and measured what the second GPU actually bought. In full precision it nearly doubled throughput (1.96x, 98% efficiency), but with mixed precision the same setup managed only 1.15x, and a controlled experiment traced the loss to a 4 vCPU host that could not prepare images fast enough, not to GPU communication.",
+      "deep": "A from scratch ViT (1,806,538 parameters, patch 4, dim 192, depth 6) trained with PyTorch DistributedDataParallel over NCCL on Kaggle's 2x Tesla T4, plus two laptop groups (Apple M5 on MPS, and gloo over the M5's CPU cores). Correctness comes first: a test spawns a real gloo process group and checks that two ranks holding batch B give the same gradient as one process holding 2B (rtol 1e-4), with an inverse test proving the check can fail. Scaling is reported as matched rank speedup: fp32 went from 1,853 to 3,637 img/s (1.96x, 98%) and fp16 from 3,810 to 4,376 img/s (1.15x, 57%). A --synthetic-data mode that removes decode, augmentation, and workers restored 1.92x (96%), which acquits the all reduce; with real data, throughput stalled near 4,073 img/s whatever the GPU or worker count, and the artifacts record cpu_cores 4. A gate (make verify) checks every unit bearing number in the docs against run artifacts.",
+      "say": "I trained a small ViT on two T4s and got 98% scaling efficiency in fp32. Turning on mixed precision dropped it to 57% on identical hardware. I built a synthetic input mode to separate the suspects, and it brought scaling back to 96%. So the all reduce was innocent, and the 4 vCPU host was starving the GPUs.",
+      "evidence": [
+        "portfolio: DDP in fp32: 1.96x at 98% efficiency",
+        "portfolio: identical config in fp16: 1.15x at 57%",
+        "repo:distributed-vit-cifar10/RESULTS.md: | **Synthetic, no dataloader** | 3,956 | 7,580 | **1.92x** | **96%** |",
+        "portfolio: The artifacts record cpu_cores: 4.",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws1-fp32` | 1 | single | fp32 | 1,853 | baseline | reference | 553 | 80.70% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-fp32` | 2 | DDP | fp32 | 3,637 | 1.96x (98%) | 1.96x | 561 | 80.01% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws1-amp` | 1 | single | fp16 | 3,810 | baseline | 2.06x | 347 | 80.52% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-amp` | 2 | DDP | fp16 | 4,376 | 1.15x (57%) | 2.36x | 354 | 79.71% |"
+      ],
+      "sources": [],
+      "tags": [
+        "overview",
+        "ddp",
+        "scaling"
+      ]
+    },
+    {
+      "id": "vit-02",
+      "type": "why",
+      "level": 1,
+      "q": "Why does this project exist? What problem is it solving?",
+      "easy": "Most published multi GPU speedups cannot be checked: you cannot tell whether the two GPU job trained the same model, whether the baseline was set up the same way, or whether the machine was busy with something else. Tanay built this benchmark so that every claim can be verified, and the main finding turned out to be a drop in its own scaling.",
+      "deep": "Three failure modes make a distributed speedup unfalsifiable, and each has a mechanism in the repo. (1) Different math: if gradient averaging is broken, the 2 rank job optimises a different objective, so its throughput describes a different system; tests/test_ddp_equivalence.py closes that. (2) Unmatched baseline: the 1 rank run differs in precision, compile, workers, epochs, or data fraction; report.baseline_for requires every field except world_size to match. (3) Contaminated measurement: background load; runs measured while the MPS suite shared the same cores (146, 288 and 343 img/s) were moved to runs/invalid rather than averaged in. On top of that, dvit.verify_claims fails the build when a number in the prose does not trace to an artifact. The portfolio's framing is that a speedup you cannot verify is only a claim.",
+      "evidence": [
+        "portfolio: A speedup you cannot verify is only a claim.",
+        "portfolio: This project was built so that every claim it makes is checkable, and its main finding is a regression in its own scaling.",
+        "repo:distributed-vit-cifar10/RESULTS.md: overlapped the MPS suite produced 146, 288 and 343 img/s"
+      ],
+      "sources": [],
+      "tags": [
+        "motivation",
+        "benchmarking",
+        "honesty"
+      ]
+    },
+    {
+      "id": "vit-03",
+      "type": "how",
+      "level": 1,
+      "q": "What hardware groups did you measure on, and why is speedup only computed within one group?",
+      "easy": "Three setups: an Apple M5 laptop GPU, several CPU processes on that laptop talking over gloo, and two Tesla T4 GPUs on Kaggle talking over NCCL. A speedup only means something between runs on the same hardware, so the reporting code never divides a T4 number by a laptop number.",
+      "deep": "Group (a): Apple M5 on the MPS backend, one device (10 CPU cores, 8 GPU cores, 16 GB unified memory), used for single device accuracy and for precision and compile effects. Group (b): gloo over N CPU processes on the same M5, used for gradient correctness and CPU weak scaling. Group (c): Kaggle 2x Tesla T4 with NCCL, the only group able to show real multi device scaling. report.py and verify_claims.measured() only form ratios between artifacts whose hardware string matches (for example '2x Tesla T4'), and test_ratios_are_only_formed_within_one_hardware_group asserts a cross hardware ratio never enters the allowed pool. runs/ holds 24 finished artifacts across the three groups: 13 on the T4s, 3 on MPS, 3 gloo, and 5 smoke runs that prove code paths execute and are badged so their accuracy is never read. A rank scaling baseline must differ from its run in exactly one property, the rank count.",
+      "evidence": [
+        "portfolio: Three hardware groups: an Apple M5 laptop with one GPU, multi process gloo over that laptop's 10 CPU cores, and 2x Tesla T4 on Kaggle with NCCL.",
+        "portfolio: 24 measured runs across 3 hardware groups",
+        "repo:distributed-vit-cifar10/RESULTS.md: | Laptop | Apple M5, 10 CPU cores, 8 GPU cores, 16 GB unified memory |"
+      ],
+      "sources": [],
+      "tags": [
+        "hardware",
+        "methodology",
+        "baselines"
+      ]
+    },
+    {
+      "id": "vit-04",
+      "type": "concept",
+      "level": 1,
+      "q": "Walk me through the ViT architecture you used.",
+      "easy": "The image is cut into a grid of 4x4 pixel squares, each square becomes a vector, a special summary vector is put at the front, and position information is added so the model knows where each square came from. Six transformer layers let every square look at every other square, and the summary vector at the end picks one of 10 classes.",
+      "deep": "Input 3x32x32. Patch embedding is nn.Conv2d(3, 192, kernel_size=4, stride=4), giving 192x8x8, flattened and transposed to 64 tokens of width 192. A learned class token (1x1x192) is concatenated at position 0 and a learned position embedding (1x65x192) is added; both are initialised with trunc_normal std 0.02. Six pre norm encoder blocks follow: x = x + DropPath(MHA(LN(x))) then x = x + DropPath(MLP(LN(x))), using nn.MultiheadAttention with 3 heads (head dim 64, batch_first) and an MLP of 192 to 384 to 192 with GELU. A final LayerNorm is applied and Linear(192, 10) reads token 0 only. Linear weights use trunc_normal std 0.02 with zero bias, LayerNorm weight 1 and bias 0, dropout 0.0. tests/test_model.py checks the output shape (4, 10), 64 patches, and a pos_embed shape of (1, 65, 192).",
+      "evidence": [
+        "repo:distributed-vit-cifar10/src/dvit/model.py: Default config is 1,806,538 parameters: patch 4 gives 64 tokens, which keeps",
+        "portfolio: ArchitectureViT, dim 192, depth 6, heads 3, MLP ratio 2.0"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2010.11929"
+      ],
+      "tags": [
+        "vit",
+        "architecture",
+        "transformer"
+      ]
+    },
+    {
+      "id": "vit-05",
+      "type": "formula",
+      "level": 2,
+      "q": "Do the patch embedding math. Why is a strided convolution the same as a linear projection of patches, and what do the class token and position embeddings do?",
+      "easy": "4x4 patches on a 32x32 image give an 8x8 grid, 64 patches, and the class token makes 65 tokens. A convolution whose kernel size equals its stride sees each patch exactly once with no overlap, which is the same as flattening each patch and multiplying it by one shared matrix. The class token is a learned slot that gathers information for the classifier, and position embeddings tell the model where each patch sits.",
+      "deep": "Token count $N=(H/P)(W/P)=(32/4)^2=64$; sequence length $N+1=65$. Each patch holds $P^2C=4\\cdot4\\cdot3=48$ values. With kernel = stride = P the convolution computes $z_i=E\\,\\mathrm{vec}(x_{p_i})+b$ with one $E\\in\\mathbb{R}^{192\\times48}$ shared by all patches, which is exactly ViT's linear patch projection; it has $48\\cdot192+192=9{,}408$ parameters. The sequence is $z^{(0)}=[x_{cls};z_1;\\dots;z_{64}]+E_{pos}$ with $E_{pos}\\in\\mathbb{R}^{65\\times192}$ (12,480 parameters). The class token carries no image content; after six blocks of attending to every patch, its final state feeds the head. Position embeddings are learned and 1D, so the 2D grid structure must be learned from data; without them self attention is permutation equivariant and could not tell where a patch came from. Failure mode: a learned table is tied to 65 positions, so a new image or patch size needs interpolation of $E_{pos}$.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/2010.11929"
+      ],
+      "tags": [
+        "vit",
+        "patch-embedding",
+        "class-token",
+        "position-embedding"
+      ]
+    },
+    {
+      "id": "vit-06",
+      "type": "how",
+      "level": 2,
+      "q": "What is inside one encoder block, and where does stochastic depth come in?",
+      "easy": "Each block normalises the tokens, runs attention so tokens can exchange information, and adds the result back; then it normalises again, runs a small two layer network on each token, and adds that back. Stochastic depth randomly skips a block's update for some images during training, more often in deeper blocks.",
+      "deep": "Pre norm residual block: LayerNorm sits before each sublayer and the residual path stays an identity, which keeps gradient flow stable in deep transformers. Attention per head is $\\mathrm{softmax}(QK^\\top/\\sqrt{d_h})V$ with $d_h=192/3=64$; heads are concatenated and projected by out_proj. The MLP ratio of 2.0 gives a hidden width of 384, half the usual ViT ratio of 4, which keeps the model tiny. DropPath rates are torch.linspace(0, 0.1, 6), so block 0 never drops and block 5 drops with p = 0.1; when a sample's mask fires its residual branch is zeroed, and survivors are scaled by 1/(1 - p) so the expected output is unchanged. In eval mode DropPath is the identity (test_drop_path_is_identity_in_eval sets drop_path 0.9 and checks two eval passes are equal). The DDP equivalence probe sets dropout and drop_path to 0.0, because random masks would differ between the 2 rank and 1 process runs and mask the thing under test.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/2010.11929"
+      ],
+      "tags": [
+        "vit",
+        "attention",
+        "stochastic-depth",
+        "pre-ln"
+      ]
+    },
+    {
+      "id": "vit-07",
+      "type": "number",
+      "level": 1,
+      "q": "How many parameters does the model have? Derive it.",
+      "easy": "1,806,538 trainable parameters, about 1.8 million. Roughly 99% of them sit in the six transformer blocks.",
+      "deep": "Per block: two LayerNorms, 2 x 384 = 768; attention in_proj 3 x 192 x 192 + 576 = 111,168 and out_proj 192 x 192 + 192 = 37,056 (148,224 together); MLP 192 x 384 + 384 = 74,112 and 384 x 192 + 192 = 73,920 (148,032 together). Block total 297,024, times 6 is 1,782,144. Add patch embedding 9,408, class token 192, position embedding 12,480, final LayerNorm 384, and head 192 x 10 + 10 = 1,930. The sum is 1,806,538, matching ViT.num_parameters() and the model_params field in every artifact. Bug 5 in the log: two docstrings had said 2.7M, written from an estimate before the model existed. In fp32 the gradient is 1,806,538 x 4 bytes = 7,226,152 bytes, about 6.9 MiB, which is the 'about 7 MB' all reduce payload.",
+      "evidence": [
+        "portfolio: A vision transformer written out rather than imported, 1,806,538 parameters, patch size 4 on 32x32 inputs giving 64 tokens plus a class token.",
+        "repo:distributed-vit-cifar10/runs/t4-ws1-fp32.json: \"model_params\": 1806538,",
+        "repo:distributed-vit-cifar10/RESULTS.md: Parameter count in two docstrings said 2.7M"
+      ],
+      "sources": [],
+      "tags": [
+        "vit",
+        "parameters",
+        "arithmetic"
+      ]
+    },
+    {
+      "id": "vit-08",
+      "type": "why",
+      "level": 2,
+      "q": "Why patch size 4, width 192, depth 6? Why is the model so small, and why write it by hand?",
+      "easy": "The project measures the training system, so the model had to be small enough never to be the slow part. Patch 4 gives 64 tokens, which keeps attention cheap, and 1.8M parameters means only about 7 MB of gradients to share between GPUs per step. Writing it out by hand means Tanay can explain every tensor being distributed.",
+      "deep": "Per block, the projections (QKV, out_proj, MLP) cost about 295K multiply adds per token, and the attention scores plus weighted sum cost about $2N^2d$, roughly 1.6M per image per block at N = 65, d = 192 (Tanay's arithmetic). So projections dominate. Patch 2 would give 257 tokens, about 16x the score cost and 4x the projection cost; patch 8 would give 16 tokens and discard spatial detail on a 32 pixel image. A small model has two systems consequences, and both shaped the result: compute per step is small, so input pipeline and launch overheads take a bigger share, and the gradient payload is small, so communication is cheap. The model is about 120 lines with no timm import, which answers the 'do you understand what you are distributing' question. The tradeoff is that the findings are specific to a regime where the host matters more, and FSDP has nothing to shard.",
+      "evidence": [
+        "portfolio: It is small on purpose, because the model must not be the bottleneck in a throughput measurement, and at this size the gradient payload for each all reduce is about 7 MB."
+      ],
+      "sources": [],
+      "tags": [
+        "vit",
+        "design-choice",
+        "attention-cost"
+      ]
+    },
+    {
+      "id": "vit-09",
+      "type": "compare",
+      "level": 2,
+      "q": "How does a ViT trained from scratch on CIFAR-10 compare with a CNN, and is about 80% top-1 good?",
+      "easy": "CNNs build in the assumptions that nearby pixels belong together and that an object looks the same anywhere in the frame; a ViT has to learn those from data, so on a small dataset with no pretraining it trails. About 80% in 30 epochs is reasonable for a 1.8M parameter ViT from scratch and well below a ResNet, but accuracy was never the target here.",
+      "deep": "Inductive bias: convolutions give locality and translation equivariance by construction; a ViT has only the patch grid and learned position embeddings. The ViT paper's strong results come from pretraining on large data and then transferring to smaller benchmarks such as CIFAR-100. On 50,000 images from scratch, augmentation (random crop with 4 pixel padding, horizontal flip), label smoothing 0.1 and stochastic depth up to 0.1 do the regularising. Results: 80.61% best top-1 on the M5 in 30 epochs and 24.3 minutes, 80.70% on one T4 in fp32, and the curve was still rising at the last epoch, so this is limited by schedule length. In this project accuracy is the control: precision and compilation should not move it, and they did not. Routes to higher accuracy if asked: a longer schedule, RandAugment, mixup or CutMix, a convolutional stem, or pretraining.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: A 1.8M parameter ViT trained from scratch reaches **80.61% top-1** in 30",
+        "repo:distributed-vit-cifar10/RESULTS.md: climbing at the last epoch, so this is a schedule length result, not a ceiling.",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws1-fp32` | 1 | single | fp32 | 1,853 | baseline | reference | 553 | 80.70% |"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2010.11929"
+      ],
+      "tags": [
+        "vit",
+        "cnn",
+        "inductive-bias",
+        "accuracy"
+      ]
+    },
+    {
+      "id": "vit-10",
+      "type": "define",
+      "level": 2,
+      "q": "Define stochastic depth, label smoothing, gradient clipping, and AdamW as this repo uses them.",
+      "easy": "Stochastic depth randomly skips layers during training so the network does not lean on any one of them. Label smoothing tells the model the right answer is 90% certain instead of 100%, which stops it becoming overconfident. Gradient clipping caps the size of each update. AdamW is Adam with weight decay applied straight to the weights instead of mixed into the gradient.",
+      "deep": "DropPath: per sample Bernoulli keep mask with keep = 1 - p, output x * mask / keep, rates linspace(0, 0.1, 6). Label smoothing: target $q=(1-\\epsilon)\\,\\mathrm{onehot}(y)+\\epsilon/K$ with $\\epsilon=0.1$, $K=10$, loss $-\\sum_k q_k\\log p_k$, via nn.CrossEntropyLoss(label_smoothing=0.1). Clipping: if $\\|g\\|_2>1.0$ then $g\\leftarrow g/\\|g\\|_2$; under fp16 the scaler must unscale_ first or the clip compares a scaled norm, and under FSDP the module's own clip_grad_norm_ must be used because each rank holds a shard. AdamW: $m\\leftarrow\\beta_1m+(1-\\beta_1)g$, $v\\leftarrow\\beta_2v+(1-\\beta_2)g^2$, $\\theta\\leftarrow\\theta-\\eta\\big(\\hat m/(\\sqrt{\\hat v}+\\epsilon)+\\lambda\\theta\\big)$ with betas (0.9, 0.95) and $\\lambda=0.05$ on weights with ndim of 2 or more. Decoupled decay differs from L2 inside Adam, where the penalty would be divided by $\\sqrt{v}$. A beta2 of 0.95 instead of 0.999 lets the second moment adapt faster, a common choice for transformer stability.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/src/dvit/train.py: p.add_argument(\"--weight-decay\", type=float, default=0.05)",
+        "portfolio: RegularizationStochastic depth 0.1, label smoothing 0.1, grad clip 1.0"
+      ],
+      "sources": [],
+      "tags": [
+        "regularization",
+        "adamw",
+        "label-smoothing",
+        "drop-path"
+      ]
+    },
+    {
+      "id": "vit-11",
+      "type": "concept",
+      "level": 1,
+      "q": "Tell me about CIFAR-10 and how the data was loaded and augmented.",
+      "easy": "CIFAR-10 is 60,000 tiny 32x32 colour photos in 10 classes such as airplane, cat, and truck: 50,000 for training and 10,000 for testing. Each training image is randomly shifted and mirrored every time it is seen, then normalised, and that per image work happens on the CPU.",
+      "deep": "Classes: airplane, automobile, bird, cat, deer, dog, frog, horse, ship, truck, balanced. Train transform: RandomCrop(32, padding=4), RandomHorizontalFlip, ToTensor, Normalize(mean (0.4914, 0.4822, 0.4465), std (0.2470, 0.2435, 0.2616)); test transform: ToTensor and Normalize. Images start as uint8 arrays, become PIL images, and are transformed in DataLoader worker processes, which is the CPU cost that later bottlenecked the T4s. The test loader uses batch 256, double the train batch. Fetching is a separate explicit step (scripts/fetch_cifar10.py) so N ranks cannot race on the same files and a network failure surfaces before a long job starts. Kaggle runs used the canonical tarball with torchvision's md5 check; laptop runs used a rebuilt HuggingFace parquet mirror; every artifact records data_source.",
+      "evidence": [
+        "portfolio: CIFAR-10, 50,000 train and 10,000 test, 30 epochs, no pretraining.",
+        "repo:distributed-vit-cifar10/src/dvit/data.py: CIFAR10_MEAN = (0.4914, 0.4822, 0.4465)",
+        "repo:distributed-vit-cifar10/runs/t4-ws1-fp32.json: \"data_source\": \"canonical (cs.toronto.edu tarball, md5 verified by torchvision)\","
+      ],
+      "sources": [],
+      "tags": [
+        "cifar-10",
+        "data",
+        "augmentation"
+      ]
+    },
+    {
+      "id": "vit-12",
+      "type": "why",
+      "level": 2,
+      "q": "The dataset download failed. What did you do, and why not just disable the checksum?",
+      "easy": "The official CIFAR-10 server could not be reached from the development network. Tanay downloaded a mirror instead but stored it in a format of its own, rather than rebuilding the original files, because making rebuilt files load would have meant turning off the integrity check that proves the data is genuine.",
+      "deep": "Bug 1: SSL UNEXPECTED_EOF_WHILE_READING from www.cs.toronto.edu before any payload arrived. Bug 2: pickles rebuilt from the HuggingFace parquet mirror were rejected as 'Dataset not found or corrupted', because torchvision checks published md5 sums a rebuilt file cannot match. The one line fix, disabling integrity checking, was refused; the house rule is never to weaken a check to make something pass. Instead fetch_cifar10.py writes data/cifar10-mirror/{train,test}.npz plus a SOURCE.txt, MirrorCIFAR10 returns (PIL image, label) so the same transforms apply, load_cifar10 prefers canonical then mirror, and describe_source writes either the canonical md5 verified label or 'huggingface parquet mirror (rebuilt, no original md5)' into every artifact. Kaggle could reach the canonical host, so every T4 number sits on md5 verified data. The point to make out loud: an integrity check that gets in your way is doing its job.",
+      "evidence": [
+        "portfolio: Silencing a checksum to make a download look successful is how results stop being trustworthy.",
+        "repo:distributed-vit-cifar10/CLAUDE.md: 2. **Never weaken a check to make something pass.** The md5 failure in bug 2",
+        "repo:distributed-vit-cifar10/runs/t4-ws1-fp32.json: \"data_source\": \"canonical (cs.toronto.edu tarball, md5 verified by torchvision)\","
+      ],
+      "sources": [],
+      "tags": [
+        "data-integrity",
+        "md5",
+        "bugs"
+      ]
+    },
+    {
+      "id": "vit-13",
+      "type": "how",
+      "level": 2,
+      "q": "How does the distributed sampler and loader work, and what two mistakes does the code guard against?",
+      "easy": "Each GPU gets its own non overlapping half of the training set every epoch. The code reshuffles every epoch and drops the leftover partial batch so both GPUs always take the same number of steps; otherwise one would wait forever for the other.",
+      "deep": "DistributedSampler(num_replicas=world_size, rank=rank, shuffle=True, drop_last=True) permutes indices with a generator seeded by seed + epoch and gives each rank a strided slice. Mistake 1: forgetting sampler.set_epoch(epoch) replays one permutation every epoch; train.py calls it at the top of each epoch and test_set_epoch_actually_reshuffles guards it. Mistake 2: ragged final batches; every backward triggers a collective, so a rank that runs one extra step blocks forever. drop_last on both sampler and DataLoader keeps step counts identical (test_drop_last_keeps_step_counts_equal_across_ranks uses 1,000 items over 3 ranks). The test sampler uses drop_last=False, so ranks can see different counts, and evaluate() all reduces the loss sum, correct count, and total before dividing instead of averaging per rank averages. Loader: num_workers 2 on Kaggle, pin_memory on CUDA, persistent_workers when workers > 0, and the default prefetch_factor of 2 batches per worker. Seeds are offset by rank so augmentation differs per replica.",
+      "evidence": [],
+      "sources": [
+        "https://docs.pytorch.org/docs/2.14/data.html"
+      ],
+      "tags": [
+        "distributed-sampler",
+        "dataloader",
+        "hangs"
+      ]
+    },
+    {
+      "id": "vit-14",
+      "type": "how",
+      "level": 1,
+      "q": "What were the training hyperparameters?",
+      "easy": "Batch 128 per GPU, 30 epochs, AdamW, a learning rate of 0.001 times the number of GPUs, two warmup epochs then cosine decay, and mild regularisation. The same settings were used for every configuration so only the systems choice varies.",
+      "deep": "AdamW, base lr 1e-3 scaled linearly by world size (2e-3 at 2 ranks; --lr-scale linear is the default), betas (0.9, 0.95), weight decay 0.05 on weight matrices and none on norms, biases, class token, and position embedding. Linear warmup over 2 epochs from 0, then cosine to 0 by the final step, computed per optimiser step. Label smoothing 0.1, stochastic depth up to 0.1, dropout 0, gradient clip at norm 1.0. Batch 128 per rank, so 256 effective at 2 ranks and 512 with accumulation 2. Seed 0, offset by rank. Precision chosen from compute capability. Runtime on Kaggle torch 2.10.0+cu128, NCCL on CUDA, gloo on CPU, FileStore rendezvous on macOS. Main suite 30 epochs; the bottleneck suite 6 epochs; gloo suite 3 epochs on 10% of the data at batch 64.",
+      "evidence": [
+        "portfolio: OptimizerAdamW, betas (0.9, 0.95), no decay on norms, biases, class token, position embedding",
+        "portfolio: ScheduleLinear warmup 2 epochs, then cosine, computed per step",
+        "portfolio: Learning rate1e-3, scaled linearly by world size",
+        "portfolio: Batch size128 per rank",
+        "portfolio: Runtimetorch 2.10.0+cu128, NCCL on CUDA, gloo on CPU, FileStore rendezvous on macOS"
+      ],
+      "sources": [],
+      "tags": [
+        "hyperparameters",
+        "config"
+      ]
+    },
+    {
+      "id": "vit-15",
+      "type": "formula",
+      "level": 2,
+      "q": "Write the learning rate schedule and say what the tests check.",
+      "easy": "The learning rate climbs in a straight line from zero to its peak over the first two epochs, then follows half a cosine wave down to zero by the last step. Tests check that it starts at zero, hits the peak exactly, ends at zero, and never overshoots.",
+      "deep": "With S steps per epoch, total $T=\\text{epochs}\\cdot S$ and warmup $W=2S$: $\\eta(t)=\\eta_{max}\\,t/W$ for $t<W$, else $\\eta(t)=\\eta_{max}\\cdot\\tfrac12\\big(1+\\cos(\\pi\\min(1,\\tfrac{t-W}{T-W}))\\big)$. engine.lr_at computes it per optimiser step (step = epoch x steps_per_epoch + i // accum) and writes it into every param group. test_schedule.py: lr_at(0) = 0; at step 200 with 100 steps per epoch it equals the 1e-3 peak; at step 1,000 it is 0 within 1e-9; over all 1,001 steps it never exceeds the peak. A second test checks the no decay group only holds 1D tensors or the (1, ...) shaped token and position tensors. Steps per epoch are 50,000 / 128 = 390 at 1 rank and 25,000 / 128 = 195 per rank at 2 ranks, so the 2 rank run takes half as many optimiser steps at twice the batch.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "lr-schedule",
+        "warmup",
+        "cosine"
+      ]
+    },
+    {
+      "id": "vit-16",
+      "type": "concept",
+      "level": 2,
+      "q": "What is the linear scaling rule, how did you apply it, and what did the bigger batch do to accuracy?",
+      "easy": "If you double the batch, the averaged gradient is less noisy, so you can take a step twice as large; Goyal et al. showed that with a warmup this keeps accuracy at large batches. Tanay multiplies the learning rate by the number of GPUs, because each GPU adds 128 images to the batch.",
+      "deep": "Rule: batch kB uses lr k$\\eta$ (Goyal et al. 2017 trained ResNet-50 at batch 8,192 on 256 GPUs in about an hour), plus gradual warmup because large early steps are unstable. Intuition: k SGD steps at batch B approximate one step at kB with lr k$\\eta$ when the gradient changes slowly. Implementation: lr = args.lr x world_size under --lr-scale linear. At 2 ranks the effective batch is 256 and lr 2e-3, with 195 instead of 390 steps per epoch. Accuracy: 2 rank DDP fp32 reached 80.01% vs 80.70% at 1 rank, consistent with half the optimiser steps, though one seed cannot separate that from noise. The rule here ignores accumulation: the accumulation 2 run has effective batch 512 at lr 2e-3 (it reached 80.15%). For Adam family optimisers the linear rule is a heuristic; square root scaling is the usual alternative.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws1-fp32` | 1 | single | fp32 | 1,853 | baseline | reference | 553 | 80.70% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-fp32` | 2 | DDP | fp32 | 3,637 | 1.96x (98%) | 1.96x | 561 | 80.01% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-amp-ga2` | 2 | DDP | fp16, accum 2 | 4,393 | no baseline | 2.37x | 361 | 80.15% |"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1706.02677"
+      ],
+      "tags": [
+        "linear-scaling",
+        "batch-size",
+        "learning-rate"
+      ]
+    },
+    {
+      "id": "vit-17",
+      "type": "concept",
+      "level": 1,
+      "q": "Explain how PyTorch DDP works, step by step.",
+      "easy": "Every GPU holds a full copy of the model and processes a different slice of each batch. After each backward pass the GPUs average their gradients, so every copy takes the same update and they stay identical without ever sending weights again.",
+      "deep": "(1) init_process_group creates the communicator. (2) DDP's constructor broadcasts state_dict() from rank 0 so replicas start identical. (3) A Reducer assigns gradients to buckets in roughly reverse parameters() order, since backward produces the last layers' gradients first, and registers one autograd hook per parameter. (4) During backward, when every gradient in a bucket is ready, an asynchronous all reduce starts on that bucket and overlaps with the rest of backward; all reduces launch in bucket index order on every rank so collectives line up. (5) At the end of backward the Reducer waits and writes averaged gradients into .grad. (6) Each rank's optimiser steps locally; identical start plus identical averaged gradients keeps replicas in sync. In this repo: DDP(model, device_ids=[local_rank], gradient_as_bucket_view=True), find_unused_parameters left at False because every parameter gets a gradient each step, and the default 25 MiB bucket cap.",
+      "evidence": [],
+      "sources": [
+        "https://docs.pytorch.org/docs/2.14/notes/ddp.html",
+        "https://docs.pytorch.org/docs/2.14/generated/torch.nn.parallel.DistributedDataParallel.html",
+        "https://arxiv.org/abs/2006.15704"
+      ],
+      "tags": [
+        "ddp",
+        "reducer",
+        "all-reduce"
+      ]
+    },
+    {
+      "id": "vit-18",
+      "type": "define",
+      "level": 1,
+      "q": "Define process group, rank, local rank, world size, backend, and rendezvous, and say how this repo sets them up.",
+      "easy": "A process group is the set of training processes that talk to each other. World size is how many there are, rank is each one's ID, local rank is its ID on its own machine (which picks its GPU), the backend is the library that moves the data, and rendezvous is how the processes find each other at startup.",
+      "deep": "torchrun sets RANK, LOCAL_RANK and WORLD_SIZE; dvit.dist.setup reads them with defaults 0, 0 and 1, so the same entrypoint also runs unlaunched. It calls torch.cuda.set_device(local_rank) and init_process_group with a 1,800 second timeout. Backends: NCCL, NVIDIA's GPU collective library, CUDA only; gloo, which runs collectives on CPU tensors. Rendezvous: torchrun --standalone starts a TCPStore key value server on localhost; dvit.launch instead uses torch.multiprocessing.spawn and a FileStore (init_method file://path), which needs no sockets and requires the path not to exist beforehand. DistContext is a frozen dataclass with is_main (rank 0 writes artifacts and logs) and is_distributed. Scalar reductions for metrics (all_reduce_mean, all_reduce_sum) use float64 tensors, on CPU under gloo.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "process-group",
+        "rendezvous",
+        "nccl",
+        "gloo"
+      ]
+    },
+    {
+      "id": "vit-19",
+      "type": "formula",
+      "level": 1,
+      "q": "How does ring all reduce work and what does it cost? Apply it to your setup.",
+      "easy": "The GPUs pass pieces of the gradient around a circle. In the first half each GPU adds the piece it receives to its own; in the second half the finished sums travel around until everyone has all of them. Each GPU ends up sending about twice the gradient size no matter how many GPUs there are, and with two GPUs exactly one gradient's worth.",
+      "deep": "Split the S byte buffer into N chunks. Reduce scatter: N - 1 steps, each rank sends one chunk of S/N to its right neighbour and adds the chunk it receives, ending with one fully reduced chunk per rank. All gather: N - 1 more steps forwarding finished chunks. Total 2(N - 1) steps of S/N each, so per rank traffic is $2\\frac{N-1}{N}S$ and time $\\approx 2(N-1)\\alpha+2\\frac{N-1}{N}\\frac{S}{B}$ for per message latency $\\alpha$ and link bandwidth B. The bandwidth term tends to 2S/B independent of N, which is why the ring is bandwidth optimal; the latency term grows linearly in N, which is why tree algorithms matter at large scale. NCCL documents that ReduceScatter followed by AllGather equals AllReduce, and nccl-tests converts algorithm bandwidth to bus bandwidth with the same factor 2(n - 1)/n. Here N = 2, so the factor is 1: each T4 sends and receives about one copy of the 6.9 MiB fp32 gradient per step, and DDP divides the sum by world size to get the mean.",
+      "evidence": [
+        "portfolio: at this size the gradient payload for each all reduce is about 7 MB"
+      ],
+      "sources": [
+        "https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/",
+        "https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html",
+        "https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md",
+        "https://arxiv.org/abs/1802.05799"
+      ],
+      "tags": [
+        "ring-all-reduce",
+        "nccl",
+        "communication-cost"
+      ]
+    },
+    {
+      "id": "vit-20",
+      "type": "number",
+      "level": 2,
+      "q": "Where does 'about 7 MB of gradients' come from, and why is it the same in fp16?",
+      "easy": "1.8 million parameters times 4 bytes each is about 7 MB. Mixed precision runs the matrix math in 16 bit, but the weights and therefore the gradients stay 32 bit, so the amount the GPUs exchange does not change between the fp32 and fp16 runs.",
+      "deep": "1,806,538 x 4 B = 7,226,152 B = 6.89 MiB. verify_claims.measured() derives the payload from the recorded model_params field (model_params x 4 / 1024^2), so the docs' 'about 7 MB' is checked rather than asserted, and test_gradient_payload_is_derived_from_recorded_parameters covers it. torch.autocast casts the inputs of eligible ops (linear, matmul, conv) to fp16 inside the forward but leaves parameters in fp32, and gradients land in fp32 .grad tensors, so DDP's buckets are fp32 in both arms. That is what licenses the phrase 'identical communication volume' across the 98% and 57% runs. An option not used: a DDP communication hook that casts gradients to fp16 before the all reduce, halving the payload; the isolation experiment showed the payload was not the problem.",
+      "evidence": [
+        "portfolio: at this size the gradient payload for each all reduce is about 7 MB",
+        "repo:distributed-vit-cifar10/src/dvit/verify_claims.py: mem |= {r[\"model_params\"] * 4 / 1024 ** 2 for r in runs}"
+      ],
+      "sources": [
+        "https://docs.pytorch.org/docs/2.14/amp.html"
+      ],
+      "tags": [
+        "gradient-payload",
+        "mixed-precision",
+        "communication"
+      ]
+    },
+    {
+      "id": "vit-21",
+      "type": "concept",
+      "level": 2,
+      "q": "What are gradient bucketing and communication overlap, and how much did they matter here?",
+      "easy": "Instead of sending each layer's gradient separately, DDP groups gradients into buckets and starts sending a bucket as soon as it is complete, while the GPU is still computing gradients for earlier layers. That can hide communication behind computation. In this project the gradients were so small that the cheapness of communication mattered more than the overlap.",
+      "deep": "Many tiny all reduces each pay launch and latency cost; one giant all reduce at the end of backward overlaps with nothing. Buckets (default cap 25 MiB) are the middle ground, filled in reverse layer order. gradient_as_bucket_view=True makes .grad tensors views into bucket memory, saving a copy and some peak memory. With a 6.9 MiB gradient, most of the model fits in one default bucket, so there is limited room for overlap. What made communication cheap is size: one fp16 T4 takes about 32 ms per 128 image step (128 / 3,956 img/s), and moving 7 MB over a PCIe Gen3 x16 link at a few GB/s effective takes a few milliseconds (Tanay's estimate; the link was never benchmarked). The measurement that bounds it is the synthetic run's 96% efficiency: compute plus communication at 2 ranks loses at most about 4%. A smaller bucket_cap_mb would create more overlap at the cost of more calls; it was not tuned because the ablation showed nothing to win.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: | **Synthetic, no dataloader** | 3,956 | 7,580 | **1.92x** | **96%** |"
+      ],
+      "sources": [
+        "https://docs.pytorch.org/docs/2.14/generated/torch.nn.parallel.DistributedDataParallel.html",
+        "https://arxiv.org/abs/2006.15704",
+        "https://www.nvidia.com/en-us/data-center/tesla-t4/"
+      ],
+      "tags": [
+        "bucketing",
+        "overlap",
+        "ddp"
+      ]
+    },
+    {
+      "id": "vit-22",
+      "type": "how",
+      "level": 2,
+      "q": "How does gradient accumulation interact with DDP, and what did you measure?",
+      "easy": "Accumulation adds up gradients from several small batches before taking one step, to imitate a bigger batch without more memory. Under DDP you must tell it not to share gradients after the intermediate batches, or you pay for communication every time. Tanay measured accumulation of 2 as effectively free.",
+      "deep": "For microbatches 1 to K - 1, the forward and backward run inside model.no_sync(), which suppresses the Reducer's all reduce, and gradients accumulate locally in .grad. The K-th microbatch runs outside no_sync and its backward all reduces the accumulated sum. Each loss is divided by K so the summed gradient equals the mean over the K x B batch. is_last_micro also fires on the epoch's final batch so a partial group still steps. The forward has to be inside no_sync too, which the code does by wrapping both. Tests: test_accumulation_matches_the_full_batch (4 microbatches of 4 against one batch of 16 at rtol 1e-4) and its inverse, test_forgetting_to_divide_by_steps_is_caught, which asserts unscaled accumulation gives exactly 4x the gradient. Measured: accumulation 2 at 2 ranks ran 4,393 img/s against 4,376 without, 1.004x. Caveat: both runs are host bound, so this cannot show what accumulation costs when the GPU is the limit.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: * Gradient accumulation at 2 microbatches is 1.004x, effectively free.",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-amp-ga2` | 2 | DDP | fp16, accum 2 | 4,393 | no baseline | 2.37x | 361 | 80.15% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-amp` | 2 | DDP | fp16 | 4,376 | 1.15x (57%) | 2.36x | 354 | 79.71% |"
+      ],
+      "sources": [
+        "https://docs.pytorch.org/docs/2.14/generated/torch.nn.parallel.DistributedDataParallel.html"
+      ],
+      "tags": [
+        "gradient-accumulation",
+        "no_sync",
+        "ddp"
+      ]
+    },
+    {
+      "id": "vit-23",
+      "type": "how",
+      "level": 1,
+      "q": "How did you prove the two GPU run computes the same gradient as one GPU? What would make that test meaningless?",
+      "easy": "The test starts two processes that each compute the gradient on half of a fixed batch, lets DDP average them, and compares the result with one process computing the gradient on the whole batch. A second test checks that a deliberately wrong computation fails, so the first test cannot pass by accident.",
+      "deep": "tests/test_ddp_equivalence.py builds a probe ViT (dim 48, depth 2, heads 2, dropout 0, drop_path 0, since random masks would differ). mp.spawn starts two workers on gloo over a FileStore in a temp dir; torch.manual_seed(1234) gives identical init; each rank takes its 8 sample shard of a fixed 16 sample batch, computes mean cross entropy, and backpropagates through DDP; rank 0 saves gradients flattened in sorted parameter name order. The reference is one process on all 16 samples. assert_close(rtol=1e-4, atol=1e-6). It holds because the mean over 16 equals the average of two means over 8 when shards are equal, and DDP's all reduce averages. The tolerance is float32 summation order noise; a missing all reduce shows up as order 1 relative error. The guard, test_a_broken_reduction_would_be_caught, computes the gradient on half the batch and asserts it is not close. Limit: it runs on CPU gloo, so it validates DDP's math and the model, not NCCL on the T4s; the Kaggle notebook runs pytest before the sweep.",
+      "evidence": [
+        "portfolio: The suite spawns a real gloo process group and checks it to rtol=1e-4.",
+        "portfolio: It ships with a second test that deliberately computes the wrong thing, because a correctness test that cannot fail is decoration rather than evidence."
+      ],
+      "sources": [],
+      "tags": [
+        "testing",
+        "ddp",
+        "gradient-equivalence"
+      ]
+    },
+    {
+      "id": "vit-24",
+      "type": "how",
+      "level": 2,
+      "q": "Why does the code refuse to run multi process training on the Mac GPU?",
+      "easy": "Apple's GPU backend has no way to share gradients between processes. Rather than quietly copying everything to the CPU and still calling it distributed GPU training, the code stops with an error that names the three setups that do work.",
+      "deep": "dist.resolve_backend(device_type, world_size): world_size 1 returns None; cuda returns nccl; cpu returns gloo; mps with world_size above 1 raises UnsupportedTopology with the message that MPS cannot participate in a process group, because gloo does not support MPS tensors and NCCL is CUDA only, and it lists the paths that work (mps at world_size 1, DVIT_DEVICE=cpu for gloo, or CUDA). train.main catches it, prints 'refusing to run', and returns exit code 2. The silent alternative, moving each tensor to CPU for every collective, would publish numbers labelled distributed MPS that actually measure device to host copies plus CPU collectives. Tests: test_mps_refuses_to_pretend_it_is_distributed, test_cuda_picks_nccl_and_cpu_picks_gloo, test_single_process_needs_no_backend. The principle in the README: a benchmark that cannot be trusted to refuse cannot be trusted.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "topology",
+        "mps",
+        "backend-selection"
+      ]
+    },
+    {
+      "id": "vit-25",
+      "type": "why",
+      "level": 1,
+      "q": "Tell me about the bug that cost the most time.",
+      "easy": "Every two process run on the laptop just sat there with no error until it timed out. It looked like slow training, but the processes were stuck trying to find each other over a local network port the machine blocked.",
+      "deep": "Bug 3. torchrun's default rendezvous opens a TCPStore on localhost; on the development machine localhost TCP was blocked and IPv6 resolution failed in a loop, so init_process_group waited until its timeout. A hang reads as slow training, so suspicion lands on the model or the data first. Fix: dvit.launch spawns N children with torch.multiprocessing.spawn, sets RANK, LOCAL_RANK, WORLD_SIZE and DVIT_INIT_FILE, and dist.setup switches to init_method file://..., a FileStore that needs no sockets. sweep.default_launcher picks the FileStore launcher on macOS and torchrun elsewhere, overridable with DVIT_LAUNCHER, and both launchers accept identical training arguments. What would surface it faster next time: a short init timeout and a log line right after the first collective succeeds.",
+      "say": "The worst bug didn't crash. Every two rank run just hung until the timeout, which looks exactly like slow training. torchrun's TCP rendezvous was blocked on localhost, so I wrote a FileStore launcher that needs no sockets. Now when a distributed job looks slow, I check the launcher early.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: Every 2 rank run hung, no error, until timeout"
+      ],
+      "sources": [],
+      "tags": [
+        "bugs",
+        "rendezvous",
+        "hang"
+      ]
+    },
+    {
+      "id": "vit-26",
+      "type": "concept",
+      "level": 1,
+      "q": "What hardware and software stack produced the headline numbers?",
+      "easy": "Two NVIDIA Tesla T4 GPUs on a free Kaggle machine with only 4 virtual CPU cores, NVIDIA's NCCL library for GPU communication, and PyTorch 2.10. The 4 CPU cores turned out to be the most important hardware fact in the project.",
+      "deep": "T4: Turing architecture, compute capability 7.5 (sm_75), 16 GB GDDR6 at 320+ GB/s, 8.1 TFLOPS fp32, 65 TFLOPS fp16 on 320 tensor cores, 70 W, PCIe Gen3 x16, no hardware bf16. Host: 4 vCPUs (artifact cpu_cores 4); torch used 2 intra op threads at 1 rank and 1 per rank at 2 ranks (threads_per_rank). Software: torch 2.10.0+cu128 from the Kaggle image, installed with pip --no-deps so the package cannot pull a different torch; NCCL backend; torchrun --standalone on Linux. Main suite at commit 33bcd11 (30 epochs), bottleneck suite at 2e788b1 (6 epochs). Peak memory comes from torch.cuda.max_memory_allocated. Laptop group: Apple M5, 10 CPU cores, 8 GPU cores, 16 GB unified memory, torch 2.14.0, MPS backend, no allocator peak available.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/runs/t4-ws2-amp-synth.json: \"cpu_cores\": 4,",
+        "repo:distributed-vit-cifar10/runs/t4-ws2-amp-synth.json: \"threads_per_rank\": 1,",
+        "repo:distributed-vit-cifar10/runs/t4-ws1-fp32.json: \"threads_per_rank\": 2,",
+        "repo:distributed-vit-cifar10/RESULTS.md: 30 epochs, full CIFAR-10, batch 128 per rank, nccl, torch 2.10.0+cu128,",
+        "repo:distributed-vit-cifar10/RESULTS.md: 6 epochs, batch 128 per rank, fp16, 2x T4, all from commit `2e788b1`."
+      ],
+      "sources": [
+        "https://www.nvidia.com/en-us/data-center/tesla-t4/"
+      ],
+      "tags": [
+        "hardware",
+        "t4",
+        "kaggle"
+      ]
+    },
+    {
+      "id": "vit-27",
+      "type": "concept",
+      "level": 1,
+      "q": "Explain mixed precision training and the GradScaler.",
+      "easy": "Mixed precision runs the heavy matrix math in 16 bit numbers, which tensor core GPUs process faster and which take half the memory, while keeping the weights and the numerically sensitive operations in 32 bit. Because 16 bit numbers cannot hold very small values, the loss is multiplied by a large factor before backpropagation so small gradients do not round to zero, then divided back out before the update.",
+      "deep": "Micikevicius et al. 2017: fp16 activations and gradients, an fp32 master copy of the weights, and loss scaling. torch.autocast wraps the forward and loss only; on CUDA it casts matmul, linear, conv and bmm to fp16 and runs softmax, layer_norm, log_softmax, cross_entropy and similar reductions in fp32. GradScaler: scaler.scale(loss).backward(); scaler.unscale_(opt) before clipping (engine.py does this); scaler.step(opt) skips the update if any gradient is inf or NaN; scaler.update() multiplies the scale by 0.5 on overflow and by 2.0 after 2,000 clean steps, starting from 65,536. fp16 tops out at 65,504 with 10 mantissa bits, hence the scaler; bf16 keeps fp32's 8 exponent bits, so it needs none. pick_amp_dtype: CUDA sm_80 and later get bf16 without a scaler, sm_75 gets fp16 with one, MPS gets fp16 without one (no GradScaler support there), CPU gets bf16. FSDP needs ShardedGradScaler so the inf check is agreed across ranks and no rank skips a step alone.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/1710.03740",
+        "https://docs.pytorch.org/docs/2.14/amp.html"
+      ],
+      "tags": [
+        "mixed-precision",
+        "gradscaler",
+        "fp16",
+        "bf16"
+      ]
+    },
+    {
+      "id": "vit-28",
+      "type": "why",
+      "level": 1,
+      "q": "What was the bf16 trap on the T4?",
+      "easy": "PyTorch reported that the T4 supports bfloat16, but the card only does it in slow software emulation. Trusting that answer sent every early mixed precision run down the emulated path while the benchmark still labelled the result mixed precision.",
+      "deep": "Bug 8: torch.cuda.is_bf16_supported() returns True on sm_75 because recent PyTorch counts emulated bf16 as support. The first Kaggle run requested bf16 for every amp row, and torch inductor logged that the T4 does not support bfloat16 compilation natively while the sweep carried on. Fix: amp_dtype_for_capability(major) picks bf16 only when major is 8 or more (Ampere and later), and fp16 plus a GradScaler otherwise, reading torch.cuda.get_device_capability. Every artifact records amp_dtype; every T4 amp run recorded float16. The amp rows were rerun (the kaggle-amp suite); the two fp32 rows were unaffected. Tests parametrize capability majors 6 and 7 (fp16 plus scaler) and 8, 9 and 10 (bf16, no scaler), and assert Turing is never treated as bf16 capable. It was caught by reading the first cell of the Kaggle output. The write up groups it with three other bugs where an API answered a slightly different question than the one being asked.",
+      "evidence": [
+        "portfolio: A related trap is that on a T4, torch.cuda.is_bf16_supported() returns True.",
+        "repo:distributed-vit-cifar10/RESULTS.md: Before it, every amp run requested bf16 and torch inductor replied",
+        "repo:distributed-vit-cifar10/runs/t4-ws2-amp-synth.json: \"amp_dtype\": \"float16\","
+      ],
+      "sources": [],
+      "tags": [
+        "bf16",
+        "bugs",
+        "compute-capability"
+      ]
+    },
+    {
+      "id": "vit-29",
+      "type": "number",
+      "level": 1,
+      "q": "What did mixed precision buy on one T4, and why not more?",
+      "easy": "It roughly doubled throughput: 1,853 to 3,810 images per second on one T4, a 2.06x speedup, and peak GPU memory fell from 553 MB to 347 MB, with accuracy essentially unchanged.",
+      "deep": "t4-ws1-fp32: 1,853 img/s, 553 MB, 80.70%. t4-ws1-amp: 3,810 img/s, 347 MB, 80.52%. Both 30 epochs, batch 128, 2 workers, commit 33bcd11. Memory: parameters, gradients and two AdamW moments are about 16 bytes x 1.8M = 29 MB in both runs, so the 206 MB drop is mostly activations held in fp16 (Tanay's arithmetic). The T4 datasheet ratio of fp16 tensor core to fp32 throughput is 65 / 8.1, about 8x, so 2.06x means the step is far from matmul bound: the matrices are only 192 wide, LayerNorm, softmax and loss stay in fp32, elementwise ops and kernel launches take a share, and the host has to keep up. A rough FLOP count gives about 0.75 GFLOPs per training image, so 3,810 img/s is about 3 TFLOPS achieved, a small fraction of the fp16 peak. Prediction 3 ('amp is a large win on T4') scored correct, and only because the bf16 fix landed first.",
+      "evidence": [
+        "portfolio: Mixed precision was predicted to be a large win, and it is: 2.06x at one rank with peak memory falling from 553 MB to 347 MB.",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws1-fp32` | 1 | single | fp32 | 1,853 | baseline | reference | 553 | 80.70% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws1-amp` | 1 | single | fp16 | 3,810 | baseline | 2.06x | 347 | 80.52% |"
+      ],
+      "sources": [
+        "https://www.nvidia.com/en-us/data-center/tesla-t4/"
+      ],
+      "tags": [
+        "mixed-precision",
+        "t4",
+        "results"
+      ]
+    },
+    {
+      "id": "vit-30",
+      "type": "number",
+      "level": 2,
+      "q": "What happened with mixed precision and torch.compile on the Apple GPU, and what did compile do on CUDA?",
+      "easy": "On the Mac, turning on 16 bit math alone made training 32% slower, because every operation paid for converting numbers back and forth. Compiling the model fused those conversions away and made it 2.23x faster than plain 32 bit, cutting a 24 minute run to 11. On the T4s compile added a much smaller 1.08x.",
+      "deep": "mps-fp32: 1,061 img/s, 24.3 min, 80.61%. mps-amp (fp16 autocast, eager): 726 img/s, 0.68x, 31.6 min, 80.77%. mps-amp-compiled: 2,361 img/s, 2.23x, 10.6 min, 80.72%. The explanation offered: in eager mode autocast inserts a cast around each eligible op, costing memory traffic and launches, and Apple silicon is already efficient at fp32, so casts cost more than the fp16 math saves; torch.compile's inductor backend traces the graph and fuses casts into neighbouring kernels. This is consistent with the numbers but was not profiled. On CUDA, compile added 1.08x on top of DDP plus amp (4,376 to 4,706 img/s, 2.54x over single GPU fp32), because CUDA eager kernels are already well tuned. Measurement detail: the compiled DDP run's first epoch ran at 837 img/s while compiling; the median over epochs excludes that from throughput, but the wall clock includes it (366 s total against 343 s uncompiled). 'Turn on AMP' is CUDA advice that did not transfer to MPS.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: | `mps-fp32` | fp32 | 1,061 | baseline | 80.61% | 24.3 min |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `mps-amp` | fp16 autocast | 726 | 0.68x | 80.77% | 31.6 min |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `mps-amp-compiled` | fp16 plus torch.compile | 2,361 | 2.23x | 80.72% | 10.6 min |",
+        "portfolio: 726 img/s against 1,061 in fp32, a 32% slowdown",
+        "portfolio: Wall clock for the full 30 epoch run falls from 24 minutes to 11.",
+        "repo:distributed-vit-cifar10/RESULTS.md: * `torch.compile` adds 1.08x on top of DDP plus amp, reaching 4,706 img/s and",
+        "repo:distributed-vit-cifar10/runs/t4-ws2-ddp-amp-compiled.json: \"images_per_sec\": 837.3116544446874,",
+        "repo:distributed-vit-cifar10/runs/t4-ws2-ddp-amp-compiled.json: \"total_seconds\": 366.1588887759999,",
+        "repo:distributed-vit-cifar10/runs/t4-ws2-ddp-amp.json: \"total_seconds\": 343.18519433599977,"
+      ],
+      "sources": [],
+      "tags": [
+        "mps",
+        "torch-compile",
+        "mixed-precision"
+      ]
+    },
+    {
+      "id": "vit-31",
+      "type": "how",
+      "level": 1,
+      "q": "Exactly how did you measure throughput, speedup, and efficiency?",
+      "easy": "Each epoch is timed with the GPU forced to finish its queued work at the start and the end, images processed by all GPUs are added up and divided by that time, and the run's figure is the median over epochs. Speedup is two GPU throughput over one GPU throughput with every other setting identical; efficiency is speedup divided by the number of GPUs.",
+      "deep": "metrics.Stopwatch calls torch.cuda.synchronize (or torch.mps.synchronize) on enter and exit, because kernel launches are asynchronous and an unsynchronised timer measures launch time. Per epoch, images per rank are summed with all_reduce_sum, seconds are max(local, mean across ranks), and throughput is global images over seconds. The timed region is the training loop including data loading, excluding evaluation. RunRecord.finalise takes the median of per epoch throughput, which drops the compile epoch and first epoch worker startup. Rank speedup: report.baseline_for finds a world_size 1 artifact with the same hardware string and equal precision, compiled, grad_accum_steps, synthetic_data, num_workers, epochs and subset_fraction; efficiency = speedup / world_size. plain_baseline_for (1 rank, fp32, no compile) answers the separate question of how much faster than naive, and efficiency is never computed against it. With no match the dashboard prints 'no baseline'. One seed and one run per configuration, no repeats.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "measurement",
+        "throughput",
+        "methodology"
+      ]
+    },
+    {
+      "id": "vit-32",
+      "type": "formula",
+      "level": 1,
+      "q": "Apply Amdahl's law to your results. Does it explain the drop?",
+      "easy": "Amdahl's law says the part of a job that cannot be split across processors caps the total speedup. Read backwards from the measured speedups, the unsplittable share looks like 2% in fp32 and 74% in fp16, which cannot be right for identical code, so the better model is a shared resource with a fixed capacity: the CPU host feeding both GPUs.",
+      "deep": "$S(N)=\\frac{1}{(1-p)+p/N}$, with limit $1/(1-p)$ as N grows. Solving for the serial fraction e (the Karp-Flatt form) at N = 2 gives $e=2/S-1$. fp32 real data: S = 1.963, e = 0.019. fp16 real data: S = 1.149, e = 0.74. fp16 synthetic: S = 1.916, e = 0.044 (Tanay's arithmetic on the artifact ratios). The serial part of the code did not change between fp32 and fp16, so a jump from 2% to 74% rules out a fixed serial fraction. A bottleneck model fits: $X(N)=\\min(N g,\\,H)$, where g is per GPU throughput and H is host input capacity. fp32: g = 1,853, so 2g = 3,706 sits under H and the job is GPU bound near 2x. fp16: g = 3,956 on synthetic input, so 2g = 7,912 sits far above H, about 4,073 in that suite, and the job is host bound. Amdahl's lesson survives in spirit: speeding up one part by 2.06x raises the share of the part you did not speed up. Caveat: H depends on worker count and on which Kaggle host the session landed on.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws1-fp32` | 1 | single | fp32 | 1,853 | baseline | reference | 553 | 80.70% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-fp32` | 2 | DDP | fp32 | 3,637 | 1.96x (98%) | 1.96x | 561 | 80.01% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | **Synthetic, no dataloader** | 3,956 | 7,580 | **1.92x** | **96%** |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | Real data, 2 workers per rank | 3,462 | 4,073 | 1.18x | 59% |"
+      ],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Amdahl%27s_law"
+      ],
+      "tags": [
+        "amdahl",
+        "karp-flatt",
+        "bottleneck-model"
+      ]
+    },
+    {
+      "id": "vit-33",
+      "type": "number",
+      "level": 1,
+      "q": "Give me the 2x T4 scaling table.",
+      "easy": "In 32 bit, one T4 did 1,853 images per second and two did 3,637: 1.96x at 98% efficiency. In 16 bit, one did 3,810 and two did 4,376: only 1.15x at 57%.",
+      "deep": "30 epochs, full CIFAR-10, batch 128 per rank, NCCL, torch 2.10.0+cu128, commit 33bcd11. t4-ws1-fp32: 1,853 img/s, 553 MB, 80.70%. t4-ws1-amp: 3,810, 347 MB, 80.52% (2.06x vs fp32). t4-ws2-ddp-fp32: 3,637, rank speedup 1.96x (98%), 561 MB, 80.01%. t4-ws2-ddp-amp: 4,376, 1.15x (57%), 2.36x vs fp32, 354 MB, 79.71%. t4-ws2-ddp-amp-compiled: 4,706, no baseline, 2.54x vs fp32, 345 MB, 80.09%. t4-ws2-ddp-amp-ga2: 4,393, no baseline, 2.37x, 361 MB, 80.15%. t4-ws2-fsdp-amp: 2,884, 0.76x (38%) against one unwrapped rank, 1.56x vs fp32, 338 MB, 79.41%. Caveats: one run each, one seed, a shared cloud VM. The 2 rank fp16 run is faster in absolute terms than the 2 rank fp32 run, yet it is the least efficient, which is the puzzle the isolation experiment answered.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws1-fp32` | 1 | single | fp32 | 1,853 | baseline | reference | 553 | 80.70% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws1-amp` | 1 | single | fp16 | 3,810 | baseline | 2.06x | 347 | 80.52% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-fp32` | 2 | DDP | fp32 | 3,637 | 1.96x (98%) | 1.96x | 561 | 80.01% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-amp` | 2 | DDP | fp16 | 4,376 | 1.15x (57%) | 2.36x | 354 | 79.71% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-amp-compiled` | 2 | DDP | fp16 + compile | 4,706 | no baseline | 2.54x | 345 | 80.09% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-amp-ga2` | 2 | DDP | fp16, accum 2 | 4,393 | no baseline | 2.37x | 361 | 80.15% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-fsdp-amp` | 2 | FSDP | fp16 | 2,884 | 0.76x (38%) | 1.56x | 338 | 79.41% |"
+      ],
+      "sources": [],
+      "tags": [
+        "results",
+        "scaling",
+        "t4"
+      ]
+    },
+    {
+      "id": "vit-34",
+      "type": "number",
+      "level": 1,
+      "q": "Walk me through the isolation experiment and its numbers.",
+      "easy": "Tanay replaced real images with ready made random tensors held in memory, so the CPU had nothing to decode. Two GPUs then scaled at 1.92x (96%). With real images they scaled at only 1.18x, and adding more loader processes made it worse.",
+      "deep": "kaggle-bottleneck suite: 6 epochs, batch 128 per rank, fp16, 2x T4, commit 2e788b1. Synthetic input (num_workers 0): 3,956 to 7,580 img/s, 1.92x, 96%. Real data with 2 workers per rank: 3,462 to 4,073, 1.18x, 59%. Real data with 8 workers per rank: 3,599 to 3,996, 1.11x, 56%. Readings: one T4 alone consumes 3,956 img/s of synthetic input, within 3% of the most the host ever produced; at one rank the input path already costs 12% (3,462 against 3,956); at two ranks the gap is 46% (4,073 against 7,580). The suite's config comment wrote the reading rule in advance: synthetic scaling near 2x convicts the dataloader, near 1.15x convicts the collective. Caveats: the synthetic pool is 512 images reused modulo, so it is friendlier to caches and its 96% is an upper bound; its accuracy is meaningless because labels are random, and the dashboard prints n/a.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: | **Synthetic, no dataloader** | 3,956 | 7,580 | **1.92x** | **96%** |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | Real data, 2 workers per rank | 3,462 | 4,073 | 1.18x | 59% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | Real data, 8 workers per rank | 3,599 | 3,996 | 1.11x | 56% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: within 3 percent of everything the host can produce",
+        "repo:distributed-vit-cifar10/RESULTS.md: 12 percent is lost to the host before any distribution is involved.",
+        "repo:distributed-vit-cifar10/RESULTS.md: At 2 ranks that gap widens to 46 percent.",
+        "repo:distributed-vit-cifar10/RESULTS.md: Synthetic data indexes a 512 image pool",
+        "portfolio: The measurement that settles it took six short runs and one flag."
+      ],
+      "sources": [],
+      "tags": [
+        "isolation",
+        "synthetic-data",
+        "results"
+      ]
+    },
+    {
+      "id": "vit-35",
+      "type": "why",
+      "level": 1,
+      "q": "So why did the speedup vanish?",
+      "easy": "Two GPUs need twice as many prepared images per second. In 32 bit each GPU was slow enough that the 4 CPU cores could keep both fed. In 16 bit each GPU doubled its appetite, and the CPU could barely feed one GPU at full speed, so the second GPU spent its time waiting.",
+      "deep": "The chain: (1) fp16 doubles per GPU demand, from about 1,853 to about 3,810 img/s. (2) Every image needs a uint8 to PIL conversion, RandomCrop with padding, a flip, ToTensor and Normalize on the CPU in worker processes. (3) Kaggle's host has 4 vCPUs and topped out near 4,073 img/s of prepared input in the bottleneck suite. (4) Two fp16 T4s want about 7,600 img/s and get about 4,000. (5) The all reduce is unchanged, the same 7 MB, and the synthetic run bounds its cost at about 4%. More workers made it worse: 8 per rank means 16 worker processes plus 2 trainers on 4 cores, so the extra processes add context switches and cache churn (3,996 against 4,073 img/s). The operational reading: scaling efficiency depends on the ratio between accelerator speed and host speed, so speeding up the accelerator is what broke it, and anyone tuning NCCL would have worked in the wrong subsystem.",
+      "evidence": [
+        "portfolio: One T4 in fp16 already consumes 3,956 img/s of synthetic input, so 4 vCPUs cannot feed even one GPU comfortably, let alone two.",
+        "portfolio: Raising workers from 2 to 8 per rank made it worse, 3,996 against 4,073, because 16 worker processes on 4 cores buy context switches and nothing else.",
+        "portfolio: With real data, throughput never passes about 4,073 img/s no matter how many GPUs or workers are thrown at it.",
+        "portfolio: Scaling efficiency is a property of the ratio between accelerator speed and host speed, and optimising the accelerator is what breaks it."
+      ],
+      "sources": [],
+      "tags": [
+        "bottleneck",
+        "dataloader",
+        "diagnosis"
+      ]
+    },
+    {
+      "id": "vit-36",
+      "type": "define",
+      "level": 2,
+      "q": "What is FSDP and how does it differ from DDP?",
+      "easy": "DDP keeps a full copy of the model, its gradients, and its optimiser state on every GPU. FSDP splits all three across GPUs and gathers each layer's pieces only while that layer is being used, which saves memory for big models at the cost of extra communication.",
+      "deep": "FSDP, in the style of ZeRO stage 3: each rank stores 1/N of the flattened parameters, gradients and optimiser state. Forward: all gather a unit's parameters, compute, free the gathered copy. Backward: all gather again, compute gradients, then reduce scatter so each rank keeps only its shard of the averaged gradient; the optimiser updates only that shard. Per step it moves more data than DDP, two all gathers plus a reduce scatter against one all reduce (which is itself a reduce scatter plus an all gather). In this repo: FSDP(model, auto_wrap_policy=size_based_auto_wrap_policy with min_num_params 10,000, device_id=local_rank), so each encoder block becomes its own unit. Two FSDP specific correctness issues are handled: clipping must call the module's own collective aware clip_grad_norm_, because the free function sees only the local shard and under clips (bug 6, found by reading code, since the laptop has no CUDA), and fp16 needs ShardedGradScaler so the inf and NaN decision is reduced across ranks. FSDP pays off when parameters plus optimiser state do not fit on one card; here that state is about 29 MB.",
+      "evidence": [],
+      "sources": [
+        "https://arxiv.org/abs/2304.11277",
+        "https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html"
+      ],
+      "tags": [
+        "fsdp",
+        "sharding",
+        "zero"
+      ]
+    },
+    {
+      "id": "vit-37",
+      "type": "number",
+      "level": 2,
+      "q": "How did FSDP do, and was the comparison fair?",
+      "easy": "FSDP was 34% slower than DDP on two GPUs (2,884 against 4,376 images per second) and saved only about 5% of GPU memory. It was even slower than one GPU with no wrapper. That was the predicted outcome for a model this small.",
+      "deep": "t4-ws2-fsdp-amp: 2,884 img/s, 338 MB peak, 79.41%. Like for like against DDP at 2 ranks: 0.66x throughput, 338 against 354 MB, a 5% saving. Against one unwrapped fp16 rank (3,810 img/s) it is 0.76x, 38% efficiency, which mixes a strategy change into a rank change and says bluntly that two FSDP T4s are slower than one plain T4. Memory arithmetic (Tanay's, not measured separately): parameters, gradients and AdamW moments total about 16 bytes x 1.8M = 29 MB; sharding across two ranks saves about 14.5 MB, close to the measured 16 MB gap, so the saving is what sharding predicts and activations dominate the rest. Fairness caveats: default FSDP settings, a 10,000 parameter wrap threshold that creates several small units, and the same host bound regime as DDP. The repo's own line: 'We chose DDP because FSDP measured 0.66x at this model size' beats 'we used DDP'. CLAUDE.md is blunt that at 1.8M parameters the 0.66x is arithmetic rather than a finding.",
+      "evidence": [
+        "portfolio: FSDP was predicted to lose, and it does: 2,884 img/s against DDP's 4,376, buying 5% of peak memory for 34% of throughput.",
+        "repo:distributed-vit-cifar10/RESULTS.md: FSDP reaches 2,884 img/s against DDP's 4,376, so **0.66x**.",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-fsdp-amp` | 2 | FSDP | fp16 | 2,884 | 0.76x (38%) | 1.56x | 338 | 79.41% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-amp` | 2 | DDP | fp16 | 4,376 | 1.15x (57%) | 2.36x | 354 | 79.71% |",
+        "repo:distributed-vit-cifar10/CLAUDE.md: 2. A larger model would make FSDP a fair fight. At 1.8M parameters its 0.66x"
+      ],
+      "sources": [
+        "https://arxiv.org/abs/2304.11277"
+      ],
+      "tags": [
+        "fsdp",
+        "results",
+        "memory"
+      ]
+    },
+    {
+      "id": "vit-38",
+      "type": "number",
+      "level": 2,
+      "q": "Why is accuracy in your results table at all, if this is a systems project?",
+      "easy": "Accuracy is the control. Precision and compilation should change speed, not learning, so a large accuracy move would have meant a bug. Top-1 stayed between 79.41% and 80.70% across all seven T4 runs and within 0.16 points across the three laptop runs.",
+      "deep": "T4: 79.41% to 80.70% over seven configurations. M5: 80.61, 80.77 and 80.72. The 2 rank runs sit slightly lower (79.41 to 80.15 against 80.52 and 80.70 at 1 rank), consistent with half the optimiser steps at double the batch, with one seed each, so no claim is made about it. report.Run.accuracy_is_meaningful excludes smoke runs (subset below 1.0 or under 10 epochs) and synthetic runs from accuracy views; the gloo runs keep their img/s and lose their top-1. Figure 3's overlaid test accuracy curves are the visual version of the control. Had fp16 or FSDP dropped accuracy by several points, the right output would have been a bug report, for example a broken loss scale or a missing gradient sync, rather than a results row.",
+      "evidence": [
+        "portfolio: Across all seven T4 configurations, top-1 spans 79.41% to 80.70%, and the three Apple silicon runs land within 0.16 points of each other.",
+        "repo:distributed-vit-cifar10/RESULTS.md: other (80.61, 80.77, 80.72), which is what should happen"
+      ],
+      "sources": [],
+      "tags": [
+        "accuracy",
+        "control",
+        "results"
+      ]
+    },
+    {
+      "id": "vit-39",
+      "type": "number",
+      "level": 2,
+      "q": "What did the CPU gloo experiment show, and why was the prediction wrong?",
+      "easy": "Tanay expected more training processes on one laptop CPU to slow things down. Instead throughput rose from 552 to 879 images per second at 4 processes, because a single process left most of the CPU cores idle.",
+      "deep": "gloo-overhead suite: 3 epochs, 10% of CIFAR-10, batch 64 per rank, FileStore launcher, 4 intra op threads per rank on a 10 core M5. 1 rank: 552 img/s. 2 ranks: 694 (1.26x, 63%). 4 ranks: 879 (1.59x, 40%). One rank used 4 threads and left 6 cores idle, so extra ranks recruited idle cores; by 4 ranks, 16 threads on 10 cores is oversubscribed and efficiency falls to 40%. This is weak scaling (effective batch 64 to 256), so accuracy across rows is not comparable, and a fair strong scaling test would pin total threads. A rerun that overlapped the MPS suite measured 146, 288 and 343 img/s and even reversed the efficiency trend; those artifacts live in runs/invalid and were never averaged in. Detail to know: the bug log quotes the first idle measurement as 521, 632 and 814, while the table uses the current idle artifacts.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: | `gloo-ws1` | 1 | 4 | 64 | 552 | baseline | |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `gloo-ws2` | 2 | 4 | 128 | 694 | 1.26x | 63% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `gloo-ws4` | 4 | 4 | 256 | 879 | 1.59x | 40% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: overlapped the MPS suite produced 146, 288 and 343 img/s",
+        "repo:distributed-vit-cifar10/RESULTS.md: against 521, 632 and 814 the first time"
+      ],
+      "sources": [],
+      "tags": [
+        "gloo",
+        "cpu-scaling",
+        "predictions"
+      ]
+    },
+    {
+      "id": "vit-40",
+      "type": "compare",
+      "level": 2,
+      "q": "Strong scaling versus weak scaling: which did each experiment measure?",
+      "easy": "Strong scaling keeps the total work fixed and asks whether more processors finish it faster; weak scaling grows the work with the processors and asks whether the time per unit holds steady. Here each GPU keeps a batch of 128, so the global batch grows with GPU count while each epoch's 50,000 images get split.",
+      "deep": "With a fixed per rank batch, per step work per GPU is constant (weak scaling per step), while the epoch is split in half (strong scaling per epoch: 195 steps each instead of 390). Images per second is the right metric for both views. Amdahl's law bounds strong scaling of a fixed problem; Gustafson's view, where the problem grows with N, gives scaled speedup $S=N-e(N-1)$ for serial fraction e. The gloo suite is explicitly weak scaling (effective batch 64, 128, 256) and says its accuracy column is not comparable. A strict strong scaling version would hold the global batch at 128 (64 per rank at 2 ranks), halving per GPU work per step, so fixed costs such as collective latency, kernel launches and Python overhead would take a larger share. The T4 numbers therefore flatter DDP slightly compared with strong scaling at a fixed global batch.",
+      "evidence": [],
+      "sources": [
+        "https://en.wikipedia.org/wiki/Amdahl%27s_law"
+      ],
+      "tags": [
+        "strong-scaling",
+        "weak-scaling",
+        "gustafson"
+      ]
+    },
+    {
+      "id": "vit-41",
+      "type": "how",
+      "level": 2,
+      "q": "You wrote predictions down before running. What were they and how did they score?",
+      "easy": "Three predictions: DDP would reach about 1.8x (wrong, it reached 1.96x in fp32), FSDP would lose to DDP (right, 0.66x), and mixed precision would be a big win on the T4 (right, 2.06x). Being wrong about the first one led to the main finding.",
+      "deep": "Prediction 1 reasoned that a small model makes the all reduce expensive relative to compute. That is backwards: a small model means small gradient tensors, about 7 MB, which DDP handles cheaply, and fp32 scaled 1.96x. But the same config in fp16 scaled 1.15x, which no prediction anticipated and which the isolation experiment explained. Prediction 2: FSDP at 1.8M parameters is pure overhead; it measured 0.66x of DDP, worse than expected. Prediction 3: fp16 with a GradScaler is a large win on T4; 2.06x at one rank, conditional on the dtype fix. House rule: predictions are written before the run and scored after, and wrong ones stay in the record, as with the gloo suite. The point is that a retrofitted explanation is cheap, while a written prediction makes a surprise measurable.",
+      "evidence": [
+        "portfolio: Three predictions were written down before this ran, so they could be scored instead of retrofitted.",
+        "portfolio: The third prediction said DDP would land near 1.8x rather than 2x, reasoning that a small model makes the all reduce expensive relative to compute.",
+        "portfolio: Mixed precision was predicted to be a large win, and it is: 2.06x at one rank with peak memory falling from 553 MB to 347 MB.",
+        "portfolio: FSDP was predicted to lose, and it does: 2,884 img/s against DDP's 4,376, buying 5% of peak memory for 34% of throughput."
+      ],
+      "sources": [],
+      "tags": [
+        "predictions",
+        "methodology"
+      ]
+    },
+    {
+      "id": "vit-42",
+      "type": "how",
+      "level": 2,
+      "q": "How do you stop numbers in the docs drifting from the measurements?",
+      "easy": "A script reads every number with a unit (images per second, MB, an 'x' ratio, or a percentage) from the README, results page, and project notes, and fails if it cannot be traced to a measured run or to a ratio between two runs on the same hardware. It caught five unsupported claims the first time it ran.",
+      "deep": "dvit/verify_claims.py. Patterns: throughput ([\\d,]+(?:\\.\\d+)?)\\s*img/s, memory with MB, ratio (\\d+\\.\\d+)x, and percent with either % or the word percent. The allowed pool holds every artifact's median img/s, peak MB, gradient payload (params x 4 / 1024^2), and best accuracy x 100, plus every within hardware ratio a/b and its derived forms: efficiency (ratio / world size x 100), ratio x 100, |100 - ratio x 100|, and relative memory changes. rounds_to rounds the artifact value to the claim's own decimals, so 1.963 passes '1.96' and fails '1.8', and extra precision is never granted (1.96 does not pass '1.963'). Unitless numbers (epochs, batch sizes, years) are skipped as configuration. Values from runs/invalid pass but are flagged loudly as discarded. A regression test documents a real gate bug: a trailing word boundary after the alternation meant '98%' never matched, so every figure written with a percent sign was being skipped. make gate runs pytest and the verifier together; it can also check the video captions.",
+      "evidence": [
+        "portfolio: It found five unsupported claims the first time it ran.",
+        "repo:distributed-vit-cifar10/README.md: was written with. Writing 1.96x from 1.963 is fine. Writing 1.8x is not.",
+        "repo:distributed-vit-cifar10/tests/test_verify_claims.py: \"\"\"Regression: a trailing word boundary after the alternation meant"
+      ],
+      "sources": [],
+      "tags": [
+        "verification",
+        "reporting",
+        "honesty"
+      ]
+    },
+    {
+      "id": "vit-43",
+      "type": "why",
+      "level": 2,
+      "q": "Tell me about the wrong numbers on your own dashboard.",
+      "easy": "The dashboard divided a real data two GPU run by a one GPU run from a synthetic data experiment, so it showed 1.11x where the fair comparison was 1.15x. Crossing two experiments of different lengths produced another wrong figure, 1.26x. Tanay fixed both by requiring the baseline to match on everything except GPU count.",
+      "deep": "Bug 9: baseline_for matched precision and compile but not num_workers, synthetic_data, epochs or subset_fraction, so t4-ws2-ddp-amp (4,376) was divided by the synthetic 1 rank run (3,956), printing 1.11x instead of 1.15x against t4-ws1-amp. Separately, crossing the 30 epoch and 6 epoch suites produced 1.26x; the code comment records that the two lengths differ by about 10 percent. All four fields joined the match key. The chart also appends '(synthetic input)' to synthetic bars so the tallest bar, 7,580 img/s, cannot read as the best real throughput. The 1.11x was found while screen recording the page for a video, the only reason anyone read that cell closely. The write up counts three wrong dashboard numbers in all, and they are why the verification gate exists: diligence alone had let them through.",
+      "evidence": [
+        "portfolio: which silently reported 1.11x where the matched comparison is 1.15x",
+        "repo:distributed-vit-cifar10/src/dvit/report.py: alone. Crossing them produced 1.26x where the matched",
+        "repo:distributed-vit-cifar10/src/dvit/report.py: and they differ by about 10 percent on warmup weighting",
+        "portfolio: Three were wrong numbers on the dashboard, all found by pointing a screen recorder at a page nobody had read closely."
+      ],
+      "sources": [],
+      "tags": [
+        "bugs",
+        "dashboard",
+        "baselines"
+      ]
+    },
+    {
+      "id": "vit-44",
+      "type": "case",
+      "level": 2,
+      "q": "Summarise the bug log. Which bugs taught you the most?",
+      "easy": "Nine bugs are kept on purpose in the results page. Several came from a library answering a slightly different question than the one asked, one was a silent hang, and some were wrong numbers in Tanay's own reports.",
+      "deep": "1: SSL EOF on the canonical CIFAR host, fixed with a mirror fallback. 2: rebuilt pickles rejected by torchvision's md5 check, fixed by a separate npz format instead of disabling the check. 3: TCPStore rendezvous hang, fixed with a FileStore launcher. 4: MPS 'peak' memory was an instantaneous reading taken after activations were freed; memory is now reported only where an allocator high water mark exists, memory_source is recorded, and MPS shows n/a. 5: docstrings said 2.7M parameters; corrected to the measured 1,806,538. 6: FSDP would have under clipped with the free clip function; fixed by using FSDP's collective aware clip, found by inspection. 7: gloo numbers taken under contention, discarded and rerun idle. 8: is_bf16_supported counts emulation; dtype now comes from compute capability. 9: dashboard baseline mismatch; baselines must match on everything except rank count. The write up's grouping: four were APIs answering a slightly different question (bf16, md5, MPS memory, and sys.argv[0] producing a command that could not reproduce its run, fixed by reproduce_command), one a hang, three wrong dashboard numbers. The lesson Tanay draws: read what an API actually measures before trusting its answer.",
+      "evidence": [
+        "portfolio: Four of the nine came from an API answering a slightly different question than the one being asked",
+        "repo:distributed-vit-cifar10/RESULTS.md: `torch.mps.current_allocated_memory` is instantaneous, read after activations were freed",
+        "repo:distributed-vit-cifar10/RESULTS.md: Parameter count in two docstrings said 2.7M"
+      ],
+      "sources": [],
+      "tags": [
+        "bugs",
+        "lessons"
+      ]
+    },
+    {
+      "id": "vit-45",
+      "type": "how",
+      "level": 2,
+      "q": "What profiling method did you use to find the bottleneck?",
+      "easy": "No profiler was used. Tanay used synchronised timing with one variable changed at a time, plus a synthetic input mode that removes the data pipeline entirely, which tests a cause directly instead of reading a correlation off a trace.",
+      "deep": "Method: (1) synchronised wall clock per epoch and median throughput; (2) per run environment capture: cpu_cores, threads_per_rank, num_workers, amp_dtype, memory_source, data_source, git_commit, torch_version; (3) ablation by instrument: --synthetic-data removes decode, augmentation and workers, so 2 ranks over 1 rank under it is compute plus communication only; (4) a worker sweep (2 against 8 per rank) to test whether more host parallelism helps. The repo contains no torch.profiler or Nsight traces. What a profiler would add: an Nsight Systems timeline would show idle gaps between GPU steps and whether NCCL kernels overlap backward kernels; timing the DataLoader's next() call would give the share of each step spent waiting for data; host tools such as top or py-spy would show the 4 cores pegged by workers. Why ablation first: it answers 'what happens if this component disappears' in six short runs, which a single trace cannot. The cheapest next step is a per step data wait timer in the training loop.",
+      "evidence": [
+        "portfolio: The measurement that settles it took six short runs and one flag."
+      ],
+      "sources": [],
+      "tags": [
+        "profiling",
+        "ablation",
+        "methodology"
+      ]
+    },
+    {
+      "id": "vit-46",
+      "type": "case",
+      "level": 2,
+      "q": "What are the limitations of this study?",
+      "easy": "Only two GPUs on one machine, one run per setting, a diagnosis whose fix was never tested, a synthetic test that is kinder to the hardware than real data, and a model too small to make FSDP meaningful.",
+      "deep": "Scale: 2 ranks on free Kaggle, single node, no NVLink, no inter node network. Statistics: one seed and one run per configuration on a shared cloud VM, so no variance estimate. Suite mismatch: the main suite (commit 33bcd11, 30 epochs) and the bottleneck suite (2e788b1, 6 epochs) disagree on absolute throughput for the same 1 rank fp16 config (3,810 against 3,462 img/s), so only within suite ratios are compared. The synthetic pool is 512 images, so 96% is an upper bound. The fix (GPU side augmentation or more host cores) is untested. At 1.8M parameters FSDP's 0.66x is arithmetic. MPS has no allocator peak, so laptop memory is n/a. Accuracy differences across rank counts are confounded by fewer optimiser steps. The MPS cast overhead explanation is not profiled. No direct link bandwidth measurement (nccl-tests was not run).",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: * The fix is untested.",
+        "repo:distributed-vit-cifar10/RESULTS.md: Synthetic data indexes a 512 image pool",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws1-amp` | 1 | single | fp16 | 3,810 | baseline | 2.06x | 347 | 80.52% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | Real data, 2 workers per rank | 3,462 | 4,073 | 1.18x | 59% |",
+        "repo:distributed-vit-cifar10/CLAUDE.md: 2. A larger model would make FSDP a fair fight. At 1.8M parameters its 0.66x"
+      ],
+      "sources": [],
+      "tags": [
+        "limitations"
+      ]
+    },
+    {
+      "id": "vit-47",
+      "type": "case",
+      "level": 3,
+      "q": "What breaks at 10x and 100x scale, and what would production need?",
+      "easy": "At 10 to 100 GPUs three things bite: preparing images on the CPU, network bandwidth between machines, and fixed costs that every step pays. Production would move augmentation onto the GPU or preprocess data ahead of time, use fast interconnects with hierarchical collectives, and retune the optimiser for very large batches.",
+      "deep": "Input: by straight proportion, a host producing about 4,073 img/s from 4 vCPUs would need on the order of 75 cores to feed 20 fp16 T4s at about 3,800 img/s each, assuming decode scales linearly with cores. Fixes: GPU augmentation (NVIDIA DALI, or torchvision transforms applied to uint8 batches on device), pre decoded tensors in shared memory or sharded record files, caching. Communication: the ring's bandwidth term stays near 2S/B but its latency term grows with N, and across nodes B drops from PCIe or NVLink to the network card; hierarchical and tree all reduce, gradient compression hooks (fp16 or PowerSGD), and bucket tuning help. Optimisation: 128 per GPU x 100 GPUs is a 12,800 global batch, past where the linear rule with 2 warmup epochs is established; longer warmup, LAMB or LARS style optimisers, and retuning. Stragglers: every step waits for the slowest rank. Reliability: elastic launch, checkpoint and resume, NCCL timeouts and watchdogs instead of a silent 1,800 second wait. Measurement: repeated runs with intervals, profiler traces on dedicated idle hardware. Larger models: FSDP or tensor parallelism becomes worth its communication.",
+      "evidence": [
+        "portfolio: With real data, throughput never passes about 4,073 img/s no matter how many GPUs or workers are thrown at it."
+      ],
+      "sources": [
+        "https://arxiv.org/abs/1706.02677",
+        "https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/"
+      ],
+      "tags": [
+        "scale",
+        "production",
+        "data-pipeline"
+      ]
+    },
+    {
+      "id": "vit-48",
+      "type": "case",
+      "level": 2,
+      "q": "What would you do next?",
+      "easy": "Prove the diagnosis by removing the CPU limit: move augmentation onto the GPU, or run the same experiment on a machine with more CPU cores, and check that fp16 two GPU scaling climbs back toward the 96% the synthetic run showed.",
+      "deep": "In order, following the repo's CLAUDE.md: (1) confirm the diagnosis by removing the ceiling rather than inferring it, with GPU side augmentation (random crop and flip on uint8 tensors on device) or a host with 16 or more cores; write the prediction first: close to the synthetic 1.92x but below it, since real data is less cache friendly. (2) A model large enough that FSDP is a fair fight. (3) More than 2 ranks; every code path already supports it. Also: a per step data wait timer; three repeats per configuration for variance; rerun both suites at one commit and length in one session; measure the link with nccl-tests; and fix the small issues found on rereading the code (weight decay name matching and the timing reduction). The repo's own instruction stands: do not tune NCCL, because the measurement already rules it out.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/CLAUDE.md: 1. Confirm the diagnosis by removing the ceiling rather than inferring it.",
+        "repo:distributed-vit-cifar10/CLAUDE.md: Do not tune nccl. Section 5 rules it out, and the measurement is in `runs/`.",
+        "repo:distributed-vit-cifar10/RESULTS.md: | **Synthetic, no dataloader** | 3,956 | 7,580 | **1.92x** | **96%** |"
+      ],
+      "sources": [],
+      "tags": [
+        "next-steps"
+      ]
+    },
+    {
+      "id": "vit-49",
+      "type": "case",
+      "level": 3,
+      "q": "If I code reviewed this repo, what would I find?",
+      "easy": "A few small issues turned up when the code was reread for this deck. None changes the main finding, but they are what a careful reviewer would catch, and Tanay should raise them before the interviewer does. They were found by reading, not yet confirmed by running.",
+      "deep": "(1) build_optimizer exempts the class token and position embedding with name.endswith('.cls_token'); an unwrapped single rank model names it 'cls_token' with no dot, so the 1 rank baselines apply weight decay 0.05 to both, while DDP ('module.cls_token') and compiled ('_orig_mod.cls_token') models do not. That is a small optimiser difference between baseline and treatment; throughput is unaffected, and the existing test does not assert membership. (2) Under FSDP with default flat parameters every parameter is 1D, so the ndim rule likely puts all weights in the no decay group; the FSDP run probably trained without weight decay. (3) train_one_epoch takes max(local seconds, mean seconds) while the comment says slowest; on rank 0 that is not the global maximum (a MAX all reduce would be), though DDP synchronises every step so the effect is tiny. (4) reproduce_command writes a dvit.launch command for any world_size above 1, even when torchrun launched the run. (5) Linear lr scaling ignores accumulation. (6) Doc drift: the provenance table still says the T4 accelerator was 'Not yet run', and CLAUDE.md's test counts (21 and 18) predate later tests.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/src/dvit/engine.py: if p.ndim <= 1 or name.endswith((\".cls_token\", \".pos_embed\")):",
+        "repo:distributed-vit-cifar10/src/dvit/engine.py: global_seconds = max(seconds, all_reduce_mean(seconds, ctx))",
+        "repo:distributed-vit-cifar10/RESULTS.md: | Accelerator | 2x NVIDIA T4, Kaggle. **Not yet run** |",
+        "repo:distributed-vit-cifar10/CLAUDE.md: dashboard generator, and the 21 test suite."
+      ],
+      "sources": [],
+      "tags": [
+        "code-review",
+        "bugs",
+        "self-critique"
+      ]
+    },
+    {
+      "id": "vit-50",
+      "type": "pushback",
+      "level": 2,
+      "q": "Isn't the 57% just NCCL being slow over PCIe without NVLink?",
+      "easy": "That was the first suspect, and the experiment ruled it out. With the data pipeline removed, the identical NCCL setup scaled at 96%, and the gradient volume is the same 7 MB in fp32 and fp16.",
+      "deep": "Concede: Kaggle's T4s talk over PCIe Gen3 x16 at best, with no NVLink, and Tanay did not benchmark the link (no nccl-tests run), so the deck cannot quote its bandwidth. Defend: (1) the same hardware, model and payload gave 98% in fp32, so the collective was fast enough at fp32 compute rates; (2) under synthetic input, fp16 at the faster compute rate still scaled 1.92x (96%), which bounds communication plus compute overhead at about 4%; (3) with real data throughput plateaued near 4,073 img/s whatever the GPU or worker count, the signature of a shared upstream resource rather than a link; (4) 7 MB per step at a few GB/s is a few milliseconds against a roughly 32 ms fp16 step. What would change the conclusion: a 16 core host still scaling at 57%.",
+      "say": "Fair suspect, and it was my first one too. But the same NCCL path scaled at 96% once I removed the dataloader. The gradient payload is the same 7 MB in both precisions. And real data plateaued near 4,073 images a second no matter what I added, which points upstream of the GPUs.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: | **Synthetic, no dataloader** | 3,956 | 7,580 | **1.92x** | **96%** |",
+        "portfolio: With real data, throughput never passes about 4,073 img/s no matter how many GPUs or workers are thrown at it.",
+        "portfolio: at this size the gradient payload for each all reduce is about 7 MB"
+      ],
+      "sources": [
+        "https://www.nvidia.com/en-us/data-center/tesla-t4/"
+      ],
+      "tags": [
+        "pushback",
+        "nccl",
+        "pcie"
+      ]
+    },
+    {
+      "id": "vit-51",
+      "type": "pushback",
+      "level": 2,
+      "q": "Synthetic data is a toy. How do you know it isolates anything?",
+      "easy": "It is a measuring instrument, not a training result. It removes exactly one component, the CPU side data pipeline, and keeps everything else, which is what a cause and effect test needs. Tanay treats its 96% as an upper bound.",
+      "deep": "Concede: a 512 image pool indexed modulo its size is cache friendly; labels are random, so accuracy is meaningless; tensors arrive pre normalised, so host to device copies still happen but nothing else does. Hence 96% is an upper bound on what fixing the input path could achieve. Defend: the question was binary (collective or input pipeline), and the suite wrote its reading rule before running: near 2x convicts the dataloader, near 1.15x convicts the collective. It came back at 1.92x. Each rank builds an identical pool from the same seed (tested), shapes match real CIFAR (tested), and the pool keeps memory near 6 MB rather than about 600 MB for 50,000 float images. Artifacts carry synthetic_data true, and the dashboard badges the run and prints n/a for accuracy. What it cannot show: that a real fix reaches 96%; that needs GPU augmentation or more cores.",
+      "say": "It's an instrument, and I treat it like one. It removes exactly the CPU input path and nothing else, and I wrote down how to read it before running. It came back at 1.92x, nowhere near 1.15x. I still call the 96% an upper bound, because a 512 image pool is friendlier to caches than real data.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: | **Synthetic, no dataloader** | 3,956 | 7,580 | **1.92x** | **96%** |",
+        "repo:distributed-vit-cifar10/RESULTS.md: Synthetic data indexes a 512 image pool",
+        "portfolio: their 96% is an upper bound on what fixing the input path could achieve, not a promise."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "synthetic-data"
+      ]
+    },
+    {
+      "id": "vit-52",
+      "type": "pushback",
+      "level": 2,
+      "q": "Two GPUs on Kaggle isn't distributed training. Why should I care?",
+      "easy": "Fair: it is the smallest possible distributed setup. But the mechanisms are the ones used at larger scale, and the lesson that a faster accelerator can break scaling by exposing the host gets worse with more GPUs per host.",
+      "deep": "Concede: single node, 2 ranks, free hardware, no inter node network, no NVLink, no elastic launch, one run per config. Defend: (1) the code is generic in world size (process groups, DistributedSampler, DDP, FSDP, FileStore and torchrun launchers); only the hardware capped it at 2. (2) What transfers is the measurement discipline: matched baselines, a gradient equivalence proof with an inverse guard, ablation instead of correlation, refusing impossible topologies, and a gate tying prose to artifacts. (3) The finding scales badly: an 8 GPU node with a modest CPU faces the same ratio between accelerator speed and host speed, and each GPU generation widens it. Next experiment: more than 2 ranks and a bigger model.",
+      "say": "It's the smallest distributed setup there is, and I won't pretend otherwise. What transfers is the method: a gradient equivalence test, baselines matched on everything except rank count, and an ablation that found the cause. The finding gets worse at scale, because faster GPUs per host hit the CPU limit sooner.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "scale"
+      ]
+    },
+    {
+      "id": "vit-53",
+      "type": "pushback",
+      "level": 2,
+      "q": "Why not just raise num_workers or use DALI and move on?",
+      "easy": "Raising workers was tried and made it worse: 8 workers per GPU was slower than 2, because the machine has only 4 cores. Moving augmentation to the GPU is the right fix, but the study's job was to find the cause first, and that fix is the listed next step.",
+      "deep": "Concede: in production you would fix the input pipeline, and GPU augmentation through DALI or on device transforms is the obvious move; it is untested here. Defend: (1) more workers was measured, 3,996 img/s at 8 per rank against 4,073 at 2, because 16 workers on 4 cores is oversubscription; (2) tuning before diagnosing produces a correlation, and varying workers alone could not separate the collective from the input path, which the synthetic run did; (3) the diagnosis changes what to buy: more host cores or GPU side preprocessing, not a faster interconnect, and it says not to tune NCCL.",
+      "say": "I did raise workers, and it got slower, because sixteen workers on four cores just context switch. GPU side augmentation is the fix I'd ship. I wanted the cause pinned down first, so nobody spends a week tuning NCCL.",
+      "evidence": [
+        "portfolio: Raising workers from 2 to 8 per rank made it worse, 3,996 against 4,073, because 16 worker processes on 4 cores buy context switches and nothing else."
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "dataloader",
+        "dali"
+      ]
+    },
+    {
+      "id": "vit-54",
+      "type": "pushback",
+      "level": 3,
+      "q": "You say DDP overlaps the 7 MB all reduce with backward 'almost entirely'. With a 25 MiB default bucket, isn't that mostly one bucket and little overlap?",
+      "easy": "Good catch: with gradients this small, most of them fall into one bucket, so there is little overlap to speak of. What actually keeps communication cheap is that 7 MB moves in a few milliseconds compared with a roughly 32 millisecond step.",
+      "deep": "Concede: the default bucket cap is 25 MiB and the whole gradient is 6.9 MiB, so the Reducer has very few buckets and most of the all reduce launches near the end of backward; 'almost entirely overlapped' overstates the mechanism, and no trace was taken. Defend the conclusion: overlapped or not, the communication cost is bounded by the synthetic run, 1.92x (96%), so it costs at most about 4% of step time. Back of envelope: 128 images / 3,956 img/s is about 32 ms per step; 7 MB over PCIe Gen3 x16 at 2 to 10 GB/s effective is roughly 0.7 to 3.5 ms. To test overlap directly: set bucket_cap_mb to 1 to force many buckets and compare, or read an Nsight timeline for NCCL kernels running concurrently with backward kernels.",
+      "say": "You're right that it's mostly one bucket at this size, so I'd soften that phrase. The claim that survives is that communication is cheap. The synthetic run bounds it at about 4%. Seven megabytes is a few milliseconds against a 32 millisecond step, overlapped or not.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/RESULTS.md: | **Synthetic, no dataloader** | 3,956 | 7,580 | **1.92x** | **96%** |",
+        "portfolio: A small model means small gradient tensors, about 7 MB, which DDP overlaps with the backward pass almost entirely."
+      ],
+      "sources": [
+        "https://docs.pytorch.org/docs/2.14/generated/torch.nn.parallel.DistributedDataParallel.html",
+        "https://www.nvidia.com/en-us/data-center/tesla-t4/"
+      ],
+      "tags": [
+        "pushback",
+        "bucketing",
+        "overlap"
+      ]
+    },
+    {
+      "id": "vit-55",
+      "type": "pushback",
+      "level": 3,
+      "q": "Your 2 GPU fp16 run hit 4,376 img/s, but you say the host never passes about 4,073. Which is it?",
+      "easy": "Both are real but come from two different experiment sessions. The 4,073 ceiling is from the short diagnostic suite, which measured every configuration 7 to 9% lower than the main suite; within each suite the pattern is identical.",
+      "deep": "Concede: the phrase 'never passes about 4,073 img/s' holds only inside the 6 epoch bottleneck suite (commit 2e788b1). The 30 epoch main suite (commit 33bcd11) measured 4,376 for the same 2 rank fp16 configuration, and 3,810 against 3,462 at 1 rank. Kaggle sessions land on different hosts, and report.py's own comment records the two suite lengths differing by about 10 percent. Defend: this is exactly why baseline_for refuses to cross suites (crossing them once printed 1.26x), and why only within suite ratios are reported: 1.15x in the main suite and 1.18x in the diagnostic suite, both far from the 1.92x synthetic. The finding concerns the ratio, not the absolute ceiling. Fix: rerun both suites in one session at one commit, with repeats.",
+      "say": "Fair catch. The 4,073 ceiling comes from the short diagnostic suite. That suite ran on a different Kaggle session and commit, and it measured every config a bit lower. That's why my reporting code refuses to divide across suites. Inside each suite the story is the same: real data barely scales and synthetic data nearly doubles.",
+      "evidence": [
+        "portfolio: With real data, throughput never passes about 4,073 img/s no matter how many GPUs or workers are thrown at it.",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws2-ddp-amp` | 2 | DDP | fp16 | 4,376 | 1.15x (57%) | 2.36x | 354 | 79.71% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | `t4-ws1-amp` | 1 | single | fp16 | 3,810 | baseline | 2.06x | 347 | 80.52% |",
+        "repo:distributed-vit-cifar10/RESULTS.md: | Real data, 2 workers per rank | 3,462 | 4,073 | 1.18x | 59% |",
+        "repo:distributed-vit-cifar10/src/dvit/report.py: and they differ by about 10 percent on warmup weighting",
+        "repo:distributed-vit-cifar10/src/dvit/report.py: alone. Crossing them produced 1.26x where the matched"
+      ],
+      "sources": [],
+      "tags": [
+        "pushback",
+        "consistency",
+        "baselines"
+      ]
+    },
+    {
+      "id": "vit-56",
+      "type": "define",
+      "level": 2,
+      "q": "Define the remaining systems terms from the write up: scaling efficiency, rank speedup, vCPU, context switch, compute capability, emulation, torch.compile and inductor, allocator high water mark, md5, and top-1.",
+      "easy": "Scaling efficiency says how much of the ideal speedup you got. A vCPU is a share of a physical CPU core rented in the cloud. A context switch is the operating system swapping one process off a core for another. Compute capability is NVIDIA's version number for a GPU's feature set. Emulation means doing in software what the hardware cannot do natively. torch.compile turns Python model code into fused, faster kernels. Top-1 is the share of images whose highest scoring class is correct.",
+      "deep": "Rank speedup = $X_N/X_1$ with $X_1$ a matched single rank run; scaling efficiency = speedup / N (98% means two GPUs did 1.96 GPUs' worth). vCPU: a hyperthread or core share exposed to a VM; os.cpu_count() reported 4 on Kaggle. Context switch: the scheduler saves one process's registers and loads another's, flushing caches and TLB state; oversubscribing cores (16 workers on 4 vCPUs) turns time slices into overhead. Compute capability: major.minor of the CUDA architecture; T4 is 7.5 (sm_75, Turing), hardware bf16 starts at 8.0 (Ampere). Emulation: bf16 on sm_75 is executed through slower fp32 paths. torch.compile: TorchDynamo captures the Python graph and the inductor backend generates fused Triton or C++ kernels; the first epoch pays compile time. Allocator high water mark: the peak bytes the caching allocator handed out (torch.cuda.max_memory_allocated); MPS exposes only instantaneous readings. md5: a 128 bit checksum torchvision compares against published values to detect corrupt or substituted files. Top-1: argmax of the logits equals the label, measured on the 10,000 test images with sums all reduced across ranks.",
+      "evidence": [
+        "repo:distributed-vit-cifar10/runs/t4-ws2-amp-synth.json: \"memory_source\": \"torch.cuda.max_memory_allocated\","
+      ],
+      "sources": [],
+      "tags": [
+        "glossary",
+        "definitions"
+      ]
+    },
+    {
+      "id": "vit-57",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain this project to a hiring manager in under a minute.",
+      "easy": "Lead with the rule (every claim checkable), then the surprise (98% to 57%), the diagnosis (CPU host), and the value (it stopped anyone tuning the wrong layer).",
+      "deep": "Structure: the problem with unverifiable speedups; what was built (gradient equivalence test, matched baselines, a docs gate); the surprise (fp32 98%, fp16 57% on identical hardware); the controlled diagnosis (synthetic input restores 96%, the host has 4 vCPUs); the business value (a week saved by not tuning NCCL); one honest caveat (two GPUs, fix untested). Keep numbers to two or three.",
+      "say": "I built a distributed training benchmark where every speedup claim can be checked. Two GPUs nearly doubled throughput in full precision. When I turned on mixed precision, efficiency fell to 57% on the same hardware. A controlled experiment that removed the data pipeline brought it back to 96%, which proved the CPU host was starving the GPUs. That diagnosis stops a team from spending a week tuning the network layer for nothing.",
+      "evidence": [
+        "portfolio: identical config in fp16: 1.15x at 57%",
+        "repo:distributed-vit-cifar10/RESULTS.md: | **Synthetic, no dataloader** | 3,956 | 7,580 | **1.92x** | **96%** |"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "hiring-manager"
+      ]
+    },
+    {
+      "id": "vit-58",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain it to a staff engineer.",
+      "easy": "Give the mechanism and the evidence chain, and volunteer the weak spots before they find them.",
+      "deep": "Hit: model sizing (1.8M parameters, 7 MB fp32 gradient that autocast does not change); the equivalence test with its inverse; matched baselines; fp32 98% against fp16 57%; synthetic 96% and the worker sweep; the min(N g, H) model; then the caveats: one bucket so 'cheap' more than 'overlapped', suite to suite absolute differences, untested fix, one run per config.",
+      "say": "It's a 1.8 million parameter ViT, sized so the model can't be the bottleneck. I proved DDP equivalence first, two ranks of B against one process of 2B, with an inverse test. On two T4s, fp32 scaled at 98% and fp16 at 57%, with the same 7 megabyte payload. A synthetic input mode brought it back to 96%, and more workers made it worse on a 4 vCPU host. One thing I'd correct in my own write up: at this size it's mostly one DDP bucket, so the comm is cheap more than it is overlapped.",
+      "evidence": [
+        "portfolio: DDP in fp32: 1.96x at 98% efficiency",
+        "portfolio: identical config in fp16: 1.15x at 57%",
+        "repo:distributed-vit-cifar10/RESULTS.md: | **Synthetic, no dataloader** | 3,956 | 7,580 | **1.92x** | **96%** |",
+        "portfolio: at this size the gradient payload for each all reduce is about 7 MB"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "staff-engineer"
+      ]
+    },
+    {
+      "id": "vit-59",
+      "type": "narrate",
+      "level": 2,
+      "q": "Explain it to a product manager.",
+      "easy": "Use an analogy: two fast workers sharing one supplier. The supplier, not the workers, set the pace.",
+      "deep": "Keep it to the decision it informs: where to spend. The measurement says buy more CPU or move image preparation onto the GPU, not a faster network between GPUs. Avoid acronyms; one number at most.",
+      "say": "Think of two fast chefs sharing one prep cook. When the chefs were slower, one prep cook kept up and two chefs really did twice the work. When I made each chef twice as fast, the prep cook became the limit, and the second chef mostly waited. I measured that directly instead of guessing. So the fix is a better prep station, meaning more CPU or moving image preparation onto the GPU, not a faster network between the GPUs.",
+      "evidence": [],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "pm"
+      ]
+    },
+    {
+      "id": "vit-60",
+      "type": "narrate",
+      "level": 1,
+      "q": "Explain it to a recruiter.",
+      "easy": "One sentence on what was built, one on the surprise, one on the skill it shows.",
+      "deep": "Recruiter version: no acronyms beyond GPU, one number, and the skill named plainly (finding and proving the real cause of a performance problem).",
+      "say": "I trained an image recognition model on two graphics cards and measured honestly what the second card bought. At first it nearly doubled the speed. After a common speed trick, the second card added only about 15%. I tracked down why: the machine's processor couldn't prepare images fast enough. It shows I can find the real cause of a performance problem and prove it.",
+      "evidence": [
+        "portfolio: identical config in fp16: 1.15x at 57%"
+      ],
+      "sources": [],
+      "tags": [
+        "narrate",
+        "recruiter"
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "title": "An Image is Worth 16x16 Words (ViT), abstract",
+      "url": "https://arxiv.org/abs/2010.11929",
+      "why": "The original Vision Transformer: images as sequences of patches, strong results when pretrained on large data and transferred."
+    },
+    {
+      "title": "Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour",
+      "url": "https://arxiv.org/abs/1706.02677",
+      "why": "The linear learning rate scaling rule and warmup that the repo's --lr-scale linear follows."
+    },
+    {
+      "title": "PyTorch Distributed: Experiences on Accelerating Data Parallel Training",
+      "url": "https://arxiv.org/abs/2006.15704",
+      "why": "DDP's design paper: gradient bucketing, overlapping communication with backward, skipping synchronisation."
+    },
+    {
+      "title": "PyTorch DDP design notes",
+      "url": "https://docs.pytorch.org/docs/2.14/notes/ddp.html",
+      "why": "Rank 0 broadcast at construction, Reducer buckets in reverse order, per parameter hooks, async all reduce per bucket."
+    },
+    {
+      "title": "torch.nn.parallel.DistributedDataParallel API",
+      "url": "https://docs.pytorch.org/docs/2.14/generated/torch.nn.parallel.DistributedDataParallel.html",
+      "why": "Defaults for bucket_cap_mb (25 MiB), gradient_as_bucket_view, no_sync, find_unused_parameters."
+    },
+    {
+      "title": "Mixed Precision Training (Micikevicius et al.)",
+      "url": "https://arxiv.org/abs/1710.03740",
+      "why": "fp16 training with an fp32 master copy of weights and loss scaling."
+    },
+    {
+      "title": "PyTorch automatic mixed precision docs",
+      "url": "https://docs.pytorch.org/docs/2.14/amp.html",
+      "why": "Which ops autocast to fp16 or fp32 on CUDA, and GradScaler's default scale, growth and backoff."
+    },
+    {
+      "title": "PyTorch data loading docs",
+      "url": "https://docs.pytorch.org/docs/2.14/data.html",
+      "why": "DataLoader workers, pin_memory, persistent workers, prefetch_factor, and DistributedSampler set_epoch and drop_last."
+    },
+    {
+      "title": "Bringing HPC Techniques to Deep Learning (ring all reduce)",
+      "url": "https://andrew.gibiansky.com/blog/machine-learning/baidu-allreduce/",
+      "why": "Step by step ring all reduce: reduce scatter then all gather, 2(N-1) steps, per GPU traffic independent of N."
+    },
+    {
+      "title": "NCCL collective operations",
+      "url": "https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/collectives.html",
+      "why": "AllReduce, ReduceScatter and AllGather semantics, and ReduceScatter plus AllGather equals AllReduce."
+    },
+    {
+      "title": "nccl-tests performance notes",
+      "url": "https://github.com/NVIDIA/nccl-tests/blob/master/doc/PERFORMANCE.md",
+      "why": "Algorithm bandwidth against bus bandwidth and the 2(n-1)/n all reduce factor."
+    },
+    {
+      "title": "Horovod: fast and easy distributed deep learning",
+      "url": "https://arxiv.org/abs/1802.05799",
+      "why": "Ring reduction as the communication strategy for data parallel training."
+    },
+    {
+      "title": "PyTorch FSDP: Experiences on Scaling Fully Sharded Data Parallel",
+      "url": "https://arxiv.org/abs/2304.11277",
+      "why": "FSDP's design and its comparison with DDP for large model training."
+    },
+    {
+      "title": "Amdahl's law",
+      "url": "https://en.wikipedia.org/wiki/Amdahl%27s_law",
+      "why": "Speedup with a parallel fraction p on N processors and its 1/(1-p) limit."
+    },
+    {
+      "title": "NVIDIA T4 product page",
+      "url": "https://www.nvidia.com/en-us/data-center/tesla-t4/",
+      "why": "T4 specs: 8.1 fp32 TFLOPS, 65 fp16 TFLOPS, 16 GB at 320+ GB/s, PCIe Gen3 x16, 70 W."
+    }
+  ]
+}
