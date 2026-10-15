@@ -1,10 +1,10 @@
 {
- "generated_at": "2026-10-15T20:34:53Z",
+ "generated_at": "2026-10-15T20:42:13Z",
  "totals": {
-  "decks": 11,
+  "decks": 14,
   "planned": 29,
-  "cards": 607,
-  "narrations": 134
+  "cards": 772,
+  "narrations": 170
  },
  "decks": [
   {
@@ -36,27 +36,49 @@
    "id": "p-orderbook-microstructure",
    "title": "Order Book Microstructure",
    "group": "Portfolio",
-   "blurb": "A checksum verified live Kraken order book with spread, microprice, and order flow analytics.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-orderbook-microstructure.json",
+   "count": 56,
+   "narrations": 12,
+   "types": {
+    "concept": 6,
+    "define": 4,
+    "how": 15,
+    "number": 4,
+    "why": 7,
+    "case": 4,
+    "compare": 1,
+    "formula": 5,
+    "pushback": 6,
+    "narrate": 4
+   },
+   "summary_easy": "A live browser page that rebuilds Kraken's BTC/USD order book from a snapshot and about 142 updates a second, and checks it against the exchange's own checksum after every update, rebuilding from a fresh copy if a check ever fails. From that verified copy it measures how buying pressure moves the price and how volatile the price is. In a 330 second run all 46,892 checksums matched.",
+   "repo": "https://github.com/TanayPratapSingh/orderbook-microstructure",
+   "ready": true,
+   "blurb": "A checksum verified live Kraken order book with spread, microprice, and order flow analytics."
   },
   {
    "id": "p-live-earthquake-statistics",
    "title": "Live Earthquake Statistics",
    "group": "Portfolio",
-   "blurb": "Gutenberg-Richter b-values, Omori decay, and a USGS catalog that revises itself while you watch.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-live-earthquake-statistics.json",
+   "count": 60,
+   "narrations": 11,
+   "types": {
+    "concept": 4,
+    "why": 11,
+    "how": 13,
+    "define": 4,
+    "formula": 3,
+    "code": 2,
+    "number": 9,
+    "case": 4,
+    "pushback": 6,
+    "narrate": 4
+   },
+   "summary_easy": "A live browser dashboard on the US Geological Survey earthquake feed. It computes how much rarer big quakes are than small ones and how fast aftershocks fade, and it keeps a log of every correction USGS makes to its own catalog while the page is open. On October 8, 2026, California's b-value came out at 0.73 with a bootstrap range of 0.66 to 0.85.",
+   "repo": "https://github.com/TanayPratapSingh/live-earthquake-statistics",
+   "ready": true,
+   "blurb": "Gutenberg-Richter b-values, Omori decay, and a USGS catalog that revises itself while you watch."
   },
   {
    "id": "p-space-weather-nowcast",
@@ -100,14 +122,25 @@
    "id": "p-tool-dependency-graph",
    "title": "Tool Dependency Graph",
    "group": "Portfolio",
-   "blurb": "Deriving agent call order from 1,391 tool schemas by static analysis.",
-   "ready": false,
-   "count": 0,
-   "narrations": 0,
-   "types": {},
-   "file": "",
-   "summary_easy": "",
-   "repo": ""
+   "file": "decks/p-tool-dependency-graph.json",
+   "count": 49,
+   "narrations": 13,
+   "types": {
+    "concept": 8,
+    "why": 6,
+    "define": 2,
+    "how": 12,
+    "number": 2,
+    "formula": 1,
+    "case": 6,
+    "compare": 2,
+    "pushback": 6,
+    "narrate": 4
+   },
+   "summary_easy": "AI agents often fail because a tool needs an ID that only another tool can provide, like the thread ID needed to reply to an email. Tanay built a system that reads the schemas of 1,391 tools and maps which tools must run first and which inputs must come from the user. About two thirds of required inputs turn out to be handles another tool can supply, and almost all of those have a producer.",
+   "repo": "https://github.com/TanayPratapSingh/tool-dependency-graph",
+   "ready": true,
+   "blurb": "Deriving agent call order from 1,391 tool schemas by static analysis."
   },
   {
    "id": "p-distributed-vit",
